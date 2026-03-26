@@ -43,6 +43,7 @@ export default function ClientPage() {
   })
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
 
   useEffect(() => { initialize() }, [])
 
@@ -121,7 +122,10 @@ export default function ClientPage() {
     })
     setShowLogForm(false)
     setSaving(false)
+    setMessage('Session saved successfully! ✓')
+    setTimeout(() => setMessage(''), 3000)
     initialize()
+    setActiveTab('progress')
   }
 
   const activePlan = plans.find(p => p.id === activePlanId)
@@ -266,10 +270,16 @@ export default function ClientPage() {
                 </div>
               </div>
 
-              <button onClick={handleLogSession} disabled={saving}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50">
-                {saving ? 'Saving...' : 'Save Session'}
-              </button>
+              {message && (
+  <div className="bg-green-900 border border-green-700 text-green-300 rounded-lg px-4 py-3 text-sm">
+    {message}
+  </div>
+)}
+
+<button onClick={handleLogSession} disabled={saving}
+  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50">
+  {saving ? 'Saving...' : 'Save Session'}
+</button>
             </div>
           </div>
         )}
