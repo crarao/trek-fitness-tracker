@@ -38,6 +38,7 @@ export default function ClientDetailPage() {
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '' })
   const [saving, setSaving] = useState(false)
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
+  const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { initialize() }, [clientId])
@@ -90,20 +91,22 @@ export default function ClientDetailPage() {
   }
 
   const handleSaveFeedback = async (sessionId: string) => {
-    const existing = feedback.find(f => f.session_id === sessionId)
-    if (existing) {
-      await supabase.from('session_feedback')
-        .update({ admin_feedback: feedbackText[sessionId] })
-        .eq('id', existing.id)
-    } else {
-      await supabase.from('session_feedback').insert({
-        session_id: sessionId,
-        admin_feedback: feedbackText[sessionId],
-        star_rating: null
-      })
-    }
-    initialize()
+  const existing = feedback.find(f => f.session_id === sessionId)
+  if (existing) {
+    await supabase.from('session_feedback')
+      .update({ admin_feedback: feedbackText[sessionId] })
+      .eq('id', existing.id)
+  } else {
+    await supabase.from('session_feedback').insert({
+      session_id: sessionId,
+      admin_feedback: feedbackText[sessionId],
+      star_rating: null
+    })
   }
+  setSavedFeedback(prev => ({ ...prev, [sessionId]: true }))
+  setTimeout(() => setSavedFeedback(prev => ({ ...prev, [sessionId]: false })), 2000)
+  initialize()
+}
 
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
@@ -238,10 +241,10 @@ export default function ClientDetailPage() {
                         rows={2}
                         className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-xs resize-none" />
                       <button
-                        onClick={() => handleSaveFeedback(session.id)}
-                        className="mt-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs px-4 py-1.5 rounded-lg transition">
-                        Save Feedback
-                      </button>
+  onClick={() => handleSaveFeedback(session.id)}
+  className="mt-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs px-4 py-1.5 rounded-lg transition">
+  {savedFeedback[session.id] ? '✓ Saved!' : 'Save Feedback'}
+</button>
                     </div>
                   </div>
                 )
