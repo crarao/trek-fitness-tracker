@@ -4,7 +4,6 @@ import type { NextRequest } from 'next/server'
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Public routes — always accessible
   if (pathname.startsWith('/login') || 
       pathname.startsWith('/api') ||
       pathname.startsWith('/_next') ||
@@ -12,7 +11,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Check for Supabase auth cookie
   const authCookie = request.cookies.get('sb-rzndxzhmgxkxihnwqnoy-auth-token')
   
   if (!authCookie) {
