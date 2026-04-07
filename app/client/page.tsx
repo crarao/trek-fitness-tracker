@@ -160,11 +160,12 @@ export default function ClientPage() {
 
     const weekMap: Record<string, { sessions: number, minutes: number }> = {}
 
-    sessions.forEach(session => {
-      const date = new Date(session.session_date)
-      const weekStart = new Date(date)
-      weekStart.setDate(date.getDate() - date.getDay())
-      const key = weekStart.toISOString().split('T')[0]
+sessions.forEach(session => {
+  const parts = session.session_date.split('-')
+  const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+  const weekStart = new Date(date)
+  weekStart.setDate(date.getDate() - date.getDay())
+  const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`
 
       if (!weekMap[key]) weekMap[key] = { sessions: 0, minutes: 0 }
       weekMap[key].sessions += 1
