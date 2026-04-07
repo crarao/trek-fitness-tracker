@@ -30,9 +30,7 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
-  useEffect(() => {
-    fetchAll()
-  }, [])
+  useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
     const { data: companiesData } = await supabase
@@ -71,7 +69,7 @@ export default function AdminPage() {
       .single()
 
     if (companyError) {
-      setMessage('Error creating company: ' + companyError.message)
+      setMessage('Error: ' + companyError.message)
       setSaving(false)
       return
     }
@@ -90,7 +88,7 @@ export default function AdminPage() {
 
     const result = await response.json()
     if (result.error) {
-      setMessage('Error creating admin user: ' + result.error)
+      setMessage('Error: ' + result.error)
       setSaving(false)
       return
     }
@@ -104,7 +102,6 @@ export default function AdminPage() {
 
   const handleDeleteCompany = async (companyId: string, companyName: string) => {
     if (!confirm(`Delete "${companyName}" and all its data? This cannot be undone.`)) return
-
     await supabase.from('profiles').delete().eq('company_id', companyId)
     await supabase.from('companies').delete().eq('id', companyId)
     fetchAll()
@@ -114,34 +111,40 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-bold text-orange-500">CoachBoard</h1>
-          <p className="text-xs text-gray-400">Super Admin</p>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+            <span className="text-white text-sm font-bold">C</span>
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white">CoachBoard</h1>
+            <p className="text-xs text-gray-500">Super Admin</p>
+          </div>
         </div>
-        <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white transition">
+        <button onClick={handleLogout}
+          className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
           Logout
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="max-w-4xl mx-auto px-6 pt-6 grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 text-center">
-          <p className="text-4xl font-bold text-orange-500">{companies.length}</p>
-          <p className="text-sm text-gray-400 mt-1">Total Companies</p>
+      <div className="max-w-4xl mx-auto px-6 py-6">
+        {/* Stats */}
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Companies</p>
+            <p className="text-4xl font-bold text-orange-500">{companies.length}</p>
+          </div>
+          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Clients</p>
+            <p className="text-4xl font-bold text-orange-500">{clients.length}</p>
+          </div>
         </div>
-        <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 text-center">
-          <p className="text-4xl font-bold text-orange-500">{clients.length}</p>
-          <p className="text-sm text-gray-400 mt-1">Total Clients</p>
-        </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="max-w-4xl mx-auto px-6">
-        <div className="flex border-b border-gray-800 mb-6">
+        {/* Tabs */}
+        <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6 w-fit">
           {(['companies', 'clients'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-6 py-3 text-sm font-medium capitalize transition ${activeTab === tab
-                ? 'text-orange-500 border-b-2 border-orange-500'
+              className={`px-5 py-2 text-sm font-medium rounded-lg transition ${activeTab === tab
+                ? 'bg-orange-500 text-white'
                 : 'text-gray-400 hover:text-white'}`}>
               {tab === 'companies' ? `Companies (${companies.length})` : `All Clients (${clients.length})`}
             </button>
@@ -152,58 +155,66 @@ export default function AdminPage() {
         {activeTab === 'companies' && (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold">Companies</h2>
-              <button
-                onClick={() => setShowForm(!showForm)}
-                className="bg-orange-500 hover:bg-orange-600 text-white text-sm px-4 py-2 rounded-lg transition">
+              <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Companies</h2>
+              <button onClick={() => setShowForm(!showForm)}
+                className="bg-orange-500 hover:bg-orange-400 text-white text-sm px-4 py-2 rounded-xl transition font-medium">
                 + Add Company
               </button>
             </div>
 
             {showForm && (
-              <div className="bg-gray-900 rounded-xl p-6 mb-6 space-y-4 border border-gray-800">
-                <h3 className="font-semibold">New Company</h3>
+              <div className="bg-gray-900 rounded-2xl p-6 mb-6 space-y-4 border border-gray-800">
+                <h3 className="font-semibold text-white">New Company</h3>
                 <input type="text" placeholder="Company name"
                   value={newCompany.name}
                   onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500" />
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 <input type="email" placeholder="Admin email"
                   value={newCompany.email}
                   onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500" />
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 <input type="password" placeholder="Admin password"
                   value={newCompany.adminPassword}
                   onChange={(e) => setNewCompany({ ...newCompany, adminPassword: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500" />
-                {message && <p className="text-sm text-orange-400">{message}</p>}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                {message && (
+                  <div className="bg-green-950 border border-green-800 rounded-xl px-4 py-3">
+                    <p className="text-green-400 text-sm">{message}</p>
+                  </div>
+                )}
                 <button onClick={handleCreateCompany} disabled={saving}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50">
+                  className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition disabled:opacity-50 text-sm">
                   {saving ? 'Creating...' : 'Create Company'}
                 </button>
               </div>
             )}
 
             {loading ? (
-              <p className="text-gray-400">Loading...</p>
+              <p className="text-gray-500 text-sm">Loading...</p>
             ) : companies.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No companies yet. Add your first one!
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {companies.map((company) => (
-                  <div key={company.id} className="bg-gray-900 rounded-xl px-6 py-4 flex justify-between items-center border border-gray-800">
-                    <div>
-                      <p className="font-semibold">{company.name}</p>
-                      <p className="text-sm text-gray-400">{company.email}</p>
+                  <div key={company.id} className="bg-gray-900 rounded-2xl px-5 py-4 flex justify-between items-center border border-gray-800 hover:border-gray-700 transition">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
+                        <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-white text-sm">{company.name}</p>
+                        <p className="text-xs text-gray-500">{company.email}</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-600">
                         {new Date(company.created_at).toLocaleDateString()}
                       </p>
                       <button
                         onClick={() => handleDeleteCompany(company.id, company.name)}
-                        className="text-xs text-red-400 hover:text-red-300 transition">
+                        className="text-xs text-gray-600 hover:text-red-400 transition">
                         Delete
                       </button>
                     </div>
@@ -217,23 +228,28 @@ export default function AdminPage() {
         {/* ALL CLIENTS TAB */}
         {activeTab === 'clients' && (
           <div>
-            <h2 className="text-lg font-semibold mb-4">All Clients</h2>
+            <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4">All Clients</h2>
             {loading ? (
-              <p className="text-gray-400">Loading...</p>
+              <p className="text-gray-500 text-sm">Loading...</p>
             ) : clients.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No clients yet across any company.
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {clients.map((client) => (
-                  <div key={client.id} className="bg-gray-900 rounded-xl px-6 py-4 flex justify-between items-center border border-gray-800">
-                    <div>
-                      <p className="font-semibold">{client.full_name}</p>
-                      <p className="text-sm text-gray-400">{client.email}</p>
+                  <div key={client.id} className="bg-gray-900 rounded-2xl px-5 py-4 flex justify-between items-center border border-gray-800 hover:border-gray-700 transition">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
+                        <span className="text-orange-500 font-bold text-sm">{client.full_name[0]}</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-white text-sm">{client.full_name}</p>
+                        <p className="text-xs text-gray-500">{client.email}</p>
+                      </div>
                     </div>
-                    <div className="bg-gray-800 px-3 py-1 rounded-full">
-                      <p className="text-xs text-orange-400">{client.company_name}</p>
+                    <div className="bg-gray-800 border border-gray-700 px-3 py-1 rounded-lg">
+                      <p className="text-xs text-orange-400 font-medium">{client.company_name}</p>
                     </div>
                   </div>
                 ))}

@@ -79,7 +79,6 @@ export default function ClientPage() {
       .eq('id', user.id)
       .single()
 
-    console.log('Profile data:', JSON.stringify(prof))
     setProfile(prof)
 
     const { data: plansData } = await supabase
@@ -143,48 +142,42 @@ export default function ClientPage() {
       weekly_plan_id: ''
     })
     setSaving(false)
-    setMessage('Session saved successfully! ✓')
+    setMessage('Activity saved successfully! ✓')
     setTimeout(() => setMessage(''), 3000)
     initialize()
     setActiveTab('progress')
   }
 
-  // Chart data preparation
-  const getWeekLabel = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return `${date.toLocaleDateString('en', { month: 'short', day: 'numeric' })}`
-  }
-
   const getChartData = () => {
     if (sessions.length === 0) return null
-
     const weekMap: Record<string, { sessions: number, minutes: number }> = {}
 
-sessions.forEach(session => {
-  const parts = session.session_date.split('-')
-  const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-  const weekStart = new Date(date)
-  weekStart.setDate(date.getDate() - date.getDay())
-  const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`
-
+    sessions.forEach(session => {
+      const parts = session.session_date.split('-')
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+      const weekStart = new Date(date)
+      weekStart.setDate(date.getDate() - date.getDay())
+      const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`
       if (!weekMap[key]) weekMap[key] = { sessions: 0, minutes: 0 }
       weekMap[key].sessions += 1
       weekMap[key].minutes += session.duration_minutes || 0
     })
 
     const sortedWeeks = Object.keys(weekMap).sort()
-    const labels = sortedWeeks.map(getWeekLabel)
-    const sessionCounts = sortedWeeks.map(w => weekMap[w].sessions)
-    const minuteCounts = sortedWeeks.map(w => weekMap[w].minutes)
+    const labels = sortedWeeks.map(w => {
+      const parts = w.split('-')
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+      return date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+    })
 
-    return { labels, sessionCounts, minuteCounts }
+    return {
+      labels,
+      sessionCounts: sortedWeeks.map(w => weekMap[w].sessions),
+      minuteCounts: sortedWeeks.map(w => weekMap[w].minutes)
+    }
   }
 
   const chartData = getChartData()
-
-  const activePlan = plans.find(p => p.id === activePlanId)
-  const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
-
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   const currentStreak = (() => {
     let streak = 0
@@ -200,72 +193,86 @@ sessions.forEach(session => {
     return streak
   })()
 
+  const activePlan = plans.find(p => p.id === activePlanId)
+  const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
+
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <p className="text-white">Loading...</p>
+      <p className="text-gray-400">Loading...</p>
     </div>
   )
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-4 py-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-lg font-bold text-orange-500">
-            {profile?.companies?.name || 'CoachBoard'}
-          </h1>
-          <p className="text-xs text-gray-400">{profile?.full_name}</p>
+      <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+            <span className="text-white text-sm font-bold">
+              {profile?.companies?.name?.[0] || 'C'}
+            </span>
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white">
+              {profile?.companies?.name || 'CoachBoard'}
+            </h1>
+            <p className="text-xs text-gray-500">{profile?.full_name}</p>
+          </div>
         </div>
         <button onClick={() => { supabase.auth.signOut(); router.push('/login') }}
-          className="text-sm text-gray-400 hover:text-white">Logout</button>
+          className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+          Logout
+        </button>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-gray-800">
         {(['plan', 'log', 'progress'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-sm font-medium capitalize transition ${activeTab === tab
+            className={`flex-1 py-3 text-sm font-medium transition ${activeTab === tab
               ? 'text-orange-500 border-b-2 border-orange-500'
-              : 'text-gray-400 hover:text-white'}`}>
+              : 'text-gray-500 hover:text-white'}`}>
             {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log Activity' : 'Progress'}
           </button>
         ))}
       </div>
 
-      <div className="max-w-2xl mx-auto p-4">
+      <div className="max-w-2xl mx-auto px-4 py-5">
 
         {/* MY PLAN TAB */}
         {activeTab === 'plan' && (
           <div>
             {plans.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400 mt-4">
-                No weekly plan assigned yet. Your coach will add one soon!
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
+                <p className="text-lg mb-1">No plan yet</p>
+                <p className="text-sm">Your coach will assign a plan soon!</p>
               </div>
             ) : (
               <>
-                <div className="flex gap-2 flex-wrap mb-4 mt-2">
+                <div className="flex gap-2 flex-wrap mb-4">
                   {plans.map(plan => (
                     <button key={plan.id} onClick={() => setActivePlanId(plan.id)}
                       className={`text-xs px-3 py-1.5 rounded-full border transition ${activePlanId === plan.id
-                        ? 'bg-orange-900 border-orange-500 text-orange-300'
-                        : 'border-gray-700 text-gray-400 hover:text-white'}`}>
+                        ? 'bg-orange-500 border-orange-500 text-white'
+                        : 'border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'}`}>
                       {new Date(plan.week_start).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
                     </button>
                   ))}
                 </div>
 
                 {activePlan && (
-                  <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-                    <p className="text-xs text-gray-500 mb-1 uppercase tracking-widest">Week of</p>
-                    <p className="text-lg font-semibold mb-3">
+                  <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
+                    <p className="text-base font-semibold mb-4">
                       {new Date(activePlan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
                     </p>
-                    <div className="border-t border-gray-800 pt-3">
-                      <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Plan Details</p>
-                      <p className="text-gray-300 whitespace-pre-wrap leading-relaxed">{activePlan.plan_details}</p>
+                    <div className="border-t border-gray-800 pt-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Plan Details</p>
+                      <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">{activePlan.plan_details}</p>
                     </div>
-                    <button onClick={() => { setActiveTab('log'); setNewSession(prev => ({ ...prev, weekly_plan_id: activePlan.id })) }}
-                      className="mt-4 w-full bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-lg text-sm font-medium transition">
+                    <button
+                      onClick={() => { setActiveTab('log'); setNewSession(prev => ({ ...prev, weekly_plan_id: activePlan.id })) }}
+                      className="mt-5 w-full bg-orange-500 hover:bg-orange-400 text-white py-2.5 rounded-xl text-sm font-medium transition">
                       Log an Activity for This Week
                     </button>
                   </div>
@@ -277,107 +284,106 @@ sessions.forEach(session => {
 
         {/* LOG ACTIVITY TAB */}
         {activeTab === 'log' && (
-          <div className="mt-4 space-y-4">
-            <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 space-y-4">
-              <h2 className="font-semibold">Log an Activity</h2>
+          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
+            <h2 className="font-semibold text-white">Log an Activity</h2>
 
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Date</label>
-                <input type="date" value={newSession.session_date}
-                  onChange={e => setNewSession({ ...newSession, session_date: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" />
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Duration (minutes)</label>
-                <input type="number" placeholder="e.g. 45"
-                  value={newSession.duration_minutes}
-                  onChange={e => setNewSession({ ...newSession, duration_minutes: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" />
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Link to plan (optional)</label>
-                <select value={newSession.weekly_plan_id}
-                  onChange={e => setNewSession({ ...newSession, weekly_plan_id: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm">
-                  <option value="">— None —</option>
-                  {plans.map(p => (
-                    <option key={p.id} value={p.id}>
-                      Week of {new Date(p.week_start).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Notes</label>
-                <textarea placeholder="How did it go? Any observations..."
-                  value={newSession.notes}
-                  onChange={e => setNewSession({ ...newSession, notes: e.target.value })}
-                  rows={3}
-                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm resize-none" />
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-400 mb-2 block">How did you feel?</label>
-                <div className="flex gap-2">
-                  {[
-                    { rating: 1, emoji: '😓', label: 'Tough' },
-                    { rating: 2, emoji: '😐', label: 'Okay' },
-                    { rating: 3, emoji: '🙂', label: 'Good' },
-                    { rating: 4, emoji: '😄', label: 'Great' },
-                    { rating: 5, emoji: '🔥', label: 'Best' },
-                  ].map(({ rating, emoji, label }) => (
-                    <button key={rating} onClick={() => setNewSession({ ...newSession, star_rating: rating })}
-                      className={`flex-1 py-2 rounded-lg border text-center transition ${newSession.star_rating === rating
-                        ? 'border-orange-500 bg-orange-900'
-                        : 'border-gray-700 bg-gray-800 hover:border-gray-500'}`}>
-                      <div className="text-xl">{emoji}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">{label}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {message && (
-                <div className="bg-green-900 border border-green-700 text-green-300 rounded-lg px-4 py-3 text-sm">
-                  {message}
-                </div>
-              )}
-
-              <button onClick={handleLogSession} disabled={saving}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50">
-                {saving ? 'Saving...' : 'Save Activity'}
-              </button>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Date</label>
+              <input type="date" value={newSession.session_date}
+                onChange={e => setNewSession({ ...newSession, session_date: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Duration (minutes)</label>
+              <input type="number" placeholder="e.g. 45"
+                value={newSession.duration_minutes}
+                onChange={e => setNewSession({ ...newSession, duration_minutes: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Link to plan (optional)</label>
+              <select value={newSession.weekly_plan_id}
+                onChange={e => setNewSession({ ...newSession, weekly_plan_id: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                <option value="">— None —</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>
+                    Week of {new Date(p.week_start).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Notes</label>
+              <textarea placeholder="How did it go? Any observations..."
+                value={newSession.notes}
+                onChange={e => setNewSession({ ...newSession, notes: e.target.value })}
+                rows={3}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">How did you feel?</label>
+              <div className="flex gap-2">
+                {[
+                  { rating: 1, emoji: '😓', label: 'Tough' },
+                  { rating: 2, emoji: '😐', label: 'Okay' },
+                  { rating: 3, emoji: '🙂', label: 'Good' },
+                  { rating: 4, emoji: '😄', label: 'Great' },
+                  { rating: 5, emoji: '🔥', label: 'Best' },
+                ].map(({ rating, emoji, label }) => (
+                  <button key={rating}
+                    onClick={() => setNewSession({ ...newSession, star_rating: rating })}
+                    className={`flex-1 py-2.5 rounded-xl border text-center transition ${newSession.star_rating === rating
+                      ? 'border-orange-500 bg-orange-950'
+                      : 'border-gray-700 bg-gray-800 hover:border-gray-500'}`}>
+                    <div className="text-lg">{emoji}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {message && (
+              <div className="bg-green-950 border border-green-800 rounded-xl px-4 py-3">
+                <p className="text-green-400 text-sm">{message}</p>
+              </div>
+            )}
+
+            <button onClick={handleLogSession} disabled={saving}
+              className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition disabled:opacity-50 text-sm">
+              {saving ? 'Saving...' : 'Save Activity'}
+            </button>
           </div>
         )}
 
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
-          <div className="mt-4 space-y-4">
-            {/* Stats row */}
+          <div className="space-y-4">
+            {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
                 <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
-                <p className="text-xs text-gray-400 mt-1">Total Activities</p>
+                <p className="text-xs text-gray-500 mt-1">Activities</p>
               </div>
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
                 <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
-                <p className="text-xs text-gray-400 mt-1">Total Minutes</p>
+                <p className="text-xs text-gray-500 mt-1">Minutes</p>
               </div>
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
                 <p className="text-2xl font-bold text-orange-500">{currentStreak}</p>
-                <p className="text-xs text-gray-400 mt-1">Day Streak</p>
+                <p className="text-xs text-gray-500 mt-1">Day Streak</p>
               </div>
             </div>
 
             {/* Charts */}
-            {chartData && chartData.labels.length > 1 && (
+            {chartData && chartData.labels.length >= 1 && (
               <>
-                <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                  <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Activities per Week</p>
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Activities per Week</p>
                   <Bar
                     data={{
                       labels: chartData.labels,
@@ -401,8 +407,8 @@ sessions.forEach(session => {
                   />
                 </div>
 
-                <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                  <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Minutes per Week</p>
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Minutes per Week</p>
                   <Line
                     data={{
                       labels: chartData.labels,
@@ -431,38 +437,40 @@ sessions.forEach(session => {
             )}
 
             {/* Session history */}
-            <p className="text-xs text-gray-500 uppercase tracking-widest">Activity History</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
             {sessions.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No activities logged yet. Start training!
               </div>
             ) : (
               [...sessions].reverse().map(session => {
                 const fb = getFeedback(session.id)
                 return (
-                  <div key={session.id} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+                  <div key={session.id} className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
                     <div className="flex justify-between items-start mb-2">
                       <div>
-                        <p className="text-sm font-medium">
+                        <p className="text-sm font-medium text-white">
                           {new Date(session.session_date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-400">{session.duration_minutes} minutes</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes</p>
                         )}
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
                           {[1,2,3,4,5].map(s => (
-                            <span key={s} className={s <= fb.star_rating ? 'text-orange-400' : 'text-gray-700'}>★</span>
+                            <span key={s} className={s <= fb.star_rating ? 'text-orange-400 text-sm' : 'text-gray-700 text-sm'}>★</span>
                           ))}
                         </div>
                       )}
                     </div>
-                    {session.notes && <p className="text-xs text-gray-400 mt-1">{session.notes}</p>}
+                    {session.notes && (
+                      <p className="text-xs text-gray-400 bg-gray-800 rounded-lg px-3 py-2 mt-2">{session.notes}</p>
+                    )}
                     {fb?.admin_feedback && (
-                      <div className="mt-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">
-                        <p className="text-xs text-orange-400 font-medium mb-0.5">Coach feedback</p>
-                        <p className="text-xs text-gray-300">{fb.admin_feedback}</p>
+                      <div className="mt-3 bg-orange-950 border border-orange-900 rounded-xl px-3 py-2">
+                        <p className="text-xs text-orange-400 font-medium mb-0.5 uppercase tracking-wider">Coach feedback</p>
+                        <p className="text-xs text-orange-200">{fb.admin_feedback}</p>
                       </div>
                     )}
                   </div>

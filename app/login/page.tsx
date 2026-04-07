@@ -15,10 +15,7 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       setError(error.message)
@@ -45,45 +42,60 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <div className="bg-gray-900 rounded-2xl p-8 w-full max-w-md shadow-xl">
-        <h1 className="text-2xl font-bold text-white mb-2">CoachBoard</h1>
-        <p className="text-gray-400 mb-8">Sign in to your account</p>
+      <div className="w-full max-w-sm">
+        {/* Logo area */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-orange-500 rounded-2xl mb-4">
+            <span className="text-white text-2xl font-bold">C</span>
+          </div>
+          <h1 className="text-2xl font-bold text-white">CoachBoard</h1>
+          <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
+        </div>
 
-        <div className="space-y-4">
+        {/* Form */}
+        <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 space-y-4">
           <div>
-            <label className="text-sm text-gray-400 mb-1 block">Email</label>
+            <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label className="text-sm text-gray-400 mb-1 block">Password</label>
+            <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
               placeholder="••••••••"
             />
           </div>
 
           {error && (
-            <p className="text-red-400 text-sm">{error}</p>
+            <div className="bg-red-950 border border-red-800 rounded-xl px-4 py-3">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
           )}
 
           <button
             onClick={handleLogin}
             disabled={loading}
-            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50"
+            className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </div>
+
+        <p className="text-center text-gray-600 text-xs mt-6">
+          CoachBoard — Activity tracking for coaches
+        </p>
       </div>
     </div>
   )

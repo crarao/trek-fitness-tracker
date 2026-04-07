@@ -133,7 +133,6 @@ export default function ClientDetailPage() {
 
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
-  // Chart data
   const getChartData = () => {
     if (sessions.length === 0) return null
     const weekMap: Record<string, { sessions: number, minutes: number }> = {}
@@ -168,99 +167,110 @@ export default function ClientDetailPage() {
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <p className="text-white">Loading...</p>
+      <p className="text-gray-400">Loading...</p>
     </div>
   )
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-4 py-4 flex justify-between items-center">
+      <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <button onClick={() => router.push('/company')}
-            className="text-gray-400 hover:text-white text-sm">← Back</button>
-          <div>
-            <h1 className="text-lg font-bold text-white">{client?.full_name}</h1>
-            <p className="text-xs text-gray-400">{client?.email}</p>
+            className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
+            ← Back
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
+              <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
+              <p className="text-xs text-gray-500">{client?.email}</p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="max-w-2xl mx-auto px-4 pt-4 grid grid-cols-2 gap-3">
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+      <div className="max-w-2xl mx-auto px-6 pt-5 grid grid-cols-2 gap-3 mb-2">
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
           <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
-          <p className="text-xs text-gray-400 mt-1">Total Activities</p>
+          <p className="text-xs text-gray-500 mt-1">Total Activities</p>
         </div>
-        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
           <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
-          <p className="text-xs text-gray-400 mt-1">Total Minutes</p>
+          <p className="text-xs text-gray-500 mt-1">Total Minutes</p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-800 mt-4">
-        {(['plans', 'sessions', 'progress'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-sm font-medium capitalize transition ${activeTab === tab
-              ? 'text-orange-500 border-b-2 border-orange-500'
-              : 'text-gray-400 hover:text-white'}`}>
-            {tab === 'plans' ? 'Weekly Plans' : tab === 'sessions' ? 'Sessions & Feedback' : 'Progress'}
-          </button>
-        ))}
+      <div className="max-w-2xl mx-auto px-6 mt-4">
+        <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
+          {(['plans', 'sessions', 'progress'] as const).map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
+                ? 'bg-orange-500 text-white'
+                : 'text-gray-400 hover:text-white'}`}>
+              {tab === 'plans' ? 'Weekly Plans' : tab === 'sessions' ? 'Sessions & Feedback' : 'Progress'}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="max-w-2xl mx-auto p-4">
+      <div className="max-w-2xl mx-auto px-6 pb-8">
 
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
-          <div className="mt-2">
+          <div>
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-medium text-gray-400">{plans.length} plans assigned</h2>
+              <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
               <button onClick={() => setShowPlanForm(!showPlanForm)}
-                className="bg-orange-500 hover:bg-orange-600 text-white text-sm px-4 py-2 rounded-lg transition">
+                className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
                 + Assign Plan
               </button>
             </div>
 
             {showPlanForm && (
-              <div className="bg-gray-900 rounded-xl p-5 border border-gray-800 space-y-4 mb-4">
-                <h3 className="font-semibold">New Weekly Plan</h3>
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 mb-4">
+                <h3 className="font-semibold text-sm">New Weekly Plan</h3>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Week starting</label>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
                   <input type="date" value={newPlan.week_start}
                     onChange={e => setNewPlan({ ...newPlan, week_start: e.target.value })}
-                    className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm" />
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Plan details</label>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Plan details</label>
                   <textarea
-                    placeholder="e.g. Mon: 5km run, Tue: Rest, Wed: Gym..."
+                    placeholder="Mon: 5km run&#10;Tue: Rest&#10;Wed: Gym - squats 3x10..."
                     value={newPlan.plan_details}
                     onChange={e => setNewPlan({ ...newPlan, plan_details: e.target.value })}
-                    rows={5}
-                    className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 text-sm resize-none" />
+                    rows={6}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
                 </div>
                 <button onClick={handleAddPlan} disabled={saving}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50">
+                  className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
                   {saving ? 'Saving...' : 'Save Plan'}
                 </button>
               </div>
             )}
 
             {plans.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No plans assigned yet.
               </div>
             ) : (
               <div className="space-y-3">
                 {plans.map(plan => (
-                  <div key={plan.id} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                    <p className="text-xs text-gray-500 mb-1">Week of</p>
-                    <p className="font-semibold mb-2">
+                  <div key={plan.id} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
+                    <p className="font-semibold text-sm mb-3">
                       {new Date(plan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
                     </p>
-                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{plan.plan_details}</p>
+                    <div className="border-t border-gray-800 pt-3">
+                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -270,45 +280,47 @@ export default function ClientDetailPage() {
 
         {/* SESSIONS TAB */}
         {activeTab === 'sessions' && (
-          <div className="mt-2 space-y-3">
+          <div className="space-y-3">
             {sessions.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No sessions logged yet.
               </div>
             ) : (
               [...sessions].reverse().map(session => {
                 const fb = getFeedback(session.id)
                 return (
-                  <div key={session.id} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                    <div className="flex justify-between items-start mb-2">
+                  <div key={session.id} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                    <div className="flex justify-between items-start mb-3">
                       <div>
-                        <p className="text-sm font-medium">
+                        <p className="text-sm font-medium text-white">
                           {new Date(session.session_date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-400">{session.duration_minutes} mins</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins</p>
                         )}
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
                           {[1,2,3,4,5].map(s => (
-                            <span key={s} className={s <= fb.star_rating ? 'text-orange-400' : 'text-gray-700'}>★</span>
+                            <span key={s} className={s <= fb.star_rating ? 'text-orange-400 text-sm' : 'text-gray-700 text-sm'}>★</span>
                           ))}
                         </div>
                       )}
                     </div>
-                    {session.notes && <p className="text-xs text-gray-400 mb-3">{session.notes}</p>}
-                    <div className="mt-2">
-                      <label className="text-xs text-gray-500 mb-1 block">Your feedback</label>
+                    {session.notes && (
+                      <p className="text-xs text-gray-400 mb-3 bg-gray-800 rounded-lg px-3 py-2">{session.notes}</p>
+                    )}
+                    <div className="border-t border-gray-800 pt-3">
+                      <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Your feedback</label>
                       <textarea
                         placeholder="Add coaching feedback..."
                         defaultValue={fb?.admin_feedback || ''}
                         onChange={e => setFeedbackText({ ...feedbackText, [session.id]: e.target.value })}
                         rows={2}
-                        className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 text-xs resize-none" />
+                        className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-xs resize-none" />
                       <button
                         onClick={() => handleSaveFeedback(session.id)}
-                        className="mt-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs px-4 py-1.5 rounded-lg transition">
+                        className="mt-2 bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-1.5 rounded-lg transition font-medium">
                         {savedFeedback[session.id] ? '✓ Saved!' : 'Save Feedback'}
                       </button>
                     </div>
@@ -321,68 +333,64 @@ export default function ClientDetailPage() {
 
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
-          <div className="mt-4 space-y-4">
+          <div className="space-y-4">
             {sessions.length === 0 ? (
-              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No activities logged yet by this client.
               </div>
-            ) : (
+            ) : chartData && (
               <>
-                {chartData && chartData.labels.length >= 1 && (
-                  <>
-                    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Activities per Week</p>
-                      <Bar
-                        data={{
-                          labels: chartData.labels,
-                          datasets: [{
-                            label: 'Activities',
-                            data: chartData.sessionCounts,
-                            backgroundColor: 'rgba(249, 115, 22, 0.7)',
-                            borderColor: 'rgba(249, 115, 22, 1)',
-                            borderWidth: 1,
-                            borderRadius: 4,
-                          }]
-                        }}
-                        options={{
-                          responsive: true,
-                          plugins: { legend: { display: false } },
-                          scales: {
-                            x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                            y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                          }
-                        }}
-                      />
-                    </div>
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Activities per Week</p>
+                  <Bar
+                    data={{
+                      labels: chartData.labels,
+                      datasets: [{
+                        label: 'Activities',
+                        data: chartData.sessionCounts,
+                        backgroundColor: 'rgba(249, 115, 22, 0.7)',
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                      }]
+                    }}
+                    options={{
+                      responsive: true,
+                      plugins: { legend: { display: false } },
+                      scales: {
+                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
+                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
+                      }
+                    }}
+                  />
+                </div>
 
-                    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
-                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Minutes per Week</p>
-                      <Line
-                        data={{
-                          labels: chartData.labels,
-                          datasets: [{
-                            label: 'Minutes',
-                            data: chartData.minuteCounts,
-                            borderColor: 'rgba(249, 115, 22, 1)',
-                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                            borderWidth: 2,
-                            pointBackgroundColor: 'rgba(249, 115, 22, 1)',
-                            tension: 0.3,
-                            fill: true,
-                          }]
-                        }}
-                        options={{
-                          responsive: true,
-                          plugins: { legend: { display: false } },
-                          scales: {
-                            x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                            y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                          }
-                        }}
-                      />
-                    </div>
-                  </>
-                )}
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Minutes per Week</p>
+                  <Line
+                    data={{
+                      labels: chartData.labels,
+                      datasets: [{
+                        label: 'Minutes',
+                        data: chartData.minuteCounts,
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                        borderWidth: 2,
+                        pointBackgroundColor: 'rgba(249, 115, 22, 1)',
+                        tension: 0.3,
+                        fill: true,
+                      }]
+                    }}
+                    options={{
+                      responsive: true,
+                      plugins: { legend: { display: false } },
+                      scales: {
+                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
+                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
+                      }
+                    }}
+                  />
+                </div>
               </>
             )}
           </div>
