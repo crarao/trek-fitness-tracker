@@ -81,7 +81,7 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-950 text-white">
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-orange-500">Trek Fitness</h1>
+          <h1 className="text-xl font-bold text-orange-500">CoachBoard</h1>
           <p className="text-xs text-gray-400">Super Admin</p>
         </div>
         <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white transition">
