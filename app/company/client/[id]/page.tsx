@@ -3,6 +3,29 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend
+} from 'chart.js'
+import { Bar, Line } from 'react-chartjs-2'
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend
+)
 
 type Plan = {
   id: string
@@ -33,7 +56,7 @@ export default function ClientDetailPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plans' | 'sessions'>('plans')
+  const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress'>('plans')
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '' })
   const [saving, setSaving] = useState(false)
@@ -62,7 +85,7 @@ export default function ClientDetailPage() {
       .from('logged_sessions')
       .select('*')
       .eq('client_id', clientId)
-      .order('session_date', { ascending: false })
+      .order('session_date', { ascending: true })
     setSessions(sessionsData || [])
 
     const sessionIds = sessionsData?.map(s => s.id) || []
@@ -91,24 +114,57 @@ export default function ClientDetailPage() {
   }
 
   const handleSaveFeedback = async (sessionId: string) => {
-  const existing = feedback.find(f => f.session_id === sessionId)
-  if (existing) {
-    await supabase.from('session_feedback')
-      .update({ admin_feedback: feedbackText[sessionId] })
-      .eq('id', existing.id)
-  } else {
-    await supabase.from('session_feedback').insert({
-      session_id: sessionId,
-      admin_feedback: feedbackText[sessionId],
-      star_rating: null
-    })
+    const existing = feedback.find(f => f.session_id === sessionId)
+    if (existing) {
+      await supabase.from('session_feedback')
+        .update({ admin_feedback: feedbackText[sessionId] })
+        .eq('id', existing.id)
+    } else {
+      await supabase.from('session_feedback').insert({
+        session_id: sessionId,
+        admin_feedback: feedbackText[sessionId],
+        star_rating: null
+      })
+    }
+    setSavedFeedback(prev => ({ ...prev, [sessionId]: true }))
+    setTimeout(() => setSavedFeedback(prev => ({ ...prev, [sessionId]: false })), 2000)
+    initialize()
   }
-  setSavedFeedback(prev => ({ ...prev, [sessionId]: true }))
-  setTimeout(() => setSavedFeedback(prev => ({ ...prev, [sessionId]: false })), 2000)
-  initialize()
-}
 
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
+
+  // Chart data
+  const getChartData = () => {
+    if (sessions.length === 0) return null
+    const weekMap: Record<string, { sessions: number, minutes: number }> = {}
+
+    sessions.forEach(session => {
+      const parts = session.session_date.split('-')
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+      const weekStart = new Date(date)
+      weekStart.setDate(date.getDate() - date.getDay())
+      const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`
+      if (!weekMap[key]) weekMap[key] = { sessions: 0, minutes: 0 }
+      weekMap[key].sessions += 1
+      weekMap[key].minutes += session.duration_minutes || 0
+    })
+
+    const sortedWeeks = Object.keys(weekMap).sort()
+    const labels = sortedWeeks.map(w => {
+      const parts = w.split('-')
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+      return date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+    })
+
+    return {
+      labels,
+      sessionCounts: sortedWeeks.map(w => weekMap[w].sessions),
+      minuteCounts: sortedWeeks.map(w => weekMap[w].minutes)
+    }
+  }
+
+  const chartData = getChartData()
+  const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -130,14 +186,26 @@ export default function ClientDetailPage() {
         </div>
       </div>
 
+      {/* Stats */}
+      <div className="max-w-2xl mx-auto px-4 pt-4 grid grid-cols-2 gap-3">
+        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+          <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
+          <p className="text-xs text-gray-400 mt-1">Total Activities</p>
+        </div>
+        <div className="bg-gray-900 rounded-xl p-4 border border-gray-800 text-center">
+          <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
+          <p className="text-xs text-gray-400 mt-1">Total Minutes</p>
+        </div>
+      </div>
+
       {/* Tabs */}
-      <div className="flex border-b border-gray-800">
-        {(['plans', 'sessions'] as const).map(tab => (
+      <div className="flex border-b border-gray-800 mt-4">
+        {(['plans', 'sessions', 'progress'] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`flex-1 py-3 text-sm font-medium capitalize transition ${activeTab === tab
               ? 'text-orange-500 border-b-2 border-orange-500'
               : 'text-gray-400 hover:text-white'}`}>
-            {tab === 'plans' ? 'Weekly Plans' : 'Sessions & Feedback'}
+            {tab === 'plans' ? 'Weekly Plans' : tab === 'sessions' ? 'Sessions & Feedback' : 'Progress'}
           </button>
         ))}
       </div>
@@ -167,7 +235,7 @@ export default function ClientDetailPage() {
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Plan details</label>
                   <textarea
-                    placeholder="e.g. Mon: 5km run, Tue: Rest, Wed: Gym - squats 3x10..."
+                    placeholder="e.g. Mon: 5km run, Tue: Rest, Wed: Gym..."
                     value={newPlan.plan_details}
                     onChange={e => setNewPlan({ ...newPlan, plan_details: e.target.value })}
                     rows={5}
@@ -208,7 +276,7 @@ export default function ClientDetailPage() {
                 No sessions logged yet.
               </div>
             ) : (
-              sessions.map(session => {
+              [...sessions].reverse().map(session => {
                 const fb = getFeedback(session.id)
                 return (
                   <div key={session.id} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
@@ -230,8 +298,6 @@ export default function ClientDetailPage() {
                       )}
                     </div>
                     {session.notes && <p className="text-xs text-gray-400 mb-3">{session.notes}</p>}
-
-                    {/* Admin feedback */}
                     <div className="mt-2">
                       <label className="text-xs text-gray-500 mb-1 block">Your feedback</label>
                       <textarea
@@ -239,16 +305,85 @@ export default function ClientDetailPage() {
                         defaultValue={fb?.admin_feedback || ''}
                         onChange={e => setFeedbackText({ ...feedbackText, [session.id]: e.target.value })}
                         rows={2}
-                        className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 text-xs resize-none" />
+                        className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 text-xs resize-none" />
                       <button
-  onClick={() => handleSaveFeedback(session.id)}
-  className="mt-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs px-4 py-1.5 rounded-lg transition">
-  {savedFeedback[session.id] ? '✓ Saved!' : 'Save Feedback'}
-</button>
+                        onClick={() => handleSaveFeedback(session.id)}
+                        className="mt-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs px-4 py-1.5 rounded-lg transition">
+                        {savedFeedback[session.id] ? '✓ Saved!' : 'Save Feedback'}
+                      </button>
                     </div>
                   </div>
                 )
               })
+            )}
+          </div>
+        )}
+
+        {/* PROGRESS TAB */}
+        {activeTab === 'progress' && (
+          <div className="mt-4 space-y-4">
+            {sessions.length === 0 ? (
+              <div className="bg-gray-900 rounded-xl p-8 text-center text-gray-400">
+                No activities logged yet by this client.
+              </div>
+            ) : (
+              <>
+                {chartData && chartData.labels.length >= 1 && (
+                  <>
+                    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Activities per Week</p>
+                      <Bar
+                        data={{
+                          labels: chartData.labels,
+                          datasets: [{
+                            label: 'Activities',
+                            data: chartData.sessionCounts,
+                            backgroundColor: 'rgba(249, 115, 22, 0.7)',
+                            borderColor: 'rgba(249, 115, 22, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                          }]
+                        }}
+                        options={{
+                          responsive: true,
+                          plugins: { legend: { display: false } },
+                          scales: {
+                            x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
+                            y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Minutes per Week</p>
+                      <Line
+                        data={{
+                          labels: chartData.labels,
+                          datasets: [{
+                            label: 'Minutes',
+                            data: chartData.minuteCounts,
+                            borderColor: 'rgba(249, 115, 22, 1)',
+                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(249, 115, 22, 1)',
+                            tension: 0.3,
+                            fill: true,
+                          }]
+                        }}
+                        options={{
+                          responsive: true,
+                          plugins: { legend: { display: false } },
+                          scales: {
+                            x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
+                            y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
+                          }
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </div>
         )}
