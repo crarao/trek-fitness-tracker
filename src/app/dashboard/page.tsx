@@ -40,3 +40,4 @@ export default function DashboardPage() {
       <p className="text-white text-lg">Loading...</p>
     </div>
   )
+}
