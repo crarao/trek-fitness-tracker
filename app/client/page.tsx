@@ -80,7 +80,7 @@ export default function ClientPage() {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name)')
+      .select('*, companies:company_id(name, logo_url)')
       .eq('id', user.id)
       .single()
 
@@ -248,11 +248,19 @@ const handleChangePassword = async () => {
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-            <span className="text-white text-sm font-bold">
-              {profile?.companies?.name?.[0] || 'C'}
-            </span>
-          </div>
+          {profile?.companies?.logo_url ? (
+  <img
+    src={profile.companies.logo_url}
+    alt={profile?.companies?.name}
+    className="w-8 h-8 rounded-lg object-cover"
+  />
+) : (
+  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+    <span className="text-white text-sm font-bold">
+      {profile?.companies?.name?.[0] || 'C'}
+    </span>
+  </div>
+)}
           <div>
             <h1 className="text-base font-bold text-white">
               {profile?.companies?.name || 'CoachBoard'}

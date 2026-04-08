@@ -17,6 +17,7 @@ export default function CompanyAdminPage() {
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
+  const [company, setCompany] = useState<any>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '' })
   const [saving, setSaving] = useState(false)
@@ -24,6 +25,8 @@ export default function CompanyAdminPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
+  const [logoSaved, setLogoSaved] = useState(false)
 
   useEffect(() => { initialize() }, [])
 
@@ -43,11 +46,12 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name')
+      .select('name, logo_url')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
+    setCompany(company)
     fetchClients(profile.company_id)
   }
 
@@ -91,6 +95,18 @@ const handleChangePassword = async () => {
       setPasswordMessage('')
     }, 2000)
   }
+}
+
+
+const handleSaveLogo = async () => {
+  const { error } = await supabase
+    .from('companies')
+    .update({ logo_url: logoUrl })
+    .eq('id', companyId!)
+  console.log('Logo save error:', error, 'companyId:', companyId, 'logoUrl:', logoUrl)
+  setLogoSaved(true)
+  setTimeout(() => setLogoSaved(false), 2000)
+  initialize()
 }
 
   const handleCreateClient = async () => {
@@ -154,11 +170,19 @@ const handleChangePassword = async () => {
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-            <span className="text-white text-sm font-bold">
-              {companyName ? companyName[0] : 'C'}
-            </span>
-          </div>
+          {company?.logo_url ? (
+  <img
+    src={company.logo_url}
+    alt={companyName}
+    className="w-8 h-8 rounded-lg object-cover"
+  />
+) : (
+  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+    <span className="text-white text-sm font-bold">
+      {companyName ? companyName[0] : 'C'}
+    </span>
+  </div>
+)}
           <div>
             <h1 className="text-base font-bold text-white">{companyName || 'CoachBoard'}</h1>
             <p className="text-xs text-gray-500">Company Admin</p>
@@ -180,34 +204,56 @@ const handleChangePassword = async () => {
 
 {showPasswordForm && (
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
-    <div className="max-w-3xl mx-auto space-y-3">
-      <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
-      <input
-        type="password"
-        placeholder="New password"
-        value={passwordData.newPassword}
-        onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-      <input
-        type="password"
-        placeholder="Confirm new password"
-        value={passwordData.confirmPassword}
-        onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-      {passwordMessage && (
-        <p className={`text-sm ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
-          {passwordMessage}
-        </p>
-      )}
-      <button
-        onClick={handleChangePassword}
-        className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm">
-        Update Password
-      </button>
+    <div className="max-w-3xl mx-auto space-y-6">
+
+      {/* Logo URL */}
+      <div>
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="https://yourcompany.com/logo.png"
+            value={logoUrl}
+            onChange={e => setLogoUrl(e.target.value)}
+            className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+          <button
+            onClick={handleSaveLogo}
+            className="bg-orange-500 hover:bg-orange-400 text-white px-4 py-2.5 rounded-xl transition text-sm font-medium">
+            {logoSaved ? '✓ Saved!' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      {/* Password Change */}
+      <div>
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
+        <input
+          type="password"
+          placeholder="New password"
+          value={passwordData.newPassword}
+          onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm mb-3" />
+        <input
+          type="password"
+          placeholder="Confirm new password"
+          value={passwordData.confirmPassword}
+          onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        {passwordMessage && (
+          <p className={`text-sm mt-2 ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
+            {passwordMessage}
+          </p>
+        )}
+        <button
+          onClick={handleChangePassword}
+          className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm mt-3">
+          Update Password
+        </button>
+      </div>
+
     </div>
   </div>
 )}
-
 
       <div className="max-w-3xl mx-auto px-6 py-6">
         {/* Stats */}
