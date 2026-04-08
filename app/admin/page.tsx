@@ -29,6 +29,10 @@ export default function AdminPage() {
   const [newCompany, setNewCompany] = useState({ name: '', email: '', adminPassword: '' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
+  const [passwordMessage, setPasswordMessage] = useState('')
+
 
   useEffect(() => { fetchAll() }, [])
 
@@ -57,6 +61,31 @@ export default function AdminPage() {
     await supabase.auth.signOut()
     router.push('/login')
   }
+
+const handleChangePassword = async () => {
+  if (passwordData.newPassword !== passwordData.confirmPassword) {
+    setPasswordMessage('Passwords do not match')
+    return
+  }
+  if (passwordData.newPassword.length < 6) {
+    setPasswordMessage('Password must be at least 6 characters')
+    return
+  }
+  const { error } = await supabase.auth.updateUser({
+    password: passwordData.newPassword
+  })
+  if (error) {
+    setPasswordMessage('Error: ' + error.message)
+  } else {
+    setPasswordMessage('Password changed successfully! ✓')
+    setPasswordData({ newPassword: '', confirmPassword: '' })
+    setTimeout(() => {
+      setShowPasswordForm(false)
+      setPasswordMessage('')
+    }, 2000)
+  }
+}
+
 
   const handleCreateCompany = async () => {
     setSaving(true)
@@ -120,11 +149,48 @@ export default function AdminPage() {
             <p className="text-xs text-gray-500">Super Admin</p>
           </div>
         </div>
-        <button onClick={handleLogout}
-          className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-          Logout
-        </button>
+<div className="flex gap-2">
+  <button
+    onClick={() => setShowPasswordForm(!showPasswordForm)}
+    className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+    Settings
+  </button>
+  <button onClick={handleLogout}
+    className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+    Logout
+  </button>
+</div>
       </div>
+
+{showPasswordForm && (
+  <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
+    <div className="max-w-4xl mx-auto space-y-3">
+      <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
+      <input
+        type="password"
+        placeholder="New password"
+        value={passwordData.newPassword}
+        onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+      <input
+        type="password"
+        placeholder="Confirm new password"
+        value={passwordData.confirmPassword}
+        onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+      {passwordMessage && (
+        <p className={`text-sm ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
+          {passwordMessage}
+        </p>
+      )}
+      <button
+        onClick={handleChangePassword}
+        className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm">
+        Update Password
+      </button>
+    </div>
+  </div>
+)}
 
       <div className="max-w-4xl mx-auto px-6 py-6">
         {/* Stats */}
