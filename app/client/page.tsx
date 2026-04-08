@@ -66,6 +66,8 @@ export default function ClientPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [showGoalForm, setShowGoalForm] = useState(false)
+  const [goalText, setGoalText] = useState('')
 
   useEffect(() => { initialize() }, [])
 
@@ -108,6 +110,17 @@ export default function ClientPage() {
     }
 
     setLoading(false)
+  }
+
+  const handleSaveGoal = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase
+      .from('profiles')
+      .update({ goal: goalText })
+      .eq('id', user!.id)
+    setShowGoalForm(false)
+    setGoalText('')
+    initialize()
   }
 
   const handleLogSession = async () => {
@@ -242,6 +255,44 @@ export default function ClientPage() {
         {/* MY PLAN TAB */}
         {activeTab === 'plan' && (
           <div>
+            {/* Goal Section */}
+            <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-4">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">My Goal</p>
+                  {profile?.goal ? (
+                    <p className="text-sm text-white">{profile.goal}</p>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No goal set yet</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setGoalText(profile?.goal || '')
+                    setShowGoalForm(!showGoalForm)
+                  }}
+                  className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition ml-4">
+                  {profile?.goal ? 'Edit' : 'Set Goal'}
+                </button>
+              </div>
+
+              {showGoalForm && (
+                <div className="mt-4 space-y-3 border-t border-gray-800 pt-4">
+                  <textarea
+                    placeholder="e.g. Complete EBC trek by October 2026"
+                    value={goalText}
+                    onChange={e => setGoalText(e.target.value)}
+                    rows={2}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+                  <button
+                    onClick={handleSaveGoal}
+                    className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm">
+                    Save Goal
+                  </button>
+                </div>
+              )}
+            </div>
+
             {plans.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 <p className="text-lg mb-1">No plan yet</p>
@@ -363,7 +414,6 @@ export default function ClientPage() {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
-            {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
                 <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
@@ -379,7 +429,6 @@ export default function ClientPage() {
               </div>
             </div>
 
-            {/* Charts */}
             {chartData && chartData.labels.length >= 1 && (
               <>
                 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
@@ -436,7 +485,6 @@ export default function ClientPage() {
               </>
             )}
 
-            {/* Session history */}
             <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">

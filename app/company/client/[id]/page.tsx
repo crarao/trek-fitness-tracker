@@ -223,6 +223,12 @@ export default function ClientDetailPage() {
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
           <div>
+{client?.goal && (
+  <div className="bg-orange-950 border border-orange-900 rounded-2xl px-5 py-4 mb-4">
+    <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Client Goal</p>
+    <p className="text-sm text-orange-200">{client.goal}</p>
+  </div>
+)}
             <div className="flex justify-between items-center mb-4">
               <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
               <button onClick={() => setShowPlanForm(!showPlanForm)}
