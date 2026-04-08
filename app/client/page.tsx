@@ -66,6 +66,8 @@ export default function ClientPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [aiInsight, setAiInsight] = useState<string | null>(null)
+  const [loadingInsight, setLoadingInsight] = useState(false)
   const [showGoalForm, setShowGoalForm] = useState(false)
   const [goalText, setGoalText] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -125,6 +127,30 @@ export default function ClientPage() {
     setGoalText('')
     initialize()
   }
+
+
+const fetchAiInsight = async () => {
+  setLoadingInsight(true)
+  try {
+    const recentSessions = [...sessions].slice(-10)
+    const response = await fetch('/api/ai-insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessions: recentSessions,
+        goal: profile?.goal,
+        clientName: profile?.full_name
+      })
+    })
+    const data = await response.json()
+    console.log('AI response:', data)
+    setAiInsight(data.insight || 'AI insights coming soon! Your coach will be able to generate personalized feedback based on your activity history.')
+  } catch (error) {
+    console.error('AI error:', error)
+    setAiInsight('Unable to generate insights right now. Please try again.')
+  }
+  setLoadingInsight(false)
+}
 
 const handleChangePassword = async () => {
   if (passwordData.newPassword !== passwordData.confirmPassword) {
@@ -503,6 +529,30 @@ const handleChangePassword = async () => {
                 <p className="text-xs text-gray-500 mt-1">Day Streak</p>
               </div>
             </div>
+
+{/* AI Insights */}
+<div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+  <div className="flex justify-between items-center mb-3">
+    <div>
+      <p className="text-xs text-gray-500 uppercase tracking-wider">Coach AI Insights</p>
+    </div>
+    <button
+      onClick={fetchAiInsight}
+      disabled={loadingInsight}
+      className="text-xs bg-orange-500 hover:bg-orange-400 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50">
+      {loadingInsight ? 'Analysing...' : 'Get Insights'}
+    </button>
+  </div>
+  {aiInsight ? (
+    <p className="text-sm text-gray-300 leading-relaxed">{aiInsight}</p>
+  ) : (
+    <p className="text-sm text-gray-500 italic">
+      Click "Get Insights" to get AI-powered coaching feedback based on your activity history.
+    </p>
+  )}
+</div>
+
+
 
             {chartData && chartData.labels.length >= 1 && (
               <>
