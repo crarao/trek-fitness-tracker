@@ -160,7 +160,7 @@ const handleChangePassword = async () => {
     }
 
     setMessage('Client created successfully!')
-    setNewClient({ full_name: '', email: '', password: '' })
+    setNewClient({ full_name: '', email: '', password: '', phone: '' })
     setShowForm(false)
     setSaving(false)
     fetchClients(companyId!)
