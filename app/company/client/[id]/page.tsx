@@ -186,7 +186,10 @@ export default function ClientDetailPage() {
             </div>
             <div>
               <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
-              <p className="text-xs text-gray-500">{client?.email}</p>
+              <p className="text-xs text-gray-400">{client?.email}</p>
+{client?.phone && (
+  <p className="text-xs text-gray-400">{client?.phone}</p>
+)}
             </div>
           </div>
         </div>

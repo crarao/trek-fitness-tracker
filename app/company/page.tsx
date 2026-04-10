@@ -19,7 +19,7 @@ export default function CompanyAdminPage() {
   const [companyName, setCompanyName] = useState('')
   const [company, setCompany] = useState<any>(null)
   const [showForm, setShowForm] = useState(false)
-  const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '' })
+  const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -117,12 +117,13 @@ const handleSaveLogo = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: newClient.email,
-        password: newClient.password,
-        full_name: newClient.full_name,
-        company_id: companyId,
-        role: 'client'
-      })
+  email: newClient.email,
+  password: newClient.password,
+  full_name: newClient.full_name,
+  company_id: companyId,
+  role: 'client',
+  phone: newClient.phone
+})
     })
 
 
@@ -283,6 +284,12 @@ const handleChangePassword = async () => {
               value={newClient.email}
               onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+
+	<input type="tel" placeholder="Phone number"
+		  value={newClient.phone}
+		  onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+		  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+
             <input type="password" placeholder="Temporary password"
               value={newClient.password}
               onChange={(e) => setNewClient({ ...newClient, password: e.target.value })}

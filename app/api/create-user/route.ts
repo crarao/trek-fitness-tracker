@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
   )
 
-  const { email, password, full_name, company_id, role } = await request.json()
+const { email, password, full_name, company_id, role, phone } = await request.json()
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -26,13 +26,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: authError.message }, { status: 400 })
   }
 
-  const { error: profileError } = await supabaseAdmin.from('profiles').insert({
-    id: authData.user.id,
-    company_id,
-    full_name,
-    email,
-    role
-  })
+const { error: profileError } = await supabaseAdmin.from('profiles').insert({
+  id: authData.user.id,
+  company_id,
+  full_name,
+  email,
+  role,
+  phone: phone || null
+})
 
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 400 })
