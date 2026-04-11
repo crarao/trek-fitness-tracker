@@ -8,6 +8,7 @@ type Company = {
   id: string
   name: string
   email: string
+  phone: string
   created_at: string
 }
 
@@ -26,7 +27,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'companies' | 'clients'>('companies')
   const [showForm, setShowForm] = useState(false)
-  const [newCompany, setNewCompany] = useState({ name: '', email: '', adminPassword: '' })
+  const [newCompany, setNewCompany] = useState({ name: '', email: '', adminPassword: '', phone: '' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -92,10 +93,10 @@ const handleChangePassword = async () => {
     setMessage('')
 
     const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .insert({ name: newCompany.name, email: newCompany.email })
-      .select()
-      .single()
+  .from('companies')
+  .insert({ name: newCompany.name, email: newCompany.email, phone: newCompany.phone })
+  .select()
+  .single()
 
     if (companyError) {
       setMessage('Error: ' + companyError.message)
@@ -123,7 +124,7 @@ const handleChangePassword = async () => {
     }
 
     setMessage('Company created successfully!')
-    setNewCompany({ name: '', email: '', adminPassword: '' })
+    setNewCompany({ name: '', email: '', adminPassword: '', phone: '' })
     setShowForm(false)
     setSaving(false)
     fetchAll()
@@ -239,6 +240,12 @@ const handleChangePassword = async () => {
                   value={newCompany.email}
                   onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <input type="tel" placeholder="Company phone number"
+                  value={newCompany.phone}
+                  onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+
+
                 <input type="password" placeholder="Admin password"
                   value={newCompany.adminPassword}
                   onChange={(e) => setNewCompany({ ...newCompany, adminPassword: e.target.value })}
@@ -271,7 +278,10 @@ const handleChangePassword = async () => {
                       </div>
                       <div>
                         <p className="font-medium text-white text-sm">{company.name}</p>
-                        <p className="text-xs text-gray-500">{company.email}</p>
+                        <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
+                          {company.phone && (
+                            <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
+                          )}
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
