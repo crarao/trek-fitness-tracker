@@ -62,6 +62,10 @@ export default function ClientDetailPage() {
   const [saving, setSaving] = useState(false)
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [resetMessage, setResetMessage] = useState('')
+  const [resetting, setResetting] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { initialize() }, [clientId])
@@ -131,6 +135,35 @@ export default function ClientDetailPage() {
     initialize()
   }
 
+const handleResetPassword = async () => {
+  setResetting(true)
+  setResetMessage('')
+
+  const response = await fetch('/api/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: clientId,
+      newPassword: newPassword
+    })
+  })
+
+  const result = await response.json()
+  if (result.error) {
+    setResetMessage('Error: ' + result.error)
+  } else {
+    setResetMessage('Password reset successfully! ✓')
+    setNewPassword('')
+    setTimeout(() => {
+      setShowResetPassword(false)
+      setResetMessage('')
+    }, 2000)
+  }
+  setResetting(false)
+}
+
+
+
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
   const getChartData = () => {
@@ -180,6 +213,13 @@ export default function ClientDetailPage() {
             className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
             ← Back
           </button>
+
+          <button
+            onClick={() => setShowResetPassword(!showResetPassword)}
+            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+            Reset Password
+          </button>
+
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
               <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
@@ -194,6 +234,31 @@ export default function ClientDetailPage() {
           </div>
         </div>
       </div>
+
+{showResetPassword && (
+  <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
+    <div className="max-w-2xl mx-auto space-y-3">
+      <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Reset Client Password</p>
+      <input
+        type="password"
+        placeholder="New password for client"
+        value={newPassword}
+        onChange={e => setNewPassword(e.target.value)}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+      {resetMessage && (
+        <p className={`text-sm ${resetMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
+          {resetMessage}
+        </p>
+      )}
+      <button
+        onClick={handleResetPassword}
+        disabled={resetting}
+        className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+        {resetting ? 'Resetting...' : 'Reset Password'}
+      </button>
+    </div>
+  </div>
+)}
 
       {/* Stats */}
       <div className="max-w-2xl mx-auto px-6 pt-5 grid grid-cols-2 gap-3 mb-2">
