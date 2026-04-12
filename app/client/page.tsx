@@ -54,7 +54,7 @@ export default function ClientPage() {
   const [plans, setPlans] = useState<WeeklyPlan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress'>('plan')
+  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [newSession, setNewSession] = useState({
     session_date: new Date().toISOString().split('T')[0],
@@ -70,6 +70,22 @@ export default function ClientPage() {
   const [loadingInsight, setLoadingInsight] = useState(false)
   const [showGoalForm, setShowGoalForm] = useState(false)
   const [goalText, setGoalText] = useState('')
+
+const [profileForm, setProfileForm] = useState({
+  age: '',
+  gender: '',
+  height_cm: '',
+  weight_kg: '',
+  fitness_level: '',
+  available_days: [] as string[],
+  food_preference: '',
+  medical_conditions: '',
+  emergency_contact_name: '',
+  emergency_contact_phone: ''
+})
+const [savingProfile, setSavingProfile] = useState(false)
+const [profileMessage, setProfileMessage] = useState('')
+
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
@@ -87,6 +103,21 @@ export default function ClientPage() {
       .single()
 
     setProfile(prof)
+
+if (prof) {
+  setProfileForm({
+    age: prof.age?.toString() || '',
+    gender: prof.gender || '',
+    height_cm: prof.height_cm?.toString() || '',
+    weight_kg: prof.weight_kg?.toString() || '',
+    fitness_level: prof.fitness_level || '',
+    available_days: prof.available_days ? prof.available_days.split(',') : [],
+    food_preference: prof.food_preference || '',
+    medical_conditions: prof.medical_conditions || '',
+    emergency_contact_name: prof.emergency_contact_name || '',
+    emergency_contact_phone: prof.emergency_contact_phone || ''
+  })
+}
 
     const { data: plansData } = await supabase
       .from('weekly_plans')
@@ -128,6 +159,44 @@ export default function ClientPage() {
     initialize()
   }
 
+  const handleSaveProfile = async () => {
+  setSavingProfile(true)
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      age: profileForm.age ? parseInt(profileForm.age) : null,
+      gender: profileForm.gender || null,
+      height_cm: profileForm.height_cm ? parseFloat(profileForm.height_cm) : null,
+      weight_kg: profileForm.weight_kg ? parseFloat(profileForm.weight_kg) : null,
+      fitness_level: profileForm.fitness_level || null,
+      available_days: profileForm.available_days.join(','),
+      food_preference: profileForm.food_preference || null,
+      medical_conditions: profileForm.medical_conditions || null,
+      emergency_contact_name: profileForm.emergency_contact_name || null,
+      emergency_contact_phone: profileForm.emergency_contact_phone || null,
+    })
+    .eq('id', user!.id)
+
+  if (error) {
+    setProfileMessage('Error saving profile')
+  } else {
+    setProfileMessage('Profile saved successfully! ✓')
+    setTimeout(() => setProfileMessage(''), 3000)
+    initialize()
+  }
+  setSavingProfile(false)
+}
+
+const toggleDay = (day: string) => {
+  setProfileForm(prev => ({
+    ...prev,
+    available_days: prev.available_days.includes(day)
+      ? prev.available_days.filter(d => d !== day)
+      : [...prev.available_days, day]
+  }))
+}
 
 const fetchAiInsight = async () => {
   setLoadingInsight(true)
@@ -341,15 +410,15 @@ const handleChangePassword = async () => {
 
       {/* Tabs */}
       <div className="flex border-b border-gray-800">
-        {(['plan', 'log', 'progress'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-sm font-medium transition ${activeTab === tab
-              ? 'text-orange-500 border-b-2 border-orange-500'
-              : 'text-gray-500 hover:text-white'}`}>
-            {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log Activity' : 'Progress'}
-          </button>
-        ))}
-      </div>
+  {(['plan', 'log', 'progress', 'profile'] as const).map(tab => (
+    <button key={tab} onClick={() => setActiveTab(tab)}
+      className={`flex-1 py-3 text-xs font-medium transition ${activeTab === tab
+        ? 'text-orange-500 border-b-2 border-orange-500'
+        : 'text-gray-500 hover:text-white'}`}>
+      {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : 'Profile'}
+    </button>
+  ))}
+</div>
 
       <div className="max-w-2xl mx-auto px-4 py-5">
 
@@ -652,7 +721,138 @@ const handleChangePassword = async () => {
             )}
           </div>
         )}
+
+        {/* PROFILE TAB */}
+{activeTab === 'profile' && (
+  <div className="space-y-4 mt-4">
+    <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
+      <h2 className="font-semibold text-white">My Fitness Profile</h2>
+
+      {/* Row 1 - Age and Gender */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Age</label>
+          <input type="number" placeholder="e.g. 28"
+            value={profileForm.age}
+            onChange={e => setProfileForm({ ...profileForm, age: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Gender</label>
+          <select value={profileForm.gender}
+            onChange={e => setProfileForm({ ...profileForm, gender: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+            <option value="">Select</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+        </div>
       </div>
+
+      {/* Row 2 - Height and Weight */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Height (cm)</label>
+          <input type="number" placeholder="e.g. 172"
+            value={profileForm.height_cm}
+            onChange={e => setProfileForm({ ...profileForm, height_cm: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Weight (kg)</label>
+          <input type="number" placeholder="e.g. 75"
+            value={profileForm.weight_kg}
+            onChange={e => setProfileForm({ ...profileForm, weight_kg: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        </div>
+      </div>
+
+      {/* Fitness Level */}
+      <div>
+        <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Fitness Level</label>
+        <select value={profileForm.fitness_level}
+          onChange={e => setProfileForm({ ...profileForm, fitness_level: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+          <option value="">Select</option>
+          <option value="Beginner">Beginner</option>
+          <option value="Intermediate">Intermediate</option>
+          <option value="Advanced">Advanced</option>
+        </select>
+      </div>
+
+      {/* Food Preference */}
+      <div>
+        <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Food Preference</label>
+        <select value={profileForm.food_preference}
+          onChange={e => setProfileForm({ ...profileForm, food_preference: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+          <option value="">Select</option>
+          <option value="Vegetarian">Vegetarian</option>
+          <option value="Non-Vegetarian">Non-Vegetarian</option>
+          <option value="Eggetarian">Eggetarian</option>
+        </select>
+      </div>
+
+      {/* Available Days */}
+      <div>
+        <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">Available Training Days</label>
+        <div className="flex gap-2 flex-wrap">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
+            <button key={day}
+              onClick={() => toggleDay(day)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                profileForm.available_days.includes(day)
+                  ? 'bg-orange-500 border-orange-500 text-white'
+                  : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+              }`}>
+              {day}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Medical Conditions */}
+      <div>
+        <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Medical Conditions / Injuries</label>
+        <textarea
+          placeholder="e.g. Lower back pain, knee injury, diabetes... or None"
+          value={profileForm.medical_conditions}
+          onChange={e => setProfileForm({ ...profileForm, medical_conditions: e.target.value })}
+          rows={2}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+      </div>
+
+      {/* Emergency Contact */}
+      <div className="border-t border-gray-800 pt-4">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Emergency Contact</p>
+        <div className="grid grid-cols-2 gap-3">
+          <input type="text" placeholder="Contact name"
+            value={profileForm.emergency_contact_name}
+            onChange={e => setProfileForm({ ...profileForm, emergency_contact_name: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+          <input type="tel" placeholder="Phone number"
+            value={profileForm.emergency_contact_phone}
+            onChange={e => setProfileForm({ ...profileForm, emergency_contact_phone: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        </div>
+      </div>
+
+      {profileMessage && (
+        <div className="bg-green-950 border border-green-800 rounded-xl px-4 py-3">
+          <p className="text-green-400 text-sm">{profileMessage}</p>
+        </div>
+      )}
+
+      <button onClick={handleSaveProfile} disabled={savingProfile}
+        className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition disabled:opacity-50 text-sm">
+        {savingProfile ? 'Saving...' : 'Save Profile'}
+      </button>
+    </div>
+  </div>
+)}
+      </div>
+      
     </div>
   )
 }

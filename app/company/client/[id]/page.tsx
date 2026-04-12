@@ -27,6 +27,23 @@ ChartJS.register(
   Legend
 )
 
+type ClientProfile = {
+  full_name: string
+  email: string
+  phone: string | null
+  age: number | null
+  gender: string | null
+  height_cm: number | null
+  weight_kg: number | null
+  fitness_level: string | null
+  available_days: string | null
+  food_preference: string | null
+  medical_conditions: string | null
+  emergency_contact_name: string | null
+  emergency_contact_phone: string | null
+  goal: string | null
+}
+
 type Plan = {
   id: string
   week_start: string
@@ -52,14 +69,19 @@ export default function ClientDetailPage() {
   const params = useParams()
   const clientId = params.id as string
 
-  const [client, setClient] = useState<any>(null)
+  const [client, setClient] = useState<ClientProfile | null>(null)
   const [plans, setPlans] = useState<Plan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress'>('plans')
+  const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('plans')
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '' })
   const [saving, setSaving] = useState(false)
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
+const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
+  const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [generatedPlan, setGeneratedPlan] = useState('')
+  const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [showResetPassword, setShowResetPassword] = useState(false)
@@ -116,6 +138,54 @@ export default function ClientDetailPage() {
     setSaving(false)
     initialize()
   }
+
+const handleUpdatePlan = async () => {
+  if (!editingPlan) return
+  setSaving(true)
+  await supabase
+    .from('weekly_plans')
+    .update({
+      week_start: editingPlan.week_start,
+      plan_details: editingPlan.plan_details
+    })
+    .eq('id', editingPlan.id)
+  setEditingPlan(null)
+  setSaving(false)
+  initialize()
+}
+
+const handleDeletePlan = async (planId: string) => {
+  if (!confirm('Delete this plan? This cannot be undone.')) return
+  setDeletingPlanId(planId)
+  await supabase
+    .from('weekly_plans')
+    .delete()
+    .eq('id', planId)
+  setDeletingPlanId(null)
+  initialize()
+}
+
+
+const handleGeneratePlan = async () => {
+  setGeneratingPlan(true)
+  setShowGeneratedPlan(false)
+  setGeneratedPlan('')
+
+  const response = await fetch('/api/generate-plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile: client })
+  })
+
+  const data = await response.json()
+  if (data.plan) {
+    setGeneratedPlan(data.plan)
+    setShowGeneratedPlan(true)
+    setNewPlan(prev => ({ ...prev, plan_details: data.plan }))
+  }
+  setGeneratingPlan(false)
+}
+
 
   const handleSaveFeedback = async (sessionId: string) => {
     const existing = feedback.find(f => f.session_id === sessionId)
@@ -275,15 +345,15 @@ const handleResetPassword = async () => {
       {/* Tabs */}
       <div className="max-w-2xl mx-auto px-6 mt-4">
         <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
-          {(['plans', 'sessions', 'progress'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
-                ? 'bg-orange-500 text-white'
-                : 'text-gray-400 hover:text-white'}`}>
-              {tab === 'plans' ? 'Weekly Plans' : tab === 'sessions' ? 'Sessions & Feedback' : 'Progress'}
-            </button>
-          ))}
-        </div>
+  {(['plans', 'sessions', 'progress', 'profile'] as const).map(tab => (
+    <button key={tab} onClick={() => setActiveTab(tab)}
+      className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
+        ? 'bg-orange-500 text-white'
+        : 'text-gray-400 hover:text-white'}`}>
+      {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
+    </button>
+  ))}
+</div>
       </div>
 
       <div className="max-w-2xl mx-auto px-6 pb-8">
@@ -299,12 +369,51 @@ const handleResetPassword = async () => {
 )}
             <div className="flex justify-between items-center mb-4">
               <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
-              <button onClick={() => setShowPlanForm(!showPlanForm)}
-                className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
-                + Assign Plan
-              </button>
+              <div className="flex gap-2">
+  <button
+    onClick={handleGeneratePlan}
+    disabled={generatingPlan}
+    className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
+    {generatingPlan ? '⏳ Generating...' : '✨ Generate with AI'}
+  </button>
+  <button onClick={() => setShowPlanForm(!showPlanForm)}
+    className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
+    + Assign Plan
+  </button>
+</div>
             </div>
-
+{showGeneratedPlan && generatedPlan && (
+  <div className="bg-gray-900 rounded-2xl p-5 border border-purple-800 space-y-4 mb-4">
+    <div className="flex justify-between items-center">
+      <p className="text-xs text-purple-400 uppercase tracking-wider font-medium">✨ AI Generated Plan</p>
+      <button
+        onClick={() => setShowGeneratedPlan(false)}
+        className="text-xs text-gray-500 hover:text-white">
+        Dismiss
+      </button>
+    </div>
+    <textarea
+  value={generatedPlan}
+  onChange={e => {
+    setGeneratedPlan(e.target.value)
+    setNewPlan(prev => ({ ...prev, plan_details: e.target.value }))
+  }}
+  rows={15}
+  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm resize-none" />
+    <div className="border-t border-gray-800 pt-4">
+      <p className="text-xs text-gray-500 mb-3">Select week to assign this plan:</p>
+      <input type="date" value={newPlan.week_start}
+        onChange={e => setNewPlan({ ...newPlan, week_start: e.target.value })}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-3" />
+      <button
+        onClick={handleAddPlan}
+        disabled={saving || !newPlan.week_start}
+        className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+        {saving ? 'Assigning...' : 'Assign This Plan to Client'}
+      </button>
+    </div>
+  </div>
+)}
             {showPlanForm && (
               <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 mb-4">
                 <h3 className="font-semibold text-sm">New Weekly Plan</h3>
@@ -337,16 +446,63 @@ const handleResetPassword = async () => {
             ) : (
               <div className="space-y-3">
                 {plans.map(plan => (
-                  <div key={plan.id} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
-                    <p className="font-semibold text-sm mb-3">
-                      {new Date(plan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
-                    </p>
-                    <div className="border-t border-gray-800 pt-3">
-                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
-                    </div>
-                  </div>
-                ))}
+  <div key={plan.id} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+    {editingPlan?.id === plan.id ? (
+      // Edit mode
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500 uppercase tracking-wider">Editing Plan</p>
+        <input type="date"
+          value={editingPlan.week_start}
+          onChange={e => setEditingPlan({ ...editingPlan, week_start: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        <textarea
+          value={editingPlan.plan_details}
+          onChange={e => setEditingPlan({ ...editingPlan, plan_details: e.target.value })}
+          rows={10}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+        <div className="flex gap-2">
+          <button onClick={handleUpdatePlan} disabled={saving}
+            className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm py-2.5 rounded-xl transition disabled:opacity-50 font-medium">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+          <button onClick={() => setEditingPlan(null)}
+            className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+            Cancel
+          </button>
+        </div>
+      </div>
+    ) : (
+      // View mode
+      <>
+        <div className="flex justify-between items-start mb-3">
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
+            <p className="font-semibold text-sm">
+              {new Date(plan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setEditingPlan(plan)}
+              className="text-xs text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
+              Edit
+            </button>
+            <button
+              onClick={() => handleDeletePlan(plan.id)}
+              disabled={deletingPlanId === plan.id}
+              className="text-xs text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
+              {deletingPlanId === plan.id ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        </div>
+        <div className="border-t border-gray-800 pt-3">
+          <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+        </div>
+      </>
+    )}
+  </div>
+))}
+              
               </div>
             )}
           </div>
@@ -469,6 +625,84 @@ const handleResetPassword = async () => {
             )}
           </div>
         )}
+        {/* PROFILE TAB */}
+{activeTab === 'profile' && (
+  <div className="space-y-4">
+    <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
+      <h2 className="font-semibold text-white">Client Fitness Profile</h2>
+
+      {/* Goal */}
+      {client?.goal && (
+        <div className="bg-orange-950 border border-orange-900 rounded-xl px-4 py-3">
+          <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Goal</p>
+          <p className="text-sm text-orange-200">{client.goal}</p>
+        </div>
+      )}
+
+      {/* Basic Info */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Age</p>
+          <p className="text-sm text-white">{client?.age || '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Gender</p>
+          <p className="text-sm text-white">{client?.gender || '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Height</p>
+          <p className="text-sm text-white">{client?.height_cm ? `${client.height_cm} cm` : '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Weight</p>
+          <p className="text-sm text-white">{client?.weight_kg ? `${client.weight_kg} kg` : '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Fitness Level</p>
+          <p className="text-sm text-white">{client?.fitness_level || '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Food Preference</p>
+          <p className="text-sm text-white">{client?.food_preference || '—'}</p>
+        </div>
+      </div>
+
+      {/* Available Days */}
+      {client?.available_days && (
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Available Days</p>
+          <div className="flex gap-2 flex-wrap">
+            {client.available_days.split(',').map(day => (
+              <span key={day} className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">
+                {day}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Medical Conditions */}
+      <div>
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Medical Conditions / Injuries</p>
+        <p className="text-sm text-white">{client?.medical_conditions || '—'}</p>
+      </div>
+
+      {/* Emergency Contact */}
+      <div className="border-t border-gray-800 pt-4">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
+        <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
+        <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
+      </div>
+
+      {/* Contact */}
+      <div className="border-t border-gray-800 pt-4">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
+        <p className="text-sm text-white">{client?.phone || '—'}</p>
+        <p className="text-sm text-gray-400">{client?.email}</p>
+      </div>
+    </div>
+  </div>
+)}
       </div>
     </div>
   )
