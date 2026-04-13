@@ -9,6 +9,9 @@ type Company = {
   name: string
   email: string
   phone: string
+  trial_start: string
+  trial_end: string
+  is_active: boolean
   created_at: string
 }
 
@@ -27,7 +30,14 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'companies' | 'clients'>('companies')
   const [showForm, setShowForm] = useState(false)
-  const [newCompany, setNewCompany] = useState({ name: '', email: '', adminPassword: '', phone: '' })
+  const [newCompany, setNewCompany] = useState({ 
+  name: '', 
+  email: '', 
+  adminPassword: '', 
+  phone: '',
+  trial_start: new Date().toISOString().split('T')[0],
+  trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -87,6 +97,13 @@ const handleChangePassword = async () => {
   }
 }
 
+const handleToggleActive = async (companyId: string, currentStatus: boolean) => {
+  await supabase
+    .from('companies')
+    .update({ is_active: !currentStatus })
+    .eq('id', companyId)
+  fetchAll()
+}
 
   const handleCreateCompany = async () => {
     setSaving(true)
@@ -124,7 +141,14 @@ const handleChangePassword = async () => {
     }
 
     setMessage('Company created successfully!')
-    setNewCompany({ name: '', email: '', adminPassword: '', phone: '' })
+    setNewCompany({ 
+  name: '', 
+  email: '', 
+  adminPassword: '', 
+  phone: '',
+  trial_start: new Date().toISOString().split('T')[0],
+  trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+})
     setShowForm(false)
     setSaving(false)
     fetchAll()
@@ -244,7 +268,22 @@ const handleChangePassword = async () => {
                   value={newCompany.phone}
                   onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-
+<div className="grid grid-cols-2 gap-3">
+  <div>
+    <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Trial Start</label>
+    <input type="date"
+      value={newCompany.trial_start}
+      onChange={(e) => setNewCompany({ ...newCompany, trial_start: e.target.value })}
+      className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+  </div>
+  <div>
+    <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Trial End</label>
+    <input type="date"
+      value={newCompany.trial_end}
+      onChange={(e) => setNewCompany({ ...newCompany, trial_end: e.target.value })}
+      className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+  </div>
+</div>
 
                 <input type="password" placeholder="Admin password"
                   value={newCompany.adminPassword}
@@ -279,9 +318,18 @@ const handleChangePassword = async () => {
                       <div>
                         <p className="font-medium text-white text-sm">{company.name}</p>
                         <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
-                          {company.phone && (
-                            <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
-                          )}
+                        {company.phone && (
+                          <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
+                        )}
+                        {company.trial_end && (
+                          <p className="text-xs mt-0.5" style={{
+                          color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
+                        }}>
+                        {new Date(company.trial_end) < new Date()
+                          ? '🔒 Trial expired'
+                        : `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`}
+                        </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -289,10 +337,17 @@ const handleChangePassword = async () => {
                         {new Date(company.created_at).toLocaleDateString()}
                       </p>
                       <button
-                        onClick={() => handleDeleteCompany(company.id, company.name)}
-                        className="text-xs text-gray-600 hover:text-red-400 transition">
-                        Delete
-                      </button>
+  onClick={() => handleToggleActive(company.id, company.is_active)}
+  className={`text-xs transition ${company.is_active 
+    ? 'text-gray-600 hover:text-yellow-400' 
+    : 'text-gray-600 hover:text-green-400'}`}>
+  {company.is_active ? 'Deactivate' : 'Activate'}
+</button>
+<button
+  onClick={() => handleDeleteCompany(company.id, company.name)}
+  className="text-xs text-gray-600 hover:text-red-400 transition">
+  Delete
+</button>
                     </div>
                   </div>
                 ))}

@@ -18,6 +18,7 @@ export default function CompanyAdminPage() {
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [company, setCompany] = useState<any>(null)
+  const [trialInfo, setTrialInfo] = useState<{trial_end: string, is_active: boolean} | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '' })
   const [saving, setSaving] = useState(false)
@@ -46,12 +47,18 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url')
+      .select('name, logo_url, trial_end, is_active')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
     setCompany(company)
+    console.log('Company data:', company)
+    setTrialInfo({
+      trial_end: company?.trial_end,
+      is_active: company?.is_active
+    })
+
     fetchClients(profile.company_id)
   }
 
@@ -72,42 +79,40 @@ export default function CompanyAdminPage() {
     router.push('/login')
   }
 
-
-const handleChangePassword = async () => {
-  if (passwordData.newPassword !== passwordData.confirmPassword) {
-    setPasswordMessage('Passwords do not match')
-    return
+  const handleChangePassword = async () => {
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPasswordMessage('Passwords do not match')
+      return
+    }
+    if (passwordData.newPassword.length < 6) {
+      setPasswordMessage('Password must be at least 6 characters')
+      return
+    }
+    const { error } = await supabase.auth.updateUser({
+      password: passwordData.newPassword
+    })
+    if (error) {
+      setPasswordMessage('Error: ' + error.message)
+    } else {
+      setPasswordMessage('Password changed successfully! ✓')
+      setPasswordData({ newPassword: '', confirmPassword: '' })
+      setTimeout(() => {
+        setShowPasswordForm(false)
+        setPasswordMessage('')
+      }, 2000)
+    }
   }
-  if (passwordData.newPassword.length < 6) {
-    setPasswordMessage('Password must be at least 6 characters')
-    return
-  }
-  const { error } = await supabase.auth.updateUser({
-    password: passwordData.newPassword
-  })
-  if (error) {
-    setPasswordMessage('Error: ' + error.message)
-  } else {
-    setPasswordMessage('Password changed successfully! ✓')
-    setPasswordData({ newPassword: '', confirmPassword: '' })
-    setTimeout(() => {
-      setShowPasswordForm(false)
-      setPasswordMessage('')
-    }, 2000)
-  }
-}
 
-
-const handleSaveLogo = async () => {
-  const { error } = await supabase
-    .from('companies')
-    .update({ logo_url: logoUrl })
-    .eq('id', companyId!)
-  console.log('Logo save error:', error, 'companyId:', companyId, 'logoUrl:', logoUrl)
-  setLogoSaved(true)
-  setTimeout(() => setLogoSaved(false), 2000)
-  initialize()
-}
+  const handleSaveLogo = async () => {
+    const { error } = await supabase
+      .from('companies')
+      .update({ logo_url: logoUrl })
+      .eq('id', companyId!)
+    console.log('Logo save error:', error)
+    setLogoSaved(true)
+    setTimeout(() => setLogoSaved(false), 2000)
+    initialize()
+  }
 
   const handleCreateClient = async () => {
     setSaving(true)
@@ -117,40 +122,14 @@ const handleSaveLogo = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-  email: newClient.email,
-  password: newClient.password,
-  full_name: newClient.full_name,
-  company_id: companyId,
-  role: 'client',
-  phone: newClient.phone
-})
+        email: newClient.email,
+        password: newClient.password,
+        full_name: newClient.full_name,
+        company_id: companyId,
+        role: 'client',
+        phone: newClient.phone
+      })
     })
-
-
-const handleChangePassword = async () => {
-  if (passwordData.newPassword !== passwordData.confirmPassword) {
-    setPasswordMessage('Passwords do not match')
-    return
-  }
-  if (passwordData.newPassword.length < 6) {
-    setPasswordMessage('Password must be at least 6 characters')
-    return
-  }
-  const { error } = await supabase.auth.updateUser({
-    password: passwordData.newPassword
-  })
-  if (error) {
-    setPasswordMessage('Error: ' + error.message)
-  } else {
-    setPasswordMessage('Password changed successfully! ✓')
-    setPasswordData({ newPassword: '', confirmPassword: '' })
-    setTimeout(() => {
-      setShowPasswordForm(false)
-      setPasswordMessage('')
-    }, 2000)
-  }
-}
-
 
     const result = await response.json()
     if (result.error) {
@@ -166,101 +145,128 @@ const handleChangePassword = async () => {
     fetchClients(companyId!)
   }
 
+  const getTrialDaysLeft = () => {
+  if (!trialInfo?.trial_end) return null
+  const days = Math.ceil((new Date(trialInfo.trial_end).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+  console.log('Trial end:', trialInfo.trial_end, 'Days left:', days)
+  return days
+}
+
+  
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          {company?.logo_url ? (
-  <img
-    src={company.logo_url}
-    alt={companyName}
-    className="w-8 h-8 rounded-lg object-cover"
-  />
-) : (
-  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-    <span className="text-white text-sm font-bold">
-      {companyName ? companyName[0] : 'C'}
-    </span>
-  </div>
-)}
+          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+            <span className="text-white text-sm font-bold">
+              {companyName ? companyName[0] : 'C'}
+            </span>
+          </div>
           <div>
             <h1 className="text-base font-bold text-white">{companyName || 'CoachBoard'}</h1>
             <p className="text-xs text-gray-500">Company Admin</p>
           </div>
         </div>
-<div className="flex gap-2">
-  <button
-    onClick={() => setShowPasswordForm(!showPasswordForm)}
-    className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-    Settings
-  </button>
-  <button onClick={handleLogout}
-    className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-    Logout
-  </button>
-</div>
-      </div>
-
-
-{showPasswordForm && (
-  <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
-    <div className="max-w-3xl mx-auto space-y-6">
-
-      {/* Logo URL */}
-      <div>
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
         <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="https://yourcompany.com/logo.png"
-            value={logoUrl}
-            onChange={e => setLogoUrl(e.target.value)}
-            className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
           <button
-            onClick={handleSaveLogo}
-            className="bg-orange-500 hover:bg-orange-400 text-white px-4 py-2.5 rounded-xl transition text-sm font-medium">
-            {logoSaved ? '✓ Saved!' : 'Save'}
+            onClick={() => setShowPasswordForm(!showPasswordForm)}
+            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+            Settings
+          </button>
+          <button onClick={handleLogout}
+            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+            Logout
           </button>
         </div>
       </div>
 
-      {/* Password Change */}
-      <div>
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
-        <input
-          type="password"
-          placeholder="New password"
-          value={passwordData.newPassword}
-          onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm mb-3" />
-        <input
-          type="password"
-          placeholder="Confirm new password"
-          value={passwordData.confirmPassword}
-          onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-        {passwordMessage && (
-          <p className={`text-sm mt-2 ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
-            {passwordMessage}
-          </p>
-        )}
-        <button
-          onClick={handleChangePassword}
-          className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm mt-3">
-          Update Password
-        </button>
-      </div>
+      {/* Settings Panel */}
+      {showPasswordForm && (
+        <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {/* Logo URL */}
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="https://yourcompany.com/logo.png"
+                  value={logoUrl}
+                  onChange={e => setLogoUrl(e.target.value)}
+                  className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <button
+                  onClick={handleSaveLogo}
+                  className="bg-orange-500 hover:bg-orange-400 text-white px-4 py-2.5 rounded-xl transition text-sm font-medium">
+                  {logoSaved ? '✓ Saved!' : 'Save'}
+                </button>
+              </div>
+            </div>
 
-    </div>
-  </div>
-)}
+            {/* Password Change */}
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
+              <input
+                type="password"
+                placeholder="New password"
+                value={passwordData.newPassword}
+                onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm mb-3" />
+              <input
+                type="password"
+                placeholder="Confirm new password"
+                value={passwordData.confirmPassword}
+                onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              {passwordMessage && (
+                <p className={`text-sm mt-2 ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
+                  {passwordMessage}
+                </p>
+              )}
+              <button
+                onClick={handleChangePassword}
+                className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition text-sm mt-3">
+                Update Password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trial Notice Banner */}
+      {trialInfo && !trialInfo.is_active && (
+        <div className="bg-red-950 border-b border-red-800 px-6 py-3">
+          <p className="text-red-400 text-sm text-center">
+            🔒 Your account has been deactivated. Please contact CoachBoard to continue.
+          </p>
+        </div>
+      )}
+      {trialInfo && trialInfo.is_active && getTrialDaysLeft() !== null && (getTrialDaysLeft() ?? 0) <= 20 && (getTrialDaysLeft() ?? 0) > 0 && (
+        <div className="bg-amber-950 border-b border-amber-800 px-6 py-3">
+          <p className="text-amber-400 text-sm text-center">
+            ⚠️ ⚠️ Trial ends in {getTrialDaysLeft()} day{getTrialDaysLeft() === 1 ? '' : 's'} ({new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.
+          </p>
+        </div>
+      )}
+      {trialInfo && trialInfo.is_active && getTrialDaysLeft() !== null && (getTrialDaysLeft() ?? 0) <= 0 && (
+        <div className="bg-red-950 border-b border-red-800 px-6 py-3">
+          <p className="text-red-400 text-sm text-center">
+            🔒 Your trial has ended. Please contact CoachBoard to activate your account.
+          </p>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto px-6 py-6">
         {/* Stats */}
         <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-8">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Clients</p>
           <p className="text-4xl font-bold text-orange-500">{clients.length}</p>
+          {trialInfo?.trial_end && (getTrialDaysLeft() ?? 0) > 0 && (
+            <p className="text-xs text-gray-500 mt-2">
+              Trial active until {new Date(trialInfo.trial_end).toLocaleDateString()}
+            </p>
+          )}
         </div>
 
         {/* Header row */}
@@ -284,12 +290,10 @@ const handleChangePassword = async () => {
               value={newClient.email}
               onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-
-	<input type="tel" placeholder="Phone number"
-		  value={newClient.phone}
-		  onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
-		  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-
+            <input type="tel" placeholder="Phone number"
+              value={newClient.phone}
+              onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             <input type="password" placeholder="Temporary password"
               value={newClient.password}
               onChange={(e) => setNewClient({ ...newClient, password: e.target.value })}
