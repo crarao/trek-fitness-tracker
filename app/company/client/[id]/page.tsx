@@ -95,7 +95,7 @@ const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
-      .select('*')
+      .select('*, companies:company_id(business_type)')
       .eq('id', clientId)
       .single()
     setClient(clientData)
@@ -171,11 +171,16 @@ const handleGeneratePlan = async () => {
   setShowGeneratedPlan(false)
   setGeneratedPlan('')
 
-  const response = await fetch('/api/generate-plan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profile: client })
+const response = await fetch('/api/generate-plan', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ 
+    profile: {
+      ...client,
+      business_type: (client as any)?.companies?.business_type || 'gym'
+    }
   })
+})
 
   const data = await response.json()
   if (data.plan) {
