@@ -13,6 +13,10 @@ type Company = {
   trial_end: string
   is_active: boolean
   created_at: string
+  feedback_enabled: boolean
+  ai_insights_enabled: boolean
+  session_notes_enabled: boolean
+  notes: string | null
 }
 
 type Client = {
@@ -43,6 +47,9 @@ export default function AdminPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null)
+  const [savingCompany, setSavingCompany] = useState(false)
+  const [editMessage, setEditMessage] = useState('')
 
 
   useEffect(() => { fetchAll() }, [])
@@ -159,6 +166,38 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     await supabase.from('profiles').delete().eq('company_id', companyId)
     await supabase.from('companies').delete().eq('id', companyId)
     fetchAll()
+  }
+
+  const handleSaveCompany = async () => {
+    if (!editingCompany) return
+    setSavingCompany(true)
+    await supabase
+      .from('companies')
+      .update({
+        name: editingCompany.name,
+        email: editingCompany.email,
+        phone: editingCompany.phone,
+        trial_start: editingCompany.trial_start || null,
+        trial_end: editingCompany.trial_end || null,
+        is_active: editingCompany.is_active,
+        feedback_enabled: editingCompany.feedback_enabled,
+        ai_insights_enabled: editingCompany.ai_insights_enabled,
+        session_notes_enabled: editingCompany.session_notes_enabled,
+        notes: editingCompany.notes || null
+      })
+      .eq('id', editingCompany.id)
+    setEditMessage('Saved! ✓')
+    setSavingCompany(false)
+    setTimeout(() => {
+      setEditMessage('')
+      setEditingCompany(null)
+    }, 1500)
+    fetchAll()
+  }
+
+  const handleRemoveTrial = async () => {
+    if (!editingCompany) return
+    setEditingCompany({ ...editingCompany, trial_start: '', trial_end: '' })
   }
 
   return (
@@ -310,45 +349,177 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
             ) : (
               <div className="space-y-2">
                 {companies.map((company) => (
-                  <div key={company.id} className="bg-gray-900 rounded-2xl px-5 py-4 flex justify-between items-center border border-gray-800 hover:border-gray-700 transition">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
-                        <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
+                  <div key={company.id} className="bg-gray-900 rounded-2xl border border-gray-800 hover:border-gray-700 transition overflow-hidden">
+                    {/* Company Row */}
+                    <div className="px-5 py-4 flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
+                          <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-white text-sm">{company.name}</p>
+                          <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
+                          {company.phone && (
+                            <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`text-xs ${company.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                              {company.is_active ? '● Active' : '● Inactive'}
+                            </span>
+                            {company.trial_end && (
+                              <span className="text-xs" style={{
+                                color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
+                              }}>
+                                · {new Date(company.trial_end) < new Date()
+                                  ? 'Trial expired'
+                                  : `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-white text-sm">{company.name}</p>
-                        <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
-                        {company.phone && (
-                          <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
-                        )}
-                        {company.trial_end && (
-                          <p className="text-xs mt-0.5" style={{
-                          color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
-                        }}>
-                        {new Date(company.trial_end) < new Date()
-                          ? '🔒 Trial expired'
-                        : `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`}
-                        </p>
-                        )}
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs text-gray-600">{new Date(company.created_at).toLocaleDateString()}</p>
+                        <button
+                          onClick={() => setEditingCompany(editingCompany?.id === company.id ? null : { ...company })}
+                          className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
+                          {editingCompany?.id === company.id ? 'Close' : 'Edit'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCompany(company.id, company.name)}
+                          className="text-xs text-gray-600 hover:text-red-400 transition">
+                          Delete
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <p className="text-xs text-gray-600">
-                        {new Date(company.created_at).toLocaleDateString()}
-                      </p>
-                      <button
-  onClick={() => handleToggleActive(company.id, company.is_active)}
-  className={`text-xs transition ${company.is_active 
-    ? 'text-gray-600 hover:text-yellow-400' 
-    : 'text-gray-600 hover:text-green-400'}`}>
-  {company.is_active ? 'Deactivate' : 'Activate'}
-</button>
-<button
-  onClick={() => handleDeleteCompany(company.id, company.name)}
-  className="text-xs text-gray-600 hover:text-red-400 transition">
-  Delete
-</button>
-                    </div>
+
+                    {/* Edit Panel */}
+                    {editingCompany?.id === company.id && (
+                      <div className="border-t border-gray-800 px-5 py-5 space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company Name</label>
+                            <input type="text" value={editingCompany.name}
+                              onChange={e => setEditingCompany({ ...editingCompany, name: e.target.value })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Email</label>
+                            <input type="email" value={editingCompany.email}
+                              onChange={e => setEditingCompany({ ...editingCompany, email: e.target.value })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Phone</label>
+                          <input type="tel" value={editingCompany.phone || ''}
+                            onChange={e => setEditingCompany({ ...editingCompany, phone: e.target.value })}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Trial Start</label>
+                            <input type="date" value={editingCompany.trial_start || ''}
+                              onChange={e => setEditingCompany({ ...editingCompany, trial_start: e.target.value })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Trial End</label>
+                            <input type="date" value={editingCompany.trial_end || ''}
+                              onChange={e => setEditingCompany({ ...editingCompany, trial_end: e.target.value })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleRemoveTrial}
+                          className="text-xs text-yellow-500 hover:text-yellow-400 border border-yellow-900 hover:border-yellow-500 px-3 py-1.5 rounded-lg transition">
+                          Remove Trial (Paid Customer)
+                        </button>
+
+                        {/* Toggles */}
+                        <div className="border-t border-gray-800 pt-4 space-y-3">
+                          <p className="text-xs text-gray-500 uppercase tracking-wider">Feature Toggles</p>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm text-white">Client Feedback</p>
+                              <p className="text-xs text-gray-500">Allow coaches to give session feedback</p>
+                            </div>
+                            <button
+                              onClick={() => setEditingCompany({ ...editingCompany, feedback_enabled: !editingCompany.feedback_enabled })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.feedback_enabled
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.feedback_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm text-white">AI Insights</p>
+                              <p className="text-xs text-gray-500">Show AI coaching insights to clients</p>
+                            </div>
+                            <button
+                              onClick={() => setEditingCompany({ ...editingCompany, ai_insights_enabled: !editingCompany.ai_insights_enabled })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.ai_insights_enabled
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.ai_insights_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm text-white">Session Notes</p>
+                              <p className="text-xs text-gray-500">Allow clients to add notes when logging</p>
+                            </div>
+                            <button
+                              onClick={() => setEditingCompany({ ...editingCompany, session_notes_enabled: !editingCompany.session_notes_enabled })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.session_notes_enabled
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.session_notes_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                        </div>
+                        </div>
+
+                        {/* Active/Inactive */}
+                        <div className="border-t border-gray-800 pt-4 flex justify-between items-center">
+                          <div>
+                            <p className="text-sm text-white">Account Status</p>
+                            <p className="text-xs text-gray-500">Activate or deactivate this company</p>
+                          </div>
+                          <button
+                            onClick={() => setEditingCompany({ ...editingCompany, is_active: !editingCompany.is_active })}
+                            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.is_active
+                              ? 'bg-green-950 border-green-700 text-green-400'
+                              : 'bg-red-950 border-red-700 text-red-400'}`}>
+                            {editingCompany.is_active ? 'Active' : 'Inactive'}
+                          </button>
+                        </div>
+
+                        {/* Notes */}
+                        <div className="border-t border-gray-800 pt-4">
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Internal Notes</label>
+                          <textarea
+                            placeholder="e.g. Paid via UPI on 12 Apr, 50 clients, ₹2500/month..."
+                            value={editingCompany.notes || ''}
+                            onChange={e => setEditingCompany({ ...editingCompany, notes: e.target.value })}
+                            rows={3}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+                        </div>
+
+                        {editMessage && (
+                          <p className="text-green-400 text-sm">{editMessage}</p>
+                        )}
+                        <button
+                          onClick={handleSaveCompany}
+                          disabled={savingCompany}
+                          className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                          {savingCompany ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

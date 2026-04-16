@@ -99,7 +99,7 @@ const [profileMessage, setProfileMessage] = useState('')
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name, logo_url)')
+      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled)')
       .eq('id', user.id)
       .single()
 
@@ -547,6 +547,7 @@ const handleChangePassword = async () => {
               </select>
             </div>
 
+            {profile?.companies?.session_notes_enabled !== false && (
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Notes</label>
               <textarea placeholder="How did it go? Any observations..."
@@ -555,6 +556,7 @@ const handleChangePassword = async () => {
                 rows={3}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
             </div>
+            )}
 
             <div>
               <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">How did you feel?</label>
@@ -610,6 +612,7 @@ const handleChangePassword = async () => {
             </div>
 
 {/* AI Insights */}
+{profile?.companies?.ai_insights_enabled !== false && (
 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
   <div className="flex justify-between items-center mb-3">
     <div>
@@ -630,7 +633,7 @@ const handleChangePassword = async () => {
     </p>
   )}
 </div>
-
+)}
 
 
             {chartData && chartData.labels.length >= 1 && (
@@ -719,7 +722,7 @@ const handleChangePassword = async () => {
                     {session.notes && (
                       <p className="text-xs text-gray-400 bg-gray-800 rounded-lg px-3 py-2 mt-2">{session.notes}</p>
                     )}
-                    {fb?.admin_feedback && (
+                    {profile?.companies?.feedback_enabled !== false && fb?.admin_feedback && (
                       <div className="mt-3 bg-orange-950 border border-orange-900 rounded-xl px-3 py-2">
                         <p className="text-xs text-orange-400 font-medium mb-0.5 uppercase tracking-wider">Coach feedback</p>
                         <p className="text-xs text-orange-200">{fb.admin_feedback}</p>

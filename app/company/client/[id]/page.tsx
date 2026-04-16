@@ -103,7 +103,7 @@ const [clientProfileMessage, setClientProfileMessage] = useState('')
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(business_type)')
+      .select('*, companies:company_id(business_type, feedback_enabled)')
       .eq('id', clientId)
       .single()
     setClient(clientData)
@@ -589,6 +589,7 @@ const handleResetPassword = async () => {
                     {session.notes && (
                       <p className="text-xs text-gray-400 mb-3 bg-gray-800 rounded-lg px-3 py-2">{session.notes}</p>
                     )}
+                    {(client as any)?.companies?.feedback_enabled !== false && (
                     <div className="border-t border-gray-800 pt-3">
                       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Your feedback</label>
                       <textarea
@@ -603,6 +604,7 @@ const handleResetPassword = async () => {
                         {savedFeedback[session.id] ? '✓ Saved!' : 'Save Feedback'}
                       </button>
                     </div>
+                    )}
                   </div>
                 )
               })
