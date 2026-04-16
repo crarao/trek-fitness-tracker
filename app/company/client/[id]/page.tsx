@@ -93,6 +93,10 @@ const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
   const [loading, setLoading] = useState(true)
+const [editingClientProfile, setEditingClientProfile] = useState(false)
+const [clientProfileForm, setClientProfileForm] = useState({ trainer_name: '', diet_plan: '' })
+const [savingClientProfile, setSavingClientProfile] = useState(false)
+const [clientProfileMessage, setClientProfileMessage] = useState('')
 
   useEffect(() => { initialize() }, [clientId])
 
@@ -171,6 +175,25 @@ const handleDeletePlan = async (planId: string) => {
   initialize()
 }
 
+
+const handleSaveClientProfile = async () => {
+  setSavingClientProfile(true)
+  const { error } = await supabase
+    .from('profiles')
+    .update({
+      trainer_name: clientProfileForm.trainer_name || null,
+      diet_plan: clientProfileForm.diet_plan || null
+    })
+    .eq('id', clientId)
+  console.log('Save error:', error)
+  console.log('Client ID:', clientId)
+  setClientProfileMessage('Saved! ✓')
+
+  setSavingClientProfile(false)
+  setEditingClientProfile(false)
+  setTimeout(() => setClientProfileMessage(''), 3000)
+  initialize()
+}
 
 const handleGeneratePlan = async () => {
   setGeneratingPlan(true)
@@ -720,16 +743,63 @@ const handleResetPassword = async () => {
         <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
       </div>
 
-      {/* Trainer */}
-      <div className="border-t border-gray-800 pt-4">
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
-        <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
-      </div>
+      {/* Trainer + Diet Plan — Editable */}
+      <div className="border-t border-gray-800 pt-4 space-y-4">
+        <div className="flex justify-between items-center">
+          <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
+          <button
+            onClick={() => {
+              setClientProfileForm({
+                trainer_name: client?.trainer_name || '',
+                diet_plan: client?.diet_plan || ''
+              })
+              setEditingClientProfile(!editingClientProfile)
+            }}
+            className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
+            {editingClientProfile ? 'Cancel' : 'Edit'}
+          </button>
+        </div>
 
-      {/* Diet Plan */}
-      <div className="border-t border-gray-800 pt-4">
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
-        <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
+        {editingClientProfile ? (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Assigned Trainer</label>
+              <input type="text" placeholder="Trainer name"
+                value={clientProfileForm.trainer_name}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, trainer_name: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Diet Plan</label>
+              <textarea
+                placeholder="e.g. High protein breakfast, avoid sugar..."
+                value={clientProfileForm.diet_plan}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, diet_plan: e.target.value })}
+                rows={4}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+            </div>
+            {clientProfileMessage && (
+              <p className="text-green-400 text-sm">{clientProfileMessage}</p>
+            )}
+            <button
+              onClick={handleSaveClientProfile}
+              disabled={savingClientProfile}
+              className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+              {savingClientProfile ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
+              <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
+              <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Contact */}
