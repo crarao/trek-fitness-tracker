@@ -42,12 +42,16 @@ type ClientProfile = {
   emergency_contact_name: string | null
   emergency_contact_phone: string | null
   goal: string | null
+  trainer_name: string | null
+  diet_plan: string | null
+}
 }
 
 type Plan = {
   id: string
   week_start: string
   plan_details: string
+  workout_time: string | null
 }
 
 type Session = {
@@ -75,7 +79,7 @@ export default function ClientDetailPage() {
   const [feedback, setFeedback] = useState<Feedback[]>([])
   const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('plans')
   const [showPlanForm, setShowPlanForm] = useState(false)
-  const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '' })
+  const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '', workout_time: '' })
   const [saving, setSaving] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
@@ -131,9 +135,10 @@ const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
     await supabase.from('weekly_plans').insert({
       client_id: clientId,
       week_start: newPlan.week_start,
-      plan_details: newPlan.plan_details
+      plan_details: newPlan.plan_details,
+      workout_time: newPlan.workout_time || null
     })
-    setNewPlan({ week_start: '', plan_details: '' })
+    setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
     setShowPlanForm(false)
     setSaving(false)
     initialize()
@@ -146,7 +151,8 @@ const handleUpdatePlan = async () => {
     .from('weekly_plans')
     .update({
       week_start: editingPlan.week_start,
-      plan_details: editingPlan.plan_details
+      plan_details: editingPlan.plan_details,
+      workout_time: editingPlan.workout_time || null
     })
     .eq('id', editingPlan.id)
   setEditingPlan(null)
@@ -429,6 +435,12 @@ const handleResetPassword = async () => {
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 </div>
                 <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
+                  <input type="time" value={newPlan.workout_time}
+                    onChange={e => setNewPlan({ ...newPlan, workout_time: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                </div>
+                <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Plan details</label>
                   <textarea
                     placeholder="Mon: 5km run&#10;Tue: Rest&#10;Wed: Gym - squats 3x10..."
@@ -460,6 +472,12 @@ const handleResetPassword = async () => {
           value={editingPlan.week_start}
           onChange={e => setEditingPlan({ ...editingPlan, week_start: e.target.value })}
           className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        <div>
+          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
+          <input type="time" value={editingPlan.workout_time || ''}
+            onChange={e => setEditingPlan({ ...editingPlan, workout_time: e.target.value })}
+            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        </div>
         <textarea
           value={editingPlan.plan_details}
           onChange={e => setEditingPlan({ ...editingPlan, plan_details: e.target.value })}
@@ -485,6 +503,9 @@ const handleResetPassword = async () => {
             <p className="font-semibold text-sm">
               {new Date(plan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
             </p>
+            {plan.workout_time && (
+              <p className="text-xs text-orange-400 mt-1">⏰ {plan.workout_time}</p>
+            )}
           </div>
           <div className="flex gap-2">
             <button
@@ -697,6 +718,18 @@ const handleResetPassword = async () => {
         <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
         <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
         <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
+      </div>
+
+      {/* Trainer */}
+      <div className="border-t border-gray-800 pt-4">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
+        <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
+      </div>
+
+      {/* Diet Plan */}
+      <div className="border-t border-gray-800 pt-4">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
+        <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
       </div>
 
       {/* Contact */}

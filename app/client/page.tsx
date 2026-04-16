@@ -31,6 +31,7 @@ type WeeklyPlan = {
   id: string
   week_start: string
   plan_details: string
+  workout_time: string | null
 }
 
 type Session = {
@@ -484,13 +485,22 @@ const handleChangePassword = async () => {
                 {activePlan && (
                   <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
-                    <p className="text-base font-semibold mb-4">
+                    <p className="text-base font-semibold mb-1">
                       {new Date(activePlan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
                     </p>
+                    {activePlan.workout_time && (
+                      <p className="text-xs text-orange-400 mb-4">⏰ Workout time: {activePlan.workout_time}</p>
+                    )}
                     <div className="border-t border-gray-800 pt-4">
                       <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Plan Details</p>
                       <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">{activePlan.plan_details}</p>
                     </div>
+                    {profile?.diet_plan && (
+                      <div className="border-t border-gray-800 pt-4 mt-4">
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Diet Plan</p>
+                        <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">{profile.diet_plan}</p>
+                      </div>
+                    )}
                     <button
                       onClick={() => { setActiveTab('log'); setNewSession(prev => ({ ...prev, weekly_plan_id: activePlan.id })) }}
                       className="mt-5 w-full bg-orange-500 hover:bg-orange-400 text-white py-2.5 rounded-xl text-sm font-medium transition">

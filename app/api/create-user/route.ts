@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
   )
 
-const { email, password, full_name, company_id, role, phone } = await request.json()
+const { email, password, full_name, company_id, role, phone, trainer_name, diet_plan } = await request.json()
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
@@ -32,7 +32,9 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   full_name,
   email,
   role,
-  phone: phone || null
+  phone: phone || null,
+  trainer_name: trainer_name || null,
+  diet_plan: diet_plan || null
 })
 
   if (profileError) {

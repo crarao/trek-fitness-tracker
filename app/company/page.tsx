@@ -20,7 +20,7 @@ export default function CompanyAdminPage() {
   const [company, setCompany] = useState<any>(null)
   const [trialInfo, setTrialInfo] = useState<{trial_end: string, is_active: boolean} | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '' })
+  const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '' })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
@@ -127,7 +127,9 @@ export default function CompanyAdminPage() {
         full_name: newClient.full_name,
         company_id: companyId,
         role: 'client',
-        phone: newClient.phone
+        phone: newClient.phone,
+        trainer_name: newClient.trainer_name,
+        diet_plan: newClient.diet_plan
       })
     })
 
@@ -139,7 +141,7 @@ export default function CompanyAdminPage() {
     }
 
     setMessage('Client created successfully!')
-    setNewClient({ full_name: '', email: '', password: '', phone: '' })
+    setNewClient({ full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '' })
     setShowForm(false)
     setSaving(false)
     fetchClients(companyId!)
@@ -298,6 +300,15 @@ export default function CompanyAdminPage() {
               value={newClient.password}
               onChange={(e) => setNewClient({ ...newClient, password: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <input type="text" placeholder="Trainer name (optional)"
+              value={newClient.trainer_name}
+              onChange={(e) => setNewClient({ ...newClient, trainer_name: e.target.value })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <textarea placeholder="Diet plan (optional)"
+              value={newClient.diet_plan}
+              onChange={(e) => setNewClient({ ...newClient, diet_plan: e.target.value })}
+              rows={3}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
             {message && (
               <div className="bg-green-950 border border-green-800 rounded-xl px-4 py-3">
                 <p className="text-green-400 text-sm">{message}</p>
