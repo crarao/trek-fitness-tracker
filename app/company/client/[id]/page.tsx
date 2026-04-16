@@ -45,7 +45,7 @@ type ClientProfile = {
   trainer_name: string | null
   diet_plan: string | null
 }
-}
+
 
 type Plan = {
   id: string
