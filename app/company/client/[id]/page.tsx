@@ -82,7 +82,7 @@ export default function ClientDetailPage() {
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '', workout_time: '' })
   const [saving, setSaving] = useState(false)
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
-const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [generatedPlan, setGeneratedPlan] = useState('')
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
@@ -93,10 +93,14 @@ const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
   const [loading, setLoading] = useState(true)
-const [editingClientProfile, setEditingClientProfile] = useState(false)
-const [clientProfileForm, setClientProfileForm] = useState({ trainer_name: '', diet_plan: '' })
-const [savingClientProfile, setSavingClientProfile] = useState(false)
-const [clientProfileMessage, setClientProfileMessage] = useState('')
+  const [showEditClient, setShowEditClient] = useState(false)
+  const [editClientForm, setEditClientForm] = useState({ full_name: '', phone: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingClient, setDeletingClient] = useState(false)
+  const [editingClientProfile, setEditingClientProfile] = useState(false)
+  const [clientProfileForm, setClientProfileForm] = useState({ trainer_name: '', diet_plan: '' })
+  const [savingClientProfile, setSavingClientProfile] = useState(false)
+  const [clientProfileMessage, setClientProfileMessage] = useState('')
 
   useEffect(() => { initialize() }, [clientId])
 
@@ -270,6 +274,32 @@ const handleResetPassword = async () => {
 
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
+  const handleEditClient = async () => {
+    setSavingEdit(true)
+    await supabase
+      .from('profiles')
+      .update({
+        full_name: editClientForm.full_name || null,
+        phone: editClientForm.phone || null
+      })
+      .eq('id', clientId)
+    setSavingEdit(false)
+    setShowEditClient(false)
+    initialize()
+  }
+
+  const handleDeleteClient = async () => {
+    if (!confirm(`Delete ${client?.full_name}? This will remove all their data and cannot be undone.`)) return
+    setDeletingClient(true)
+    await supabase.from('session_feedback').delete().in('session_id',
+      (await supabase.from('logged_sessions').select('id').eq('client_id', clientId)).data?.map(s => s.id) || []
+    )
+    await supabase.from('logged_sessions').delete().eq('client_id', clientId)
+    await supabase.from('weekly_plans').delete().eq('client_id', clientId)
+    await supabase.from('profiles').delete().eq('id', clientId)
+    router.push('/company')
+  }
+
   const getChartData = () => {
     if (sessions.length === 0) return null
     const weekMap: Record<string, { sessions: number, minutes: number }> = {}
@@ -317,13 +347,25 @@ const handleResetPassword = async () => {
             className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
             ← Back
           </button>
-
           <button
             onClick={() => setShowResetPassword(!showResetPassword)}
             className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
             Reset Password
           </button>
-
+          <button
+            onClick={() => {
+              setEditClientForm({ full_name: client?.full_name || '', phone: client?.phone || '' })
+              setShowEditClient(!showEditClient)
+            }}
+            className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
+            Edit
+          </button>
+          <button
+            onClick={handleDeleteClient}
+            disabled={deletingClient}
+            className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
+            {deletingClient ? 'Deleting...' : 'Delete'}
+          </button>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
               <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
@@ -331,13 +373,36 @@ const handleResetPassword = async () => {
             <div>
               <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
               <p className="text-xs text-gray-400">{client?.email}</p>
-{client?.phone && (
-  <p className="text-xs text-gray-400">{client?.phone}</p>
-)}
+              {client?.phone && (
+                <p className="text-xs text-gray-400">{client?.phone}</p>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Edit Client Panel */}
+      {showEditClient && (
+        <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
+          <div className="max-w-2xl mx-auto space-y-3">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Edit Client Details</p>
+            <input type="text" placeholder="Full name"
+              value={editClientForm.full_name}
+              onChange={e => setEditClientForm({ ...editClientForm, full_name: e.target.value })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <input type="tel" placeholder="Phone number"
+              value={editClientForm.phone}
+              onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <button
+              onClick={handleEditClient}
+              disabled={savingEdit}
+              className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+              {savingEdit ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      )}
 
 {showResetPassword && (
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
