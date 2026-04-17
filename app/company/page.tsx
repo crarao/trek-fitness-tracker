@@ -19,7 +19,7 @@ export default function CompanyAdminPage() {
   const [companyName, setCompanyName] = useState('')
   const [company, setCompany] = useState<any>(null)
   const [clientLimit, setClientLimit] = useState<number>(50)
-  const [trialInfo, setTrialInfo] = useState<{trial_end: string, is_active: boolean} | null>(null)
+  const [trialInfo, setTrialInfo] = useState<{trial_end: string, is_active: boolean, is_trial: boolean} | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '' })
   const [saving, setSaving] = useState(false)
@@ -48,7 +48,7 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url, trial_end, is_active, client_limit')
+      .select('name, logo_url, trial_end, is_active, client_limit, is_trial')
       .eq('id', profile.company_id)
       .single()
 
@@ -58,7 +58,8 @@ export default function CompanyAdminPage() {
     console.log('Company data:', company)
     setTrialInfo({
       trial_end: company?.trial_end,
-      is_active: company?.is_active
+      is_active: company?.is_active,
+      is_trial: company?.is_trial ?? true
     })
 
     fetchClients(profile.company_id)
@@ -264,7 +265,7 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* Trial Notice Banner */}
+      {/* Notice Banners */}
       {trialInfo && !trialInfo.is_active && (
         <div className="bg-red-950 border-b border-red-800 px-6 py-3">
           <p className="text-red-400 text-sm text-center">
@@ -273,20 +274,31 @@ export default function CompanyAdminPage() {
         </div>
       )}
       {trialInfo && trialInfo.is_active && getTrialDaysLeft() !== null && (getTrialDaysLeft() ?? 0) <= 20 && (getTrialDaysLeft() ?? 0) > 0 && (
-        <div className="bg-amber-950 border-b border-amber-800 px-6 py-3">
-          <p className="text-amber-400 text-sm text-center">
-            ⚠️ ⚠️ Trial ends in {getTrialDaysLeft()} day{getTrialDaysLeft() === 1 ? '' : 's'} ({new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.
+        <div className={`border-b px-6 py-3 ${trialInfo.is_trial ? 'bg-amber-950 border-amber-800' : 'bg-blue-950 border-blue-800'}`}>
+          <p className={`text-sm text-center ${trialInfo.is_trial ? 'text-amber-400' : 'text-blue-400'}`}>
+            {trialInfo.is_trial
+              ? `⚠️ Trial ends in ${getTrialDaysLeft()} day${getTrialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.`
+              : `📅 Subscription renews in ${getTrialDaysLeft()} day${getTrialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to renew.`}
           </p>
         </div>
       )}
       {trialInfo && trialInfo.is_active && getTrialDaysLeft() !== null && (getTrialDaysLeft() ?? 0) <= 0 && (
         <div className="bg-red-950 border-b border-red-800 px-6 py-3">
           <p className="text-red-400 text-sm text-center">
-            🔒 Your trial has ended. Please contact CoachBoard to activate your account.
+            🔒 {trialInfo.is_trial ? 'Your trial has ended.' : 'Your subscription has expired.'} Please contact CoachBoard to activate your account.
           </p>
         </div>
       )}
 
+      {trialInfo && !trialInfo.is_active ? (
+        <div className="max-w-3xl mx-auto px-6 py-12 text-center">
+          <div className="bg-red-950 border border-red-800 rounded-2xl px-6 py-10">
+            <p className="text-4xl mb-4">🔒</p>
+            <h2 className="text-xl font-bold text-red-400 mb-2">Account Deactivated</h2>
+            <p className="text-red-300 text-sm">Please contact CoachBoard to reactivate your account and continue managing your clients.</p>
+          </div>
+        </div>
+      ) : (
       <div className="max-w-3xl mx-auto px-6 py-6">
         {/* Stats */}
         <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-8">
@@ -303,7 +315,7 @@ export default function CompanyAdminPage() {
           </p>
           {trialInfo?.trial_end && (getTrialDaysLeft() ?? 0) > 0 && (
             <p className="text-xs text-gray-500 mt-2">
-              Trial active until {new Date(trialInfo.trial_end).toLocaleDateString()}
+              {trialInfo.is_trial ? 'Trial' : 'Subscription'} active until {new Date(trialInfo.trial_end).toLocaleDateString()}
             </p>
           )}
         </div>
@@ -387,6 +399,7 @@ export default function CompanyAdminPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

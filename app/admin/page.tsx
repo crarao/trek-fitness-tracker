@@ -17,6 +17,7 @@ type Company = {
   ai_insights_enabled: boolean
   session_notes_enabled: boolean
   client_limit: number
+  is_trial: boolean
   notes: string | null
 }
 
@@ -197,6 +198,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ai_insights_enabled: editingCompany.ai_insights_enabled,
         session_notes_enabled: editingCompany.session_notes_enabled,
         client_limit: editingCompany.client_limit,
+        is_trial: editingCompany.is_trial,
         notes: editingCompany.notes || null
       })
       .eq('id', editingCompany.id)
@@ -211,7 +213,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
   const handleRemoveTrial = async () => {
     if (!editingCompany) return
-    setEditingCompany({ ...editingCompany, trial_start: '', trial_end: '' })
+    setEditingCompany({ ...editingCompany, trial_start: '', trial_end: '', is_trial: false })
   }
 
   return (
@@ -385,8 +387,10 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
                               }}>
                                 · {new Date(company.trial_end) < new Date()
-                                  ? 'Trial expired'
-                                  : `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`}
+                                  ? company.is_trial ? 'Trial expired' : 'Subscription expired'
+                                  : company.is_trial
+                                    ? `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`
+                                    : `Subscription until ${new Date(company.trial_end).toLocaleDateString()}`}
                               </span>
                             )}
                           </div>
