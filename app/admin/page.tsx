@@ -16,6 +16,7 @@ type Company = {
   feedback_enabled: boolean
   ai_insights_enabled: boolean
   session_notes_enabled: boolean
+  client_limit: number
   notes: string | null
 }
 
@@ -195,6 +196,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         feedback_enabled: editingCompany.feedback_enabled,
         ai_insights_enabled: editingCompany.ai_insights_enabled,
         session_notes_enabled: editingCompany.session_notes_enabled,
+        client_limit: editingCompany.client_limit,
         notes: editingCompany.notes || null
       })
       .eq('id', editingCompany.id)
@@ -450,6 +452,13 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           className="text-xs text-yellow-500 hover:text-yellow-400 border border-yellow-900 hover:border-yellow-500 px-3 py-1.5 rounded-lg transition">
                           Remove Trial (Paid Customer)
                         </button>
+
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Client Limit</label>
+                          <input type="number" value={editingCompany.client_limit || 50}
+                            onChange={e => setEditingCompany({ ...editingCompany, client_limit: parseInt(e.target.value) || 50 })}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                        </div>
 
                         {/* Toggles */}
                         <div className="border-t border-gray-800 pt-4 space-y-3">

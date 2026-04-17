@@ -18,6 +18,7 @@ export default function CompanyAdminPage() {
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [company, setCompany] = useState<any>(null)
+  const [clientLimit, setClientLimit] = useState<number>(50)
   const [trialInfo, setTrialInfo] = useState<{trial_end: string, is_active: boolean} | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({ full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '' })
@@ -47,12 +48,13 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url, trial_end, is_active')
+      .select('name, logo_url, trial_end, is_active, client_limit')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
     setCompany(company)
+    setClientLimit(company?.client_limit || 50)
     console.log('Company data:', company)
     setTrialInfo({
       trial_end: company?.trial_end,
@@ -117,6 +119,20 @@ export default function CompanyAdminPage() {
   const handleCreateClient = async () => {
     setSaving(true)
     setMessage('')
+
+    const { count } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', companyId!)
+      .eq('role', 'client')
+
+    console.log('Client count:', count, 'Limit:', clientLimit, 'CompanyId:', companyId)
+
+    if ((count || 0) >= clientLimit) {
+      setMessage(`Client limit reached (${clientLimit}). Contact CoachBoard to increase your limit.`)
+      setSaving(false)
+      return
+    }
 
     const resolvedEmail = newClient.email
       ? newClient.email
@@ -276,6 +292,15 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-8">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Clients</p>
           <p className="text-4xl font-bold text-orange-500">{clients.length}</p>
+          <div className="mt-3 bg-gray-800 rounded-full h-2">
+            <div
+              className={`h-2 rounded-full transition-all ${clients.length >= clientLimit ? 'bg-red-500' : clients.length >= clientLimit * 0.8 ? 'bg-yellow-500' : 'bg-orange-500'}`}
+              style={{ width: `${Math.min((clients.length / clientLimit) * 100, 100)}%` }}
+            />
+          </div>
+          <p className={`text-xs mt-2 ${clients.length >= clientLimit ? 'text-red-400' : 'text-gray-500'}`}>
+            {clients.length} / {clientLimit} clients used
+          </p>
           {trialInfo?.trial_end && (getTrialDaysLeft() ?? 0) > 0 && (
             <p className="text-xs text-gray-500 mt-2">
               Trial active until {new Date(trialInfo.trial_end).toLocaleDateString()}
