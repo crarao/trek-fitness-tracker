@@ -34,7 +34,7 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const companySlug = searchParams.get('company')
 
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -68,11 +68,19 @@ const fetchBranding = async (slug: string) => {
     return defaultTaglines[type] || defaultTaglines.general
   }
 
+  const toEmail = (input: string) => {
+    const cleaned = input.trim()
+    if (/^\d{10}$/.test(cleaned)) {
+      return `${cleaned}@getcoachboard.in`
+    }
+    return cleaned
+  }
+
   const handleLogin = async () => {
     setLoading(true)
     setError('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(identifier), password })
 
     if (error) {
       setError(error.message)
@@ -155,14 +163,14 @@ const fetchBranding = async (slug: string) => {
 
           <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 space-y-4">
             <div>
-              <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Email</label>
+              <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Phone or Email</label>
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
-                placeholder="you@example.com"
+                placeholder="9999999999 or you@example.com"
               />
             </div>
 

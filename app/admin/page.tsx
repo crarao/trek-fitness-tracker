@@ -116,9 +116,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     setSaving(true)
     setMessage('')
 
+    const resolvedEmail = newCompany.email
+      ? newCompany.email
+      : /^\d{10}$/.test(newCompany.phone.trim())
+        ? `${newCompany.phone.trim()}@getcoachboard.in`
+        : ''
+
+    if (!resolvedEmail) {
+      setMessage('Error: Enter a valid email or 10-digit phone number')
+      setSaving(false)
+      return
+    }
+
     const { data: company, error: companyError } = await supabase
   .from('companies')
-  .insert({ name: newCompany.name, email: newCompany.email, phone: newCompany.phone })
+  .insert({ name: newCompany.name, email: resolvedEmail, phone: newCompany.phone })
   .select()
   .single()
 
@@ -132,7 +144,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: newCompany.email,
+        email: resolvedEmail,
         password: newCompany.adminPassword,
         full_name: newCompany.name + ' Admin',
         company_id: company.id,

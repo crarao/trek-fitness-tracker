@@ -118,11 +118,23 @@ export default function CompanyAdminPage() {
     setSaving(true)
     setMessage('')
 
+    const resolvedEmail = newClient.email
+      ? newClient.email
+      : /^\d{10}$/.test(newClient.phone.trim())
+        ? `${newClient.phone.trim()}@getcoachboard.in`
+        : ''
+
+    if (!resolvedEmail) {
+      setMessage('Error: Enter a valid email or 10-digit phone number')
+      setSaving(false)
+      return
+    }
+
     const response = await fetch('/api/create-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: newClient.email,
+        email: resolvedEmail,
         password: newClient.password,
         full_name: newClient.full_name,
         company_id: companyId,
@@ -288,13 +300,13 @@ export default function CompanyAdminPage() {
               value={newClient.full_name}
               onChange={(e) => setNewClient({ ...newClient, full_name: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-            <input type="email" placeholder="Email address"
-              value={newClient.email}
-              onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-            <input type="tel" placeholder="Phone number"
+            <input type="tel" placeholder="Phone number (10 digits) — used for login"
               value={newClient.phone}
               onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <input type="email" placeholder="Email address (optional — if provided, used for login)"
+              value={newClient.email}
+              onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             <input type="password" placeholder="Temporary password"
               value={newClient.password}
