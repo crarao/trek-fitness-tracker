@@ -86,6 +86,8 @@ export default function CompanyAdminPage() {
   const [logoUrl, setLogoUrl] = useState('')
   const [logoSaved, setLogoSaved] = useState(false)
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'expiring' | 'expired'>('all')
+  const [showSettingsPasswords, setShowSettingsPasswords] = useState(false)
+  const [showNewClientPassword, setShowNewClientPassword] = useState(false)
 
   useEffect(() => { initialize() }, [])
 
@@ -292,31 +294,31 @@ export default function CompanyAdminPage() {
     <div className="min-h-screen bg-gray-950 text-white">
 
       {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-8 py-4">
-        <div className="flex justify-between items-center">
+      <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
+        <div className="flex flex-wrap justify-between items-center gap-3">
           <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
-              <span className="text-sm text-gray-400 bg-gray-800 border border-gray-700 rounded-full px-3 py-1 flex items-center gap-1.5">
-                <span className="w-2 h-2 bg-green-500 rounded-full inline-block" />
-                {clients.length} members
+            <div className="flex items-center gap-2 mb-1">
+              <h1 className="text-xl sm:text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
+              <span className="text-xs text-gray-400 bg-gray-800 border border-gray-700 rounded-full px-2.5 py-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block" />
+                {clients.length}
               </span>
             </div>
             <p className="text-xs text-gray-500">Company Admin</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Settings
             </button>
             <button onClick={handleLogout}
-              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Logout
             </button>
             <button
               onClick={() => setShowForm(!showForm)}
-              className="bg-white hover:bg-gray-100 text-gray-900 text-sm px-4 py-2 rounded-lg transition font-medium">
+              className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
               + Add Member
             </button>
           </div>
@@ -325,7 +327,7 @@ export default function CompanyAdminPage() {
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="mx-8 mt-4 mb-0 bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
+        <div className="mx-4 sm:mx-8 mt-4 mb-0 bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
             <div className="flex gap-2">
@@ -340,11 +342,20 @@ export default function CompanyAdminPage() {
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
-            <input type="password" placeholder="New password"
-              value={passwordData.newPassword}
-              onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-              className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm mb-2 placeholder-gray-600" />
-            <input type="password" placeholder="Confirm new password"
+            <div className="relative">
+              <input type={showSettingsPasswords ? 'text' : 'password'} placeholder="New password"
+                value={passwordData.newPassword}
+                onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 pr-10 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm mb-2 placeholder-gray-600" />
+              <button type="button" onClick={() => setShowSettingsPasswords(!showSettingsPasswords)}
+                className="absolute right-3 top-3 text-gray-500 hover:text-gray-300 transition">
+                {showSettingsPasswords
+                  ? <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                  : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                }
+              </button>
+            </div>
+            <input type={showSettingsPasswords ? 'text' : 'password'} placeholder="Confirm new password"
               value={passwordData.confirmPassword}
               onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
@@ -361,7 +372,7 @@ export default function CompanyAdminPage() {
 
       {/* Subscription banners */}
       {trialInfo?.is_active && (trialDaysLeft() ?? 0) > 0 && (trialDaysLeft() ?? 0) <= 20 && (
-        <div className="mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3">
+        <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3">
           <p className="text-amber-400 text-sm">
             {trialInfo.is_trial
               ? `⚠️ Trial ends in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.`
@@ -370,7 +381,7 @@ export default function CompanyAdminPage() {
         </div>
       )}
       {trialInfo?.is_active && (trialDaysLeft() ?? 0) <= 0 && (
-        <div className="mx-8 mt-4 bg-red-950 border border-red-800 rounded-xl px-5 py-3">
+        <div className="mx-4 sm:mx-8 mt-4 bg-red-950 border border-red-800 rounded-xl px-5 py-3">
           <p className="text-red-400 text-sm">
             🔒 {trialInfo.is_trial ? 'Your trial has ended.' : 'Your subscription has expired.'} Contact CoachBoard to reactivate.
           </p>
@@ -379,7 +390,7 @@ export default function CompanyAdminPage() {
 
       {/* Expired members alert */}
       {expiredClients.length > 0 && (
-        <div className="mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
+        <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
           <span className="text-amber-500 text-lg mt-0.5">⚠</span>
           <div>
             <p className="text-amber-400 font-semibold text-sm">
@@ -393,7 +404,7 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      <div className="px-8 py-6">
+      <div className="px-4 sm:px-8 py-6">
 
         {/* Add Member Form */}
         {showForm && (
@@ -412,10 +423,19 @@ export default function CompanyAdminPage() {
                 value={newClient.email}
                 onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                 className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-              <input type="password" placeholder="Temporary password"
-                value={newClient.password}
-                onChange={e => setNewClient({ ...newClient, password: e.target.value })}
-                className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+              <div className="col-span-2 relative">
+                <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
+                  value={newClient.password}
+                  onChange={e => setNewClient({ ...newClient, password: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 pr-10 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                <button type="button" onClick={() => setShowNewClientPassword(!showNewClientPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
+                  {showNewClientPassword
+                    ? <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                    : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  }
+                </button>
+              </div>
               <select
                 value={newClient.plan_type}
                 onChange={e => setNewClient({ ...newClient, plan_type: e.target.value })}
@@ -473,12 +493,12 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
 
           {/* Table toolbar */}
-          <div className="px-6 py-4 flex justify-between items-center border-b border-gray-800">
-            <h2 className="font-semibold text-white">Members — {companyName}</h2>
-            <div className="flex gap-1">
+          <div className="px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3 border-b border-gray-800">
+            <h2 className="font-semibold text-white text-sm sm:text-base">Members — {companyName}</h2>
+            <div className="flex gap-1 flex-wrap">
               {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
                 <button key={f} onClick={() => setActiveFilter(f)}
-                  className={`text-sm px-3 py-1.5 rounded-lg transition font-medium ${
+                  className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
                     activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
                   }`}>
                   {f.charAt(0).toUpperCase() + f.slice(1)}
@@ -500,12 +520,12 @@ export default function CompanyAdminPage() {
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
-                  <th className="px-6 py-3 text-left font-medium">Member</th>
-                  <th className="px-4 py-3 text-left font-medium">Plan</th>
-                  <th className="px-4 py-3 text-left font-medium">Paid</th>
-                  <th className="px-4 py-3 text-left font-medium">Start → End</th>
+                  <th className="px-4 sm:px-6 py-3 text-left font-medium">Member</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
+                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
                   <th className="px-4 py-3 text-left font-medium">Status</th>
-                  <th className="px-4 py-3 text-left font-medium">Days Left</th>
+                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Days Left</th>
                   <th className="px-4 py-3 text-left font-medium">Action</th>
                 </tr>
               </thead>
@@ -529,14 +549,27 @@ export default function CompanyAdminPage() {
                     none:     { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
                   }[status]
 
+                  const handleAction = () => {
+                    const phone = client.phone?.replace(/\D/g, '')
+                    if (status === 'expiring' && phone?.length === 10) {
+                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? new Date(m.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}. Renew now to keep going! 💪`
+                      window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                    } else if (status === 'expired' && phone?.length === 10) {
+                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
+                      window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                    } else {
+                      router.push(`/company/client/${client.id}`)
+                    }
+                  }
+
                   return (
                     <tr key={client.id}
                       className="hover:bg-gray-800/50 transition cursor-pointer"
                       onClick={() => router.push(`/company/client/${client.id}`)}>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 ${avatarColor(index)} rounded-full flex items-center justify-center flex-shrink-0`}>
-                            <span className="text-white text-sm font-bold">{initials(client.full_name)}</span>
+                          <div className={`w-8 h-8 sm:w-9 sm:h-9 ${avatarColor(index)} rounded-full flex items-center justify-center flex-shrink-0`}>
+                            <span className="text-white text-xs sm:text-sm font-bold">{initials(client.full_name)}</span>
                           </div>
                           <div>
                             <p className="font-medium text-white text-sm">{client.full_name}</p>
@@ -544,11 +577,11 @@ export default function CompanyAdminPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
-                      <td className="px-4 py-4 text-sm font-medium text-white">
+                      <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
+                      <td className="hidden sm:table-cell px-4 py-4 text-sm font-medium text-white">
                         {m ? `₹${Number(m.amount_paid).toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td className="px-4 py-4 text-sm text-gray-400">
+                      <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
                         {m ? `${fmtDate(m.start_date)} → ${fmtDate(m.end_date)}` : '—'}
                       </td>
                       <td className="px-4 py-4">
@@ -559,7 +592,7 @@ export default function CompanyAdminPage() {
                           </span>
                         ) : <span className="text-gray-600 text-sm">—</span>}
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="hidden lg:table-cell px-4 py-4">
                         {days !== null && m ? (
                           <div>
                             <p className={`text-sm font-semibold mb-1 ${statusStyle.days}`}>
@@ -574,7 +607,7 @@ export default function CompanyAdminPage() {
                       </td>
                       <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
                         <button
-                          onClick={() => router.push(`/company/client/${client.id}`)}
+                          onClick={handleAction}
                           className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${actionStyle.cls}`}>
                           {actionStyle.label}
                         </button>

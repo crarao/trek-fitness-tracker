@@ -47,6 +47,14 @@ type ClientProfile = {
 }
 
 
+type Membership = {
+  id: string
+  plan_type: string
+  amount_paid: number
+  start_date: string
+  end_date: string
+}
+
 type Plan = {
   id: string
   week_start: string
@@ -92,10 +100,19 @@ export default function ClientDetailPage() {
   const [newPassword, setNewPassword] = useState('')
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
+  const [showResetPasswordValue, setShowResetPasswordValue] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [memberships, setMemberships] = useState<Membership[]>([])
+  const [companyId, setCompanyId] = useState<string | null>(null)
   const [showEditClient, setShowEditClient] = useState(false)
-  const [editClientForm, setEditClientForm] = useState({ full_name: '', phone: '' })
+  const [editClientForm, setEditClientForm] = useState({
+    full_name: '', phone: '',
+    plan_type: '1 Month', amount_paid: '',
+    start_date: new Date().toISOString().split('T')[0], end_date: ''
+  })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [savingMembership, setSavingMembership] = useState(false)
+  const [membershipMessage, setMembershipMessage] = useState('')
   const [deletingClient, setDeletingClient] = useState(false)
   const [editingClientProfile, setEditingClientProfile] = useState(false)
   const [clientProfileForm, setClientProfileForm] = useState({ trainer_name: '', diet_plan: '' })
@@ -104,6 +121,17 @@ export default function ClientDetailPage() {
 
   useEffect(() => { initialize() }, [clientId])
 
+  useEffect(() => {
+    if (!editClientForm.start_date) return
+    const start = new Date(editClientForm.start_date)
+    const end = new Date(start)
+    if (editClientForm.plan_type === '1 Month') end.setMonth(end.getMonth() + 1)
+    else if (editClientForm.plan_type === '3 Months') end.setMonth(end.getMonth() + 3)
+    else if (editClientForm.plan_type === '6 Months') end.setMonth(end.getMonth() + 6)
+    else if (editClientForm.plan_type === '1 Year') end.setFullYear(end.getFullYear() + 1)
+    setEditClientForm(prev => ({ ...prev, end_date: end.toISOString().split('T')[0] }))
+  }, [editClientForm.plan_type, editClientForm.start_date])
+
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
@@ -111,6 +139,14 @@ export default function ClientDetailPage() {
       .eq('id', clientId)
       .single()
     setClient(clientData)
+    if (clientData?.company_id) setCompanyId(clientData.company_id)
+
+    const { data: membershipsData } = await supabase
+      .from('memberships')
+      .select('*')
+      .eq('profile_id', clientId)
+      .order('start_date', { ascending: false })
+    setMemberships(membershipsData || [])
 
     const { data: plansData } = await supabase
       .from('weekly_plans')
@@ -288,6 +324,39 @@ const handleResetPassword = async () => {
     initialize()
   }
 
+  const handleRenewMembership = async () => {
+    if (!companyId) return
+    setSavingMembership(true)
+    await supabase.from('memberships').insert({
+      profile_id: clientId,
+      company_id: companyId,
+      plan_type: editClientForm.plan_type,
+      amount_paid: parseFloat(editClientForm.amount_paid) || 0,
+      start_date: editClientForm.start_date,
+      end_date: editClientForm.end_date
+    })
+    setMembershipMessage('Membership renewed! ✓')
+    setSavingMembership(false)
+    setTimeout(() => setMembershipMessage(''), 3000)
+    initialize()
+  }
+
+  const handleCorrectMembership = async () => {
+    const latest = memberships[0]
+    if (!latest) return
+    setSavingMembership(true)
+    await supabase.from('memberships').update({
+      plan_type: editClientForm.plan_type,
+      amount_paid: parseFloat(editClientForm.amount_paid) || 0,
+      start_date: editClientForm.start_date,
+      end_date: editClientForm.end_date
+    }).eq('id', latest.id)
+    setMembershipMessage('Membership corrected! ✓')
+    setSavingMembership(false)
+    setTimeout(() => setMembershipMessage(''), 3000)
+    initialize()
+  }
+
   const handleDeleteClient = async () => {
     if (!confirm(`Delete ${client?.full_name}? This will remove all their data and cannot be undone.`)) return
     setDeletingClient(true)
@@ -354,7 +423,15 @@ const handleResetPassword = async () => {
           </button>
           <button
             onClick={() => {
-              setEditClientForm({ full_name: client?.full_name || '', phone: client?.phone || '' })
+              const latest = memberships[0]
+              setEditClientForm({
+                full_name: client?.full_name || '',
+                phone: client?.phone || '',
+                plan_type: latest?.plan_type || '1 Month',
+                amount_paid: latest?.amount_paid?.toString() || '',
+                start_date: latest?.start_date || new Date().toISOString().split('T')[0],
+                end_date: latest?.end_date || ''
+              })
               setShowEditClient(!showEditClient)
             }}
             className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
@@ -383,9 +460,11 @@ const handleResetPassword = async () => {
 
       {/* Edit Client Panel */}
       {showEditClient && (
-        <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
-          <div className="max-w-2xl mx-auto space-y-3">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Edit Client Details</p>
+        <div className="bg-gray-900 border-b border-gray-800 px-6 py-5">
+          <div className="max-w-2xl mx-auto space-y-4">
+
+            {/* Client details */}
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Client Details</p>
             <input type="text" placeholder="Full name"
               value={editClientForm.full_name}
               onChange={e => setEditClientForm({ ...editClientForm, full_name: e.target.value })}
@@ -398,8 +477,70 @@ const handleResetPassword = async () => {
               onClick={handleEditClient}
               disabled={savingEdit}
               className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-              {savingEdit ? 'Saving...' : 'Save Changes'}
+              {savingEdit ? 'Saving...' : 'Save Name / Phone'}
             </button>
+
+            {/* Membership */}
+            <div className="border-t border-gray-800 pt-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Membership</p>
+                {memberships[0] && (
+                  <span className="text-xs text-gray-600">
+                    Current: {memberships[0].plan_type} · ends {new Date(memberships[0].end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <select
+                  value={editClientForm.plan_type}
+                  onChange={e => setEditClientForm({ ...editClientForm, plan_type: e.target.value })}
+                  className="bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  <option>1 Month</option>
+                  <option>3 Months</option>
+                  <option>6 Months</option>
+                  <option>1 Year</option>
+                </select>
+                <input type="number" placeholder="Amount paid (₹)"
+                  value={editClientForm.amount_paid}
+                  onChange={e => setEditClientForm({ ...editClientForm, amount_paid: e.target.value })}
+                  className="bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
+                  <input type="date"
+                    value={editClientForm.start_date}
+                    onChange={e => setEditClientForm({ ...editClientForm, start_date: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">End Date (auto)</label>
+                  <input type="date"
+                    value={editClientForm.end_date}
+                    onChange={e => setEditClientForm({ ...editClientForm, end_date: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                </div>
+              </div>
+              {membershipMessage && (
+                <p className="text-green-400 text-sm">{membershipMessage}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleRenewMembership}
+                  disabled={savingMembership}
+                  className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                  {savingMembership ? 'Saving...' : 'Renew Membership'}
+                </button>
+                {memberships[0] && (
+                  <button
+                    onClick={handleCorrectMembership}
+                    disabled={savingMembership}
+                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                    Correct Current
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-600">Renew adds a new entry (keeps history). Correct updates the current entry (for fixing mistakes).</p>
+            </div>
+
           </div>
         </div>
       )}
@@ -408,12 +549,21 @@ const handleResetPassword = async () => {
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
     <div className="max-w-2xl mx-auto space-y-3">
       <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Reset Client Password</p>
-      <input
-        type="password"
-        placeholder="New password for client"
-        value={newPassword}
-        onChange={e => setNewPassword(e.target.value)}
-        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+      <div className="relative">
+        <input
+          type={showResetPasswordValue ? 'text' : 'password'}
+          placeholder="New password for client"
+          value={newPassword}
+          onChange={e => setNewPassword(e.target.value)}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 pr-10 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        <button type="button" onClick={() => setShowResetPasswordValue(!showResetPasswordValue)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
+          {showResetPasswordValue
+            ? <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+            : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          }
+        </button>
+      </div>
       {resetMessage && (
         <p className={`text-sm ${resetMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>
           {resetMessage}
