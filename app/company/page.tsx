@@ -272,6 +272,30 @@ export default function CompanyAdminPage() {
     expired: clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired').length,
   }
 
+  const expiringSoonCount = clients.filter(c => {
+    const m = latestMembership(c.memberships)
+    if (!m) return false
+    const d = daysLeft(m.end_date)
+    return d >= 0 && d <= 7
+  }).length
+
+  const allMemberships = clients.flatMap(c => c.memberships)
+  const now = new Date()
+  const thisMonth = now.getMonth()
+  const thisYear = now.getFullYear()
+  const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1
+  const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear
+
+  const thisMonthRevenue = allMemberships
+    .filter(m => { const d = new Date(m.start_date); return d.getMonth() === thisMonth && d.getFullYear() === thisYear })
+    .reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0)
+
+  const lastMonthRevenue = allMemberships
+    .filter(m => { const d = new Date(m.start_date); return d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear })
+    .reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0)
+
+  const revenueChange = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
 
   const filteredClients = activeFilter === 'all'
@@ -403,6 +427,86 @@ export default function CompanyAdminPage() {
           </div>
         </div>
       )}
+
+      {/* Stat cards */}
+      <div className="px-4 sm:px-8 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Members</p>
+          <p className="text-3xl font-bold text-white">{clients.length}</p>
+          <p className="text-xs text-gray-600 mt-1">All statuses</p>
+        </div>
+        <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
+          <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
+          <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
+        </div>
+        <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expired</p>
+          <p className="text-3xl font-bold text-red-400">{statusCounts.expired}</p>
+          <p className="text-xs text-gray-600 mt-1">Not renewed</p>
+        </div>
+        <div className="bg-gray-900 border border-green-900/50 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">This Month</p>
+          <p className="text-3xl font-bold text-green-400">
+            ₹{thisMonthRevenue >= 100000
+              ? `${(thisMonthRevenue / 100000).toFixed(1)}L`
+              : thisMonthRevenue >= 1000
+              ? `${(thisMonthRevenue / 1000).toFixed(1)}K`
+              : thisMonthRevenue.toLocaleString('en-IN')}
+          </p>
+          {revenueChange !== null ? (
+            <p className={`text-xs mt-1 font-medium ${revenueChange >= 0 ? 'text-green-500' : 'text-red-400'}`}>
+              {revenueChange >= 0 ? '↑' : '↓'} {Math.abs(revenueChange)}% vs last month
+            </p>
+          ) : (
+            <p className="text-xs text-gray-600 mt-1">
+              {new Date().toLocaleString('en-IN', { month: 'long' })}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Plan breakdown */}
+      <div className="px-4 sm:px-8 pt-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Plan Breakdown <span className="normal-case text-gray-600">(active + expiring)</span></p>
+          {(() => {
+            const activeMemberships = clients
+              .filter(c => ['active', 'expiring'].includes(membershipStatus(latestMembership(c.memberships))))
+              .map(c => latestMembership(c.memberships)!)
+            const total = activeMemberships.length
+            const planOrder = ['1 Month', '3 Months', '6 Months', '1 Year']
+            const planColors: Record<string, string> = {
+              '1 Month': 'bg-blue-500', '3 Months': 'bg-teal-500',
+              '6 Months': 'bg-green-500', '1 Year': 'bg-emerald-400'
+            }
+            const counts = planOrder.map(plan => ({
+              plan,
+              count: activeMemberships.filter(m => m.plan_type === plan).length
+            })).filter(p => p.count > 0)
+
+            if (total === 0) return <p className="text-xs text-gray-600">No active members yet.</p>
+
+            return (
+              <div className="space-y-2.5">
+                {counts.map(({ plan, count }) => {
+                  const pct = Math.round((count / total) * 100)
+                  return (
+                    <div key={plan} className="flex items-center gap-3">
+                      <p className="text-xs text-gray-400 w-20 flex-shrink-0">{plan}</p>
+                      <div className="flex-1 bg-gray-800 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${planColors[plan] || 'bg-gray-500'}`}
+                          style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-xs text-gray-400 w-16 text-right flex-shrink-0">{count} <span className="text-gray-600">({pct}%)</span></p>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+        </div>
+      </div>
 
       <div className="px-4 sm:px-8 py-6">
 
