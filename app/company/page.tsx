@@ -278,10 +278,10 @@ export default function CompanyAdminPage() {
 
   if (trialInfo && !trialInfo.is_active) {
     return (
-      <div className="min-h-screen bg-stone-100 flex items-center justify-center">
-        <div className="bg-white border border-red-200 rounded-2xl px-8 py-12 text-center max-w-md">
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="bg-gray-900 border border-red-800 rounded-2xl px-8 py-12 text-center max-w-md">
           <p className="text-4xl mb-4">🔒</p>
-          <h2 className="text-xl font-bold text-red-600 mb-2">Account Deactivated</h2>
+          <h2 className="text-xl font-bold text-red-400 mb-2">Account Deactivated</h2>
           <p className="text-gray-500 text-sm">Please contact CoachBoard to reactivate your account.</p>
         </div>
       </div>
@@ -289,34 +289,34 @@ export default function CompanyAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-100">
+    <div className="min-h-screen bg-gray-950 text-white">
 
       {/* Header */}
-      <div className="px-8 pt-8 pb-4">
-        <div className="flex justify-between items-start">
+      <div className="bg-gray-900 border-b border-gray-800 px-8 py-4">
+        <div className="flex justify-between items-center">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-3xl font-bold text-gray-900">{companyName || 'CoachBoard'}</h1>
-              <span className="text-sm text-gray-600 bg-white border border-gray-200 rounded-full px-3 py-1 flex items-center gap-1.5">
+              <h1 className="text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
+              <span className="text-sm text-gray-400 bg-gray-800 border border-gray-700 rounded-full px-3 py-1 flex items-center gap-1.5">
                 <span className="w-2 h-2 bg-green-500 rounded-full inline-block" />
                 {clients.length} members
               </span>
             </div>
-            <p className="text-sm text-gray-400">Company Admin</p>
+            <p className="text-xs text-gray-500">Company Admin</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-sm text-gray-500 hover:text-gray-800 border border-gray-300 bg-white px-3 py-1.5 rounded-lg transition">
+              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Settings
             </button>
             <button onClick={handleLogout}
-              className="text-sm text-gray-500 hover:text-gray-800 border border-gray-300 bg-white px-3 py-1.5 rounded-lg transition">
+              className="text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Logout
             </button>
             <button
               onClick={() => setShowForm(!showForm)}
-              className="bg-gray-900 hover:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
+              className="bg-white hover:bg-gray-100 text-gray-900 text-sm px-4 py-2 rounded-lg transition font-medium">
               + Add Member
             </button>
           </div>
@@ -325,34 +325,34 @@ export default function CompanyAdminPage() {
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="mx-8 mb-4 bg-white border border-gray-200 rounded-2xl p-5 space-y-5">
+        <div className="mx-8 mt-4 mb-0 bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
           <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Company Logo URL</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
             <div className="flex gap-2">
               <input type="text" placeholder="https://yourcompany.com/logo.png"
                 value={logoUrl} onChange={e => setLogoUrl(e.target.value)}
-                className="flex-1 bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <button onClick={handleSaveLogo}
-                className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2.5 rounded-lg transition text-sm font-medium">
+                className="bg-white hover:bg-gray-100 text-gray-900 px-4 py-2.5 rounded-lg transition text-sm font-medium">
                 {logoSaved ? '✓ Saved' : 'Save'}
               </button>
             </div>
           </div>
           <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Change Password</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
             <input type="password" placeholder="New password"
               value={passwordData.newPassword}
               onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-              className="w-full bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm mb-2" />
+              className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm mb-2 placeholder-gray-600" />
             <input type="password" placeholder="Confirm new password"
               value={passwordData.confirmPassword}
               onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-              className="w-full bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+              className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
             {passwordMessage && (
-              <p className={`text-sm mt-2 ${passwordMessage.includes('✓') ? 'text-green-600' : 'text-red-500'}`}>{passwordMessage}</p>
+              <p className={`text-sm mt-2 ${passwordMessage.includes('✓') ? 'text-green-400' : 'text-red-400'}`}>{passwordMessage}</p>
             )}
             <button onClick={handleChangePassword}
-              className="w-full bg-gray-900 hover:bg-gray-700 text-white font-semibold py-2.5 rounded-lg transition text-sm mt-3">
+              className="w-full bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition text-sm mt-3">
               Update Password
             </button>
           </div>
@@ -361,8 +361,8 @@ export default function CompanyAdminPage() {
 
       {/* Subscription banners */}
       {trialInfo?.is_active && (trialDaysLeft() ?? 0) > 0 && (trialDaysLeft() ?? 0) <= 20 && (
-        <div className="mx-8 mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3">
-          <p className="text-amber-700 text-sm">
+        <div className="mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3">
+          <p className="text-amber-400 text-sm">
             {trialInfo.is_trial
               ? `⚠️ Trial ends in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.`
               : `📅 Subscription renews in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to renew.`}
@@ -370,8 +370,8 @@ export default function CompanyAdminPage() {
         </div>
       )}
       {trialInfo?.is_active && (trialDaysLeft() ?? 0) <= 0 && (
-        <div className="mx-8 mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3">
-          <p className="text-red-600 text-sm">
+        <div className="mx-8 mt-4 bg-red-950 border border-red-800 rounded-xl px-5 py-3">
+          <p className="text-red-400 text-sm">
             🔒 {trialInfo.is_trial ? 'Your trial has ended.' : 'Your subscription has expired.'} Contact CoachBoard to reactivate.
           </p>
         </div>
@@ -379,13 +379,13 @@ export default function CompanyAdminPage() {
 
       {/* Expired members alert */}
       {expiredClients.length > 0 && (
-        <div className="mx-8 mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex items-start gap-3">
+        <div className="mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
           <span className="text-amber-500 text-lg mt-0.5">⚠</span>
           <div>
-            <p className="text-amber-800 font-semibold text-sm">
+            <p className="text-amber-400 font-semibold text-sm">
               {expiredClients.length} membership{expiredClients.length > 1 ? 's' : ''} expired
             </p>
-            <p className="text-amber-600 text-sm">
+            <p className="text-amber-500 text-sm">
               {expiredClients.slice(0, 3).map(c => c.full_name.split(' ')[0]).join(', ')}
               {expiredClients.length > 3 ? ` and ${expiredClients.length - 3} more` : ''} — follow up before they leave.
             </p>
@@ -393,33 +393,33 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      <div className="px-8 pb-8">
+      <div className="px-8 py-6">
 
         {/* Add Member Form */}
         {showForm && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6">
-            <h3 className="font-semibold text-gray-900 mb-4">New Member</h3>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
+            <h3 className="font-semibold text-white mb-4">New Member</h3>
             <div className="grid grid-cols-2 gap-3">
               <input type="text" placeholder="Full name"
                 value={newClient.full_name}
                 onChange={e => setNewClient({ ...newClient, full_name: e.target.value })}
-                className="col-span-2 bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <input type="tel" placeholder="Phone number (10 digits)"
                 value={newClient.phone}
                 onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
-                className="bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <input type="email" placeholder="Email (optional)"
                 value={newClient.email}
                 onChange={e => setNewClient({ ...newClient, email: e.target.value })}
-                className="bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <input type="password" placeholder="Temporary password"
                 value={newClient.password}
                 onChange={e => setNewClient({ ...newClient, password: e.target.value })}
-                className="col-span-2 bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <select
                 value={newClient.plan_type}
                 onChange={e => setNewClient({ ...newClient, plan_type: e.target.value })}
-                className="bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm">
+                className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
                 <option>1 Month</option>
                 <option>3 Months</option>
                 <option>6 Months</option>
@@ -428,41 +428,41 @@ export default function CompanyAdminPage() {
               <input type="number" placeholder="Amount paid (₹)"
                 value={newClient.amount_paid}
                 onChange={e => setNewClient({ ...newClient, amount_paid: e.target.value })}
-                className="bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Start Date</label>
+                <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
                 <input type="date"
                   value={newClient.start_date}
                   onChange={e => setNewClient({ ...newClient, start_date: e.target.value })}
-                  className="w-full bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">End Date (auto-calculated)</label>
+                <label className="text-xs text-gray-500 mb-1 block">End Date (auto-calculated)</label>
                 <input type="date"
                   value={newClient.end_date}
                   onChange={e => setNewClient({ ...newClient, end_date: e.target.value })}
-                  className="w-full bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                  className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
               </div>
               <input type="text" placeholder="Trainer name (optional)"
                 value={newClient.trainer_name}
                 onChange={e => setNewClient({ ...newClient, trainer_name: e.target.value })}
-                className="bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm" />
+                className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
               <textarea placeholder="Diet plan (optional)"
                 value={newClient.diet_plan}
                 onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
                 rows={2}
-                className="col-span-2 bg-gray-50 text-gray-900 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-gray-900 border border-gray-200 text-sm resize-none" />
+                className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
             </div>
             {message && (
-              <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-500' : 'text-green-600'}`}>{message}</p>
+              <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>
             )}
             <div className="flex gap-2 mt-4">
               <button onClick={handleCreateClient} disabled={saving}
-                className="flex-1 bg-gray-900 hover:bg-gray-700 text-white font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
+                className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
                 {saving ? 'Creating...' : 'Create Member'}
               </button>
               <button onClick={() => { setShowForm(false); setMessage('') }}
-                className="px-4 py-2.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 text-sm transition">
+                className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">
                 Cancel
               </button>
             </div>
@@ -470,16 +470,16 @@ export default function CompanyAdminPage() {
         )}
 
         {/* Members Table */}
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
 
           {/* Table toolbar */}
-          <div className="px-6 py-4 flex justify-between items-center border-b border-gray-100">
-            <h2 className="font-semibold text-gray-900">Members — {companyName}</h2>
+          <div className="px-6 py-4 flex justify-between items-center border-b border-gray-800">
+            <h2 className="font-semibold text-white">Members — {companyName}</h2>
             <div className="flex gap-1">
               {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
                 <button key={f} onClick={() => setActiveFilter(f)}
                   className={`text-sm px-3 py-1.5 rounded-lg transition font-medium ${
-                    activeFilter === f ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'
+                    activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
                   }`}>
                   {f.charAt(0).toUpperCase() + f.slice(1)}
                   {f !== 'all' && (
@@ -491,15 +491,15 @@ export default function CompanyAdminPage() {
           </div>
 
           {loading ? (
-            <div className="px-6 py-12 text-center text-gray-400 text-sm">Loading...</div>
+            <div className="px-6 py-12 text-center text-gray-500 text-sm">Loading...</div>
           ) : filteredClients.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-400 text-sm">
+            <div className="px-6 py-12 text-center text-gray-500 text-sm">
               {clients.length === 0 ? 'No members yet. Add your first one!' : `No ${activeFilter} members.`}
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="text-xs text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
                   <th className="px-6 py-3 text-left font-medium">Member</th>
                   <th className="px-4 py-3 text-left font-medium">Plan</th>
                   <th className="px-4 py-3 text-left font-medium">Paid</th>
@@ -509,29 +509,29 @@ export default function CompanyAdminPage() {
                   <th className="px-4 py-3 text-left font-medium">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="divide-y divide-gray-800">
                 {filteredClients.map((client, index) => {
                   const m = latestMembership(client.memberships)
                   const status = membershipStatus(m)
                   const days = m ? daysLeft(m.end_date) : null
 
                   const statusStyle = {
-                    active:   { badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500',  bar: 'bg-green-500',  days: 'text-green-700'  },
-                    expiring: { badge: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-500',  bar: 'bg-amber-500',  days: 'text-amber-700'  },
-                    expired:  { badge: 'bg-red-100 text-red-600',      dot: 'bg-red-500',    bar: 'bg-red-500',    days: 'text-red-600'    },
-                    none:     { badge: 'bg-gray-100 text-gray-400',    dot: 'bg-gray-300',   bar: 'bg-gray-200',   days: 'text-gray-400'   },
+                    active:   { badge: 'bg-green-900/50 text-green-400',  dot: 'bg-green-500',  bar: 'bg-green-500',  days: 'text-green-400'  },
+                    expiring: { badge: 'bg-amber-900/50 text-amber-400',  dot: 'bg-amber-500',  bar: 'bg-amber-500',  days: 'text-amber-400'  },
+                    expired:  { badge: 'bg-red-900/50 text-red-400',      dot: 'bg-red-500',    bar: 'bg-red-500',    days: 'text-red-400'    },
+                    none:     { badge: 'bg-gray-800 text-gray-500',       dot: 'bg-gray-600',   bar: 'bg-gray-700',   days: 'text-gray-500'   },
                   }[status]
 
                   const actionStyle = {
-                    active:   { label: 'View',      cls: 'border-gray-200 text-gray-600 hover:bg-gray-50'      },
-                    expiring: { label: 'Remind',    cls: 'border-amber-200 text-amber-700 hover:bg-amber-50'   },
-                    expired:  { label: 'Follow Up', cls: 'border-red-200 text-red-600 hover:bg-red-50'         },
-                    none:     { label: 'View',      cls: 'border-gray-200 text-gray-600 hover:bg-gray-50'      },
+                    active:   { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
+                    expiring: { label: 'Remind',    cls: 'border-amber-700 text-amber-400 hover:bg-amber-900/30'   },
+                    expired:  { label: 'Follow Up', cls: 'border-red-800 text-red-400 hover:bg-red-900/30'         },
+                    none:     { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
                   }[status]
 
                   return (
                     <tr key={client.id}
-                      className="hover:bg-gray-50 transition cursor-pointer"
+                      className="hover:bg-gray-800/50 transition cursor-pointer"
                       onClick={() => router.push(`/company/client/${client.id}`)}>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -539,16 +539,16 @@ export default function CompanyAdminPage() {
                             <span className="text-white text-sm font-bold">{initials(client.full_name)}</span>
                           </div>
                           <div>
-                            <p className="font-medium text-gray-900 text-sm">{client.full_name}</p>
-                            <p className="text-xs text-gray-400">{client.phone || client.email}</p>
+                            <p className="font-medium text-white text-sm">{client.full_name}</p>
+                            <p className="text-xs text-gray-500">{client.phone || client.email}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-sm text-gray-700">{m?.plan_type || '—'}</td>
-                      <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                      <td className="px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
+                      <td className="px-4 py-4 text-sm font-medium text-white">
                         {m ? `₹${Number(m.amount_paid).toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td className="px-4 py-4 text-sm text-gray-500">
+                      <td className="px-4 py-4 text-sm text-gray-400">
                         {m ? `${fmtDate(m.start_date)} → ${fmtDate(m.end_date)}` : '—'}
                       </td>
                       <td className="px-4 py-4">
@@ -557,7 +557,7 @@ export default function CompanyAdminPage() {
                             <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
                             {status.charAt(0).toUpperCase() + status.slice(1)}
                           </span>
-                        ) : <span className="text-gray-300 text-sm">—</span>}
+                        ) : <span className="text-gray-600 text-sm">—</span>}
                       </td>
                       <td className="px-4 py-4">
                         {days !== null && m ? (
@@ -565,12 +565,12 @@ export default function CompanyAdminPage() {
                             <p className={`text-sm font-semibold mb-1 ${statusStyle.days}`}>
                               {days < 0 ? `${days} days` : `${days} days`}
                             </p>
-                            <div className="w-20 bg-gray-100 rounded-full h-1.5">
+                            <div className="w-20 bg-gray-700 rounded-full h-1.5">
                               <div className={`h-1.5 rounded-full ${statusStyle.bar}`}
                                 style={{ width: `${elapsedPct(m)}%` }} />
                             </div>
                           </div>
-                        ) : <span className="text-gray-300 text-sm">—</span>}
+                        ) : <span className="text-gray-600 text-sm">—</span>}
                       </td>
                       <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
                         <button
