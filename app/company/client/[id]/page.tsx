@@ -111,6 +111,7 @@ export default function ClientDetailPage() {
     start_date: new Date().toISOString().split('T')[0], end_date: ''
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [editMessage, setEditMessage] = useState('')
   const [savingMembership, setSavingMembership] = useState(false)
   const [membershipMessage, setMembershipMessage] = useState('')
   const [deletingClient, setDeletingClient] = useState(false)
@@ -312,16 +313,21 @@ const handleResetPassword = async () => {
 
   const handleEditClient = async () => {
     setSavingEdit(true)
-    await supabase
-      .from('profiles')
-      .update({
-        full_name: editClientForm.full_name || null,
-        phone: editClientForm.phone || null
-      })
-      .eq('id', clientId)
+    setEditMessage('')
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: clientId, full_name: editClientForm.full_name, phone: editClientForm.phone })
+    })
+    const result = await response.json()
     setSavingEdit(false)
-    setShowEditClient(false)
-    initialize()
+    if (result.error) {
+      setEditMessage('Error: ' + result.error)
+    } else {
+      setEditMessage('Saved! ✓')
+      initialize()
+      setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
+    }
   }
 
   const handleRenewMembership = async () => {
@@ -472,6 +478,9 @@ const handleResetPassword = async () => {
               value={editClientForm.phone}
               onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            {editMessage && (
+              <p className={`text-sm ${editMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{editMessage}</p>
+            )}
             <button
               onClick={handleEditClient}
               disabled={savingEdit}
