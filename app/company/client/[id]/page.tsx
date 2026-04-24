@@ -360,12 +360,11 @@ const handleResetPassword = async () => {
   const handleDeleteClient = async () => {
     if (!confirm(`Delete ${client?.full_name}? This will remove all their data and cannot be undone.`)) return
     setDeletingClient(true)
-    await supabase.from('session_feedback').delete().in('session_id',
-      (await supabase.from('logged_sessions').select('id').eq('client_id', clientId)).data?.map(s => s.id) || []
-    )
-    await supabase.from('logged_sessions').delete().eq('client_id', clientId)
-    await supabase.from('weekly_plans').delete().eq('client_id', clientId)
-    await supabase.from('profiles').delete().eq('id', clientId)
+    await fetch('/api/delete-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: clientId })
+    })
     router.push('/company')
   }
 

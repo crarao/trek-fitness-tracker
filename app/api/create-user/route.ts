@@ -38,6 +38,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
 })
 
   if (profileError) {
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
     return NextResponse.json({ error: profileError.message }, { status: 400 })
   }
 

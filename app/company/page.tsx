@@ -88,6 +88,7 @@ export default function CompanyAdminPage() {
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'expiring' | 'expired'>('all')
   const [showSettingsPasswords, setShowSettingsPasswords] = useState(false)
   const [showNewClientPassword, setShowNewClientPassword] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => { initialize() }, [])
 
@@ -298,9 +299,13 @@ export default function CompanyAdminPage() {
 
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
 
-  const filteredClients = activeFilter === 'all'
-    ? clients
-    : clients.filter(c => membershipStatus(latestMembership(c.memberships)) === activeFilter)
+  const filteredClients = clients
+    .filter(c => activeFilter === 'all' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
+    .filter(c => {
+      if (!searchQuery.trim()) return true
+      const q = searchQuery.toLowerCase()
+      return c.full_name.toLowerCase().includes(q) || (c.phone || '').includes(q)
+    })
 
   if (trialInfo && !trialInfo.is_active) {
     return (
@@ -597,20 +602,43 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
 
           {/* Table toolbar */}
-          <div className="px-4 sm:px-6 py-4 flex flex-wrap justify-between items-center gap-3 border-b border-gray-800">
-            <h2 className="font-semibold text-white text-sm sm:text-base">Members — {companyName}</h2>
-            <div className="flex gap-1 flex-wrap">
-              {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
-                <button key={f} onClick={() => setActiveFilter(f)}
-                  className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
-                    activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
-                  }`}>
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                  {f !== 'all' && (
-                    <span className="ml-1 text-xs opacity-60">({statusCounts[f]})</span>
-                  )}
+          <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <h2 className="font-semibold text-white text-sm sm:text-base">Members — {companyName}</h2>
+              <div className="flex gap-1 flex-wrap">
+                {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
+                  <button key={f} onClick={() => setActiveFilter(f)}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
+                      activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
+                    }`}>
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                    {f !== 'all' && (
+                      <span className="ml-1 text-xs opacity-60">({statusCounts[f]})</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search by name or phone..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
-              ))}
+              )}
             </div>
           </div>
 
@@ -618,7 +646,11 @@ export default function CompanyAdminPage() {
             <div className="px-6 py-12 text-center text-gray-500 text-sm">Loading...</div>
           ) : filteredClients.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
-              {clients.length === 0 ? 'No members yet. Add your first one!' : `No ${activeFilter} members.`}
+              {clients.length === 0
+                ? 'No members yet. Add your first one!'
+                : searchQuery.trim()
+                ? `No members match "${searchQuery}".`
+                : `No ${activeFilter} members.`}
             </div>
           ) : (
             <table className="w-full">

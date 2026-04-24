@@ -102,7 +102,7 @@ const fetchBranding = async (slug: string) => {
     }
 
     if (profile.role === 'super_admin') router.push('/admin')
-    else if (profile.role === 'company_admin') router.push('/company')
+    else if (profile.role === 'company_admin' || profile.role === 'partner') router.push('/company')
     else router.push('/client')
   }
 

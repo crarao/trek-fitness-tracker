@@ -29,6 +29,12 @@ type Client = {
   company_name?: string
 }
 
+type Partner = {
+  id: string
+  full_name: string
+  phone: string
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
@@ -52,9 +58,20 @@ export default function AdminPage() {
   const [editingCompany, setEditingCompany] = useState<Company | null>(null)
   const [savingCompany, setSavingCompany] = useState(false)
   const [editMessage, setEditMessage] = useState('')
+  const [companyPartners, setCompanyPartners] = useState<Partner[]>([])
+  const [newPartner, setNewPartner] = useState({ full_name: '', phone: '' })
+  const [savingPartner, setSavingPartner] = useState(false)
+  const [partnerMessage, setPartnerMessage] = useState('')
 
 
   useEffect(() => { fetchAll() }, [])
+
+  useEffect(() => {
+    if (!editingCompany) { setCompanyPartners([]); return }
+    supabase.from('profiles').select('id, full_name, phone')
+      .eq('company_id', editingCompany.id).eq('role', 'partner')
+      .then(({ data }) => setCompanyPartners(data || []))
+  }, [editingCompany?.id])
 
   const fetchAll = async () => {
     const { data: companiesData } = await supabase
@@ -177,8 +194,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
   const handleDeleteCompany = async (companyId: string, companyName: string) => {
     if (!confirm(`Delete "${companyName}" and all its data? This cannot be undone.`)) return
-    await supabase.from('profiles').delete().eq('company_id', companyId)
-    await supabase.from('companies').delete().eq('id', companyId)
+    await fetch('/api/delete-company', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: companyId })
+    })
     fetchAll()
   }
 
@@ -214,6 +234,40 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   const handleRemoveTrial = async () => {
     if (!editingCompany) return
     setEditingCompany({ ...editingCompany, trial_start: '', trial_end: '', is_trial: false })
+  }
+
+  const handleAddPartner = async () => {
+    if (!editingCompany || !newPartner.full_name || !newPartner.phone) return
+    const phone = newPartner.phone.trim()
+    if (!/^\d{10}$/.test(phone)) { setPartnerMessage('Enter a valid 10-digit phone number'); return }
+    setSavingPartner(true)
+    const response = await fetch('/api/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: `${phone}@getcoachboard.in`,
+        password: phone,
+        full_name: newPartner.full_name,
+        company_id: editingCompany.id,
+        role: 'partner',
+        phone
+      })
+    })
+    const result = await response.json()
+    if (result.error) { setPartnerMessage('Error: ' + result.error); setSavingPartner(false); return }
+    setNewPartner({ full_name: '', phone: '' })
+    setPartnerMessage('Partner added! Default password = phone number.')
+    const { data } = await supabase.from('profiles').select('id, full_name, phone')
+      .eq('company_id', editingCompany.id).eq('role', 'partner')
+    setCompanyPartners(data || [])
+    setSavingPartner(false)
+    setTimeout(() => setPartnerMessage(''), 3000)
+  }
+
+  const handleRemovePartner = async (partnerId: string, partnerName: string) => {
+    if (!confirm(`Remove partner "${partnerName}"? They will no longer be able to log in.`)) return
+    await supabase.from('profiles').delete().eq('id', partnerId)
+    setCompanyPartners(prev => prev.filter(p => p.id !== partnerId))
   }
 
   return (
@@ -315,14 +369,20 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   value={newCompany.name}
                   onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-                <input type="email" placeholder="Admin email"
-                  value={newCompany.email}
-                  onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-                <input type="tel" placeholder="Company phone number"
-                  value={newCompany.phone}
-                  onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
-                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Admin Login <span className="normal-case text-gray-600">— email or 10-digit phone, this becomes the login credential</span></label>
+                  <input type="text" placeholder="Email or phone number"
+                    value={newCompany.email}
+                    onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Contact Phone <span className="normal-case text-gray-600">— for records only, not a login</span></label>
+                  <input type="tel" placeholder="10-digit phone (optional)"
+                    value={newCompany.phone}
+                    onChange={(e) => setNewCompany({ ...newCompany, phone: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                </div>
 <div className="grid grid-cols-2 gap-3">
   <div>
     <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Trial Start</label>
@@ -532,6 +592,50 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             onChange={e => setEditingCompany({ ...editingCompany, notes: e.target.value })}
                             rows={3}
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+                        </div>
+
+                        {/* Partner Logins */}
+                        <div className="border-t border-gray-800 pt-4">
+                          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Partner Logins</p>
+                          {companyPartners.length === 0 ? (
+                            <p className="text-xs text-gray-600 mb-3">No partners yet.</p>
+                          ) : (
+                            <div className="space-y-2 mb-3">
+                              {companyPartners.map(p => (
+                                <div key={p.id} className="flex justify-between items-center bg-gray-800 rounded-xl px-3 py-2.5">
+                                  <div>
+                                    <p className="text-sm text-white">{p.full_name}</p>
+                                    <p className="text-xs text-gray-500">{p.phone}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => handleRemovePartner(p.id, p.full_name)}
+                                    className="text-xs text-red-500 hover:text-red-400 transition">
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                            <input type="text" placeholder="Partner name"
+                              value={newPartner.full_name}
+                              onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
+                              className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                            <input type="tel" placeholder="Phone (10 digits)"
+                              value={newPartner.phone}
+                              onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
+                              className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                          </div>
+                          {partnerMessage && (
+                            <p className={`text-xs mb-2 ${partnerMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
+                              {partnerMessage}
+                            </p>
+                          )}
+                          <button onClick={handleAddPartner} disabled={savingPartner}
+                            className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
+                            {savingPartner ? 'Adding...' : '+ Add Partner Login'}
+                          </button>
+                          <p className="text-xs text-gray-600 mt-1.5">Default password is their phone number. They can change it after first login via Settings.</p>
                         </div>
 
                         {editMessage && (
