@@ -11,7 +11,8 @@ export async function POST(request: Request) {
   const { user_id, full_name, phone } = await request.json()
   if (!user_id) return NextResponse.json({ error: 'user_id required' }, { status: 400 })
 
-  const { error } = await supabaseAdmin
+  // Update profile row
+  const { error: profileError } = await supabaseAdmin
     .from('profiles')
     .update({
       full_name: full_name || null,
@@ -19,7 +20,19 @@ export async function POST(request: Request) {
     })
     .eq('id', user_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
+
+  // If phone changed and account is phone-based, update auth email to match
+  if (phone && /^\d{10}$/.test(phone.trim())) {
+    const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(user_id)
+    if (user?.email?.endsWith('@getcoachboard.in')) {
+      const newEmail = `${phone.trim()}@getcoachboard.in`
+      if (user.email !== newEmail) {
+        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, { email: newEmail })
+        if (authError) return NextResponse.json({ error: 'Profile saved but auth email update failed: ' + authError.message }, { status: 400 })
+      }
+    }
+  }
 
   return NextResponse.json({ success: true })
 }
