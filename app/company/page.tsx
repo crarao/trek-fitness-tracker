@@ -476,6 +476,32 @@ export default function CompanyAdminPage() {
         </div>
       </div>
 
+      {/* CoachBoard subscription status */}
+      {trialInfo?.trial_end && (
+        <div className="px-4 sm:px-8 pt-3">
+          {(() => {
+            const days = trialDaysLeft() ?? 0
+            const expiry = new Date(trialInfo.trial_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+            const color = days < 0 ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
+            const borderColor = days < 0 ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
+            return (
+              <div className={`bg-gray-900 border ${borderColor} rounded-2xl px-5 py-3.5 flex items-center justify-between`}>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">CoachBoard Plan</p>
+                  <p className="text-sm text-white mt-0.5">
+                    {trialInfo.is_trial ? 'Trial' : 'Subscription'} · expires {expiry}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-2xl font-bold ${color}`}>{Math.abs(days)}</p>
+                  <p className="text-xs text-gray-500">{days < 0 ? 'days overdue' : 'days left'}</p>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
       {/* Plan breakdown */}
       <div className="px-4 sm:px-8 pt-3">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
