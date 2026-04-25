@@ -277,12 +277,17 @@ export default function CompanyAdminPage() {
     expired: clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired').length,
   }
 
-  const expiringSoonCount = clients.filter(c => {
+  const expiringSoonClients = clients.filter(c => {
     const m = latestMembership(c.memberships)
     if (!m) return false
     const d = daysLeft(m.end_date)
     return d >= 0 && d <= 7
-  }).length
+  })
+  const expiringSoonCount = expiringSoonClients.length
+  const expiringSoonRevenue = expiringSoonClients.reduce((sum, c) => {
+    const m = latestMembership(c.memberships)
+    return sum + (m ? Number(m.amount_paid) || 0 : 0)
+  }, 0)
 
   const allMemberships = clients.flatMap(c => c.memberships)
   const now = new Date()
@@ -449,6 +454,9 @@ export default function CompanyAdminPage() {
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
           <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
           <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
+          {expiringSoonRevenue > 0 && (
+            <p className="text-xs text-amber-700 mt-0.5">₹{expiringSoonRevenue.toLocaleString('en-IN')} at risk</p>
+          )}
         </div>
         <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expired</p>
