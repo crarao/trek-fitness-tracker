@@ -130,7 +130,12 @@ export default function ClientDetailPage() {
   const [membershipMessage, setMembershipMessage] = useState('')
   const [deletingClient, setDeletingClient] = useState(false)
   const [editingClientProfile, setEditingClientProfile] = useState(false)
-  const [clientProfileForm, setClientProfileForm] = useState({ trainer_name: '', diet_plan: '' })
+  const [clientProfileForm, setClientProfileForm] = useState({
+    trainer_name: '', diet_plan: '',
+    goal: '', age: '', gender: '', height_cm: '', weight_kg: '',
+    fitness_level: '', food_preference: '', available_days: '',
+    medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: ''
+  })
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
 
@@ -233,17 +238,25 @@ const handleDeletePlan = async (planId: string) => {
 
 const handleSaveClientProfile = async () => {
   setSavingClientProfile(true)
-  const { error } = await supabase
+  await supabase
     .from('profiles')
     .update({
       trainer_name: clientProfileForm.trainer_name || null,
-      diet_plan: clientProfileForm.diet_plan || null
+      diet_plan: clientProfileForm.diet_plan || null,
+      goal: clientProfileForm.goal || null,
+      age: clientProfileForm.age ? parseInt(clientProfileForm.age) : null,
+      gender: clientProfileForm.gender || null,
+      height_cm: clientProfileForm.height_cm ? parseFloat(clientProfileForm.height_cm) : null,
+      weight_kg: clientProfileForm.weight_kg ? parseFloat(clientProfileForm.weight_kg) : null,
+      fitness_level: clientProfileForm.fitness_level || null,
+      food_preference: clientProfileForm.food_preference || null,
+      available_days: clientProfileForm.available_days || null,
+      medical_conditions: clientProfileForm.medical_conditions || null,
+      emergency_contact_name: clientProfileForm.emergency_contact_name || null,
+      emergency_contact_phone: clientProfileForm.emergency_contact_phone || null,
     })
     .eq('id', clientId)
-  console.log('Save error:', error)
-  console.log('Client ID:', clientId)
   setClientProfileMessage('Saved! ✓')
-
   setSavingClientProfile(false)
   setEditingClientProfile(false)
   setTimeout(() => setClientProfileMessage(''), 3000)
@@ -975,90 +988,179 @@ const handleResetPassword = async () => {
         {(client?.client_type !== 'pt' || activeTab === 'profile') && (
   <div className="space-y-4">
     <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
-      <h2 className="font-semibold text-white">Client Fitness Profile</h2>
 
-      {/* Goal */}
-      {client?.goal && (
-        <div className="bg-orange-950 border border-orange-900 rounded-xl px-4 py-3">
-          <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Goal</p>
-          <p className="text-sm text-orange-200">{client.goal}</p>
-        </div>
-      )}
-
-      {/* Basic Info */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Age</p>
-          <p className="text-sm text-white">{client?.age || '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Gender</p>
-          <p className="text-sm text-white">{client?.gender || '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Height</p>
-          <p className="text-sm text-white">{client?.height_cm ? `${client.height_cm} cm` : '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Weight</p>
-          <p className="text-sm text-white">{client?.weight_kg ? `${client.weight_kg} kg` : '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Fitness Level</p>
-          <p className="text-sm text-white">{client?.fitness_level || '—'}</p>
-        </div>
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Food Preference</p>
-          <p className="text-sm text-white">{client?.food_preference || '—'}</p>
-        </div>
-      </div>
-
-      {/* Available Days */}
-      {client?.available_days && (
-        <div>
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Available Days</p>
-          <div className="flex gap-2 flex-wrap">
-            {client.available_days.split(',').map(day => (
-              <span key={day} className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">
-                {day}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Medical Conditions */}
-      <div>
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Medical Conditions / Injuries</p>
-        <p className="text-sm text-white">{client?.medical_conditions || '—'}</p>
-      </div>
-
-      {/* Emergency Contact */}
-      <div className="border-t border-gray-800 pt-4">
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
-        <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
-        <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
-      </div>
-
-      {/* Trainer + Diet Plan — Editable */}
-      <div className={`border-t pt-4 space-y-4 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
-        <div className="flex justify-between items-center">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
-          <button
-            onClick={() => {
+      {/* Card header with Edit button */}
+      <div className="flex justify-between items-center">
+        <h2 className="font-semibold text-white">Client Fitness Profile</h2>
+        <button
+          onClick={() => {
+            if (editingClientProfile) {
+              setEditingClientProfile(false)
+            } else {
               setClientProfileForm({
                 trainer_name: client?.trainer_name || '',
-                diet_plan: client?.diet_plan || ''
+                diet_plan: client?.diet_plan || '',
+                goal: client?.goal || '',
+                age: client?.age?.toString() || '',
+                gender: client?.gender || '',
+                height_cm: client?.height_cm?.toString() || '',
+                weight_kg: client?.weight_kg?.toString() || '',
+                fitness_level: client?.fitness_level || '',
+                food_preference: client?.food_preference || '',
+                available_days: client?.available_days || '',
+                medical_conditions: client?.medical_conditions || '',
+                emergency_contact_name: client?.emergency_contact_name || '',
+                emergency_contact_phone: client?.emergency_contact_phone || '',
               })
-              setEditingClientProfile(!editingClientProfile)
-            }}
-            className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
-            {editingClientProfile ? 'Cancel' : 'Edit'}
-          </button>
-        </div>
+              setEditingClientProfile(true)
+            }
+          }}
+          className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
+          {editingClientProfile ? 'Cancel' : 'Edit'}
+        </button>
+      </div>
 
-        {editingClientProfile ? (
-          <div className="space-y-3">
+      {editingClientProfile ? (
+        <div className="space-y-4">
+          {/* Goal */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Goal</label>
+            <textarea
+              placeholder="Client's fitness goal..."
+              value={clientProfileForm.goal}
+              onChange={e => setClientProfileForm({ ...clientProfileForm, goal: e.target.value })}
+              rows={2}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+          </div>
+
+          {/* Age + Gender */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Age</label>
+              <input type="number" placeholder="e.g. 30"
+                value={clientProfileForm.age}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, age: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Gender</label>
+              <select
+                value={clientProfileForm.gender}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, gender: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                <option value="">—</option>
+                <option>Male</option>
+                <option>Female</option>
+                <option>Other</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Height + Weight */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Height (cm)</label>
+              <input type="number" placeholder="e.g. 170"
+                value={clientProfileForm.height_cm}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, height_cm: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Weight (kg)</label>
+              <input type="number" placeholder="e.g. 70"
+                value={clientProfileForm.weight_kg}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, weight_kg: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+          </div>
+
+          {/* Fitness Level + Food Preference */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Fitness Level</label>
+              <select
+                value={clientProfileForm.fitness_level}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, fitness_level: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                <option value="">—</option>
+                <option>Beginner</option>
+                <option>Intermediate</option>
+                <option>Advanced</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Food Preference</label>
+              <select
+                value={clientProfileForm.food_preference}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, food_preference: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                <option value="">—</option>
+                <option>Vegetarian</option>
+                <option>Non-Vegetarian</option>
+                <option>Vegan</option>
+                <option>Eggetarian</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Available Days — toggle buttons */}
+          <div>
+            <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">Available Days</label>
+            <div className="flex gap-2 flex-wrap">
+              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day => {
+                const selected = clientProfileForm.available_days
+                  .split(',').map(d => d.trim()).includes(day)
+                return (
+                  <button key={day} type="button"
+                    onClick={() => {
+                      const days = clientProfileForm.available_days
+                        ? clientProfileForm.available_days.split(',').map(d => d.trim()).filter(Boolean)
+                        : []
+                      const updated = selected ? days.filter(d => d !== day) : [...days, day]
+                      setClientProfileForm({ ...clientProfileForm, available_days: updated.join(',') })
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${selected
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-500'}`}>
+                    {day}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Medical Conditions */}
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Medical Conditions / Injuries</label>
+            <textarea
+              placeholder="e.g. Knee injury, hypertension..."
+              value={clientProfileForm.medical_conditions}
+              onChange={e => setClientProfileForm({ ...clientProfileForm, medical_conditions: e.target.value })}
+              rows={2}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+          </div>
+
+          {/* Emergency Contact */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Emergency Contact</label>
+              <input type="text" placeholder="Name"
+                value={clientProfileForm.emergency_contact_name}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, emergency_contact_name: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Emergency Phone</label>
+              <input type="tel" placeholder="Phone"
+                value={clientProfileForm.emergency_contact_phone}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, emergency_contact_phone: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </div>
+          </div>
+
+          {/* Trainer + Diet */}
+          <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Assigned Trainer</label>
               <input type="text" placeholder="Trainer name"
@@ -1075,18 +1177,86 @@ const handleResetPassword = async () => {
                 rows={4}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
             </div>
-            {clientProfileMessage && (
-              <p className="text-green-400 text-sm">{clientProfileMessage}</p>
-            )}
-            <button
-              onClick={handleSaveClientProfile}
-              disabled={savingClientProfile}
-              className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-              {savingClientProfile ? 'Saving...' : 'Save Changes'}
-            </button>
           </div>
-        ) : (
-          <div className="space-y-3">
+
+          {clientProfileMessage && (
+            <p className="text-green-400 text-sm">{clientProfileMessage}</p>
+          )}
+          <button
+            onClick={handleSaveClientProfile}
+            disabled={savingClientProfile}
+            className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+            {savingClientProfile ? 'Saving...' : 'Save Profile'}
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Goal */}
+          {client?.goal && (
+            <div className="bg-orange-950 border border-orange-900 rounded-xl px-4 py-3">
+              <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Goal</p>
+              <p className="text-sm text-orange-200">{client.goal}</p>
+            </div>
+          )}
+
+          {/* Basic Info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Age</p>
+              <p className="text-sm text-white">{client?.age || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Gender</p>
+              <p className="text-sm text-white">{client?.gender || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Height</p>
+              <p className="text-sm text-white">{client?.height_cm ? `${client.height_cm} cm` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Weight</p>
+              <p className="text-sm text-white">{client?.weight_kg ? `${client.weight_kg} kg` : '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Fitness Level</p>
+              <p className="text-sm text-white">{client?.fitness_level || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Food Preference</p>
+              <p className="text-sm text-white">{client?.food_preference || '—'}</p>
+            </div>
+          </div>
+
+          {/* Available Days */}
+          {client?.available_days && (
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Available Days</p>
+              <div className="flex gap-2 flex-wrap">
+                {client.available_days.split(',').map(day => (
+                  <span key={day} className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">
+                    {day}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Medical Conditions */}
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Medical Conditions / Injuries</p>
+            <p className="text-sm text-white">{client?.medical_conditions || '—'}</p>
+          </div>
+
+          {/* Emergency Contact */}
+          <div className="border-t border-gray-800 pt-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
+            <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
+            <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
+          </div>
+
+          {/* Trainer + Diet Plan */}
+          <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
               <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
@@ -1096,15 +1266,15 @@ const handleResetPassword = async () => {
               <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* Contact */}
-      <div className="border-t border-gray-800 pt-4">
-        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
-        <p className="text-sm text-white">{client?.phone || '—'}</p>
-        <p className="text-sm text-gray-400">{client?.email}</p>
-      </div>
+          {/* Contact */}
+          <div className="border-t border-gray-800 pt-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
+            <p className="text-sm text-white">{client?.phone || '—'}</p>
+            <p className="text-sm text-gray-400">{client?.email}</p>
+          </div>
+        </>
+      )}
     </div>
   </div>
 )}

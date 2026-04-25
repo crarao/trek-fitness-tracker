@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const businessType = profile.business_type || 'gym'
     const style = coachingStyles[businessType] || coachingStyles.general
 
-    const prompt = `You are a friendly, experienced ${businessType} coach writing a weekly training plan for a client. Write in plain conversational language — no markdown, no asterisks, no hashtags, no tables. Just clean text a coach would write.
+    const prompt = `You are an experienced ${businessType} coach creating a weekly training plan structure for a client.
 
 Coaching approach: ${style}
 
@@ -29,25 +29,24 @@ Age: ${profile.age} | Gender: ${profile.gender}
 Height: ${profile.height_cm}cm | Weight: ${profile.weight_kg}kg
 Fitness Level: ${profile.fitness_level}
 Available Days: ${profile.available_days}
-Food Preference: ${profile.food_preference}
-Medical Conditions: ${profile.medical_conditions || 'None'}
 Goal: ${profile.goal}
+Medical Conditions / Injuries: ${profile.medical_conditions || 'None'}
 
-Write a weekly plan covering only their available days. For each day write:
-- Day name and session focus on one line
-- Warm up in 2-3 sentences
-- Main workout with 4-6 exercises written naturally with sets and reps
-- Cool down in 1-2 sentences
-- One short nutrition tip relevant to their food preference
+Output ONLY a list of day headings — one line per day. No exercises, no descriptions, no extra text.
+Format exactly like this example:
+Day 1 – Lower Body Strength (Injury Safe) + Core Stability
+Day 2 – Upper Body Push (Shoulder-Friendly) + Cardio
+Day 3 – Active Recovery + Mobility + Rehab
 
-Keep each day concise — a coach talking to a client, not a textbook.
-If they have medical conditions, quietly adjust exercises without making a big deal of it.
-End with one encouraging line about their goal.
-Write as if speaking directly to ${profile.full_name}.`
+Rules:
+- Cover only the client's available days (skip rest days if not listed, or label them Rest)
+- Each heading must reflect their goal and any injuries or limitations
+- Keep each heading concise — session focus + any relevant modifier in brackets
+- Output nothing else. No intro, no sign-off, no blank lines before or after the list.`
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
+      max_tokens: 300,
       messages: [{ role: 'user', content: prompt }]
     })
 
