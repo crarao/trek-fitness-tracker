@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Client Profile — Mockup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0a0f; -webkit-tap-highlight-color: transparent; }
+    .tab-active  { background: #f97316; color: #fff; }
+    .tab-inactive { color: #9ca3af; }
+    input, select, textarea { font-size: 16px; } /* prevent iOS zoom on focus */
+  </style>
+</head>
+<body class="min-h-screen text-white font-sans">
+
+  <!-- MOCKUP TOGGLE -->
+  <div class="bg-blue-950 border-b border-blue-900 px-4 py-2.5 flex items-center gap-3">
+    <span class="text-blue-300 text-xs font-semibold uppercase tracking-wider">Preview</span>
+    <div class="flex gap-2 ml-auto">
+      <button onclick="setType('member')" id="btn-member"
+        class="px-3 py-1.5 rounded-lg text-xs border border-blue-600 bg-blue-700 text-white font-medium">
+        Regular Member
+      </button>
+      <button onclick="setType('pt')" id="btn-pt"
+        class="px-3 py-1.5 rounded-lg text-xs border border-blue-800 text-blue-400 font-medium">
+        PT Member
+      </button>
+    </div>
+  </div>
+
+  <!-- HEADER -->
+  <div class="bg-gray-900 border-b border-gray-800 px-4 py-3">
+    <div class="flex justify-between items-center">
+      <div class="flex items-center gap-2.5">
+        <button class="text-gray-500 border border-gray-700 px-2.5 py-1.5 rounded-lg text-xs shrink-0">
+          ← Back
+        </button>
+        <div class="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700 shrink-0">
+          <span class="text-orange-500 font-bold text-sm">R</span>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-sm font-bold text-white leading-tight">Rahul Sharma</h1>
+            <span id="pt-badge" class="hidden text-xs bg-purple-900 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full font-medium whitespace-nowrap">
+              PT Member
+            </span>
+          </div>
+          <p class="text-xs text-gray-400">+91 98765 43210</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0 ml-2">
+        <button class="text-xs text-orange-500 border border-orange-900 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
+          Edit
+        </button>
+        <button class="text-xs text-gray-500 border border-gray-700 px-2.5 py-1.5 rounded-lg">
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS — member shows 2 cards, PT shows 3 -->
+  <div class="px-4 pt-4 grid gap-3 mb-1" id="stats-grid">
+    <!-- populated by setType() -->
+  </div>
+
+  <!-- TABS -->
+  <div class="px-4 mt-4" id="tab-bar-wrap">
+    <!-- populated by setType() -->
+  </div>
+
+  <!-- TAB CONTENT -->
+  <div class="px-4 pb-12 mt-4 space-y-3">
+
+    <!-- ===== PROFILE TAB ===== -->
+    <div id="content-profile">
+
+      <!-- MEMBERSHIP CARD -->
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-3">
+        <div class="flex justify-between items-start mb-3">
+          <div>
+            <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Membership</p>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-bold text-white">3 Months</span>
+              <span class="text-xs bg-green-900 text-green-400 border border-green-800 px-2 py-0.5 rounded-full">Active</span>
+            </div>
+            <p class="text-xs text-gray-400 mt-1">15 Apr 2026 – 14 Jul 2026</p>
+          </div>
+          <div class="text-right">
+            <p class="text-base font-bold text-orange-500">₹8,000</p>
+            <p class="text-xs text-gray-500">paid</p>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="flex justify-between text-xs text-gray-500 mb-1.5">
+            <span>82 days remaining</span>
+            <span>of 90</span>
+          </div>
+          <div class="w-full bg-gray-800 rounded-full h-1.5">
+            <div class="bg-orange-500 h-1.5 rounded-full" style="width:91%"></div>
+          </div>
+        </div>
+        <!-- Inline expand -->
+        <div id="membership-actions" class="hidden border-t border-gray-800 pt-3 space-y-3">
+          <p class="text-xs text-gray-500 uppercase tracking-wider">Update Membership</p>
+          <div class="grid grid-cols-2 gap-2">
+            <select class="bg-gray-800 text-white rounded-xl px-3 py-2.5 border border-gray-700 text-sm outline-none col-span-1">
+              <option>1 Month</option>
+              <option selected>3 Months</option>
+              <option>6 Months</option>
+              <option>1 Year</option>
+            </select>
+            <input type="number" value="8000" placeholder="Amount (₹)"
+              class="bg-gray-800 text-white rounded-xl px-3 py-2.5 border border-gray-700 text-sm outline-none placeholder-gray-600" />
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">Start</label>
+              <input type="date" value="2026-04-15"
+                class="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 border border-gray-700 text-sm outline-none" />
+            </div>
+            <div>
+              <label class="text-xs text-gray-500 block mb-1">End (auto)</label>
+              <input type="date" value="2026-07-14"
+                class="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 border border-gray-700 text-sm outline-none" />
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button class="flex-1 bg-orange-500 text-white text-sm py-2.5 rounded-xl font-medium">Renew</button>
+            <button class="flex-1 bg-gray-700 text-white text-sm py-2.5 rounded-xl">Correct Current</button>
+          </div>
+          <p class="text-xs text-gray-600">Renew adds a new entry (keeps history). Correct fixes the current one.</p>
+        </div>
+        <button onclick="toggleMembership()" id="membership-toggle-btn"
+          class="mt-3 w-full text-xs text-orange-500 border border-orange-900 px-3 py-2 rounded-xl transition">
+          + Renew / Edit Membership
+        </button>
+      </div>
+
+      <!-- GOAL CARD -->
+      <div class="bg-orange-950 border border-orange-900 rounded-2xl px-4 py-3.5 mb-3">
+        <p class="text-xs text-orange-400 uppercase tracking-wider mb-1">Goal</p>
+        <p class="text-sm text-orange-200">Lose 5 kg by June, improve endurance for half marathon</p>
+      </div>
+
+      <!-- FITNESS PROFILE -->
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-3 space-y-4">
+        <p class="text-xs text-gray-500 uppercase tracking-wider">Fitness Profile</p>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+          <div><p class="text-xs text-gray-500 mb-0.5">Age</p><p class="text-sm text-white font-medium">28</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Gender</p><p class="text-sm text-white font-medium">Male</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Height</p><p class="text-sm text-white font-medium">175 cm</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Weight</p><p class="text-sm text-white font-medium">78 kg</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Fitness Level</p><p class="text-sm text-white font-medium">Intermediate</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Food Preference</p><p class="text-sm text-white font-medium">Vegetarian</p></div>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 mb-2">Available Days</p>
+          <div class="flex gap-2 flex-wrap">
+            <span class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">Mon</span>
+            <span class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">Wed</span>
+            <span class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">Fri</span>
+            <span class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg">Sat</span>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 mb-1">Medical / Injuries</p>
+          <p class="text-sm text-white">Mild lower back pain</p>
+        </div>
+      </div>
+
+      <!-- TRAINER & DIET — PT ONLY -->
+      <div id="trainer-section" class="hidden bg-gray-900 rounded-2xl p-4 border border-purple-900 mb-3">
+        <div class="flex justify-between items-center mb-3">
+          <div>
+            <p class="text-xs text-purple-400 uppercase tracking-wider mb-0.5">Trainer & Diet</p>
+            <p class="text-xs text-gray-500">Personal Training</p>
+          </div>
+          <button class="text-xs text-orange-500 border border-orange-900 px-2.5 py-1.5 rounded-lg">Edit</button>
+        </div>
+        <div class="space-y-3">
+          <div><p class="text-xs text-gray-500 mb-0.5">Assigned Trainer</p><p class="text-sm text-white font-medium">Akash Verma</p></div>
+          <div><p class="text-xs text-gray-500 mb-0.5">Diet Plan</p><p class="text-sm text-white">High protein breakfast, avoid sugar, pre-workout banana, post-workout whey</p></div>
+        </div>
+      </div>
+
+      <!-- EMERGENCY CONTACT -->
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-3">
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
+        <p class="text-sm text-white font-medium">Priya Sharma</p>
+        <p class="text-sm text-gray-400">+91 98765 11111</p>
+      </div>
+
+      <!-- CONTACT -->
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
+        <p class="text-sm text-white">+91 98765 43210</p>
+        <p class="text-sm text-gray-400">rahul.sharma@gmail.com</p>
+      </div>
+    </div>
+
+    <!-- ===== PLANS TAB ===== -->
+    <div id="content-plans" class="hidden space-y-3">
+      <div class="flex justify-between items-center">
+        <p class="text-xs text-gray-500">2 plans assigned</p>
+        <div class="flex gap-2">
+          <button class="bg-purple-600 text-white text-xs px-3 py-2 rounded-xl font-medium">✨ AI Generate</button>
+          <button class="bg-orange-500 text-white text-xs px-3 py-2 rounded-xl font-medium">+ Assign</button>
+        </div>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+        <div class="flex justify-between items-start mb-3">
+          <div>
+            <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
+            <p class="font-semibold text-sm">April 21, 2026</p>
+            <p class="text-xs text-orange-400 mt-1">⏰ 06:30</p>
+          </div>
+          <div class="flex gap-2">
+            <button class="text-xs text-gray-400 border border-gray-700 px-2.5 py-1.5 rounded-lg">Edit</button>
+            <button class="text-xs text-gray-400 border border-gray-700 px-2.5 py-1.5 rounded-lg">Delete</button>
+          </div>
+        </div>
+        <div class="border-t border-gray-800 pt-3">
+          <p class="text-sm text-gray-300 leading-relaxed">Mon: Chest & Triceps — Bench Press 3×10, Incline DB 3×12<br>Tue: Rest<br>Wed: Back & Biceps — Deadlift 3×8, Pull-ups 3×10<br>Thu: Cardio — 30 min run<br>Fri: Legs — Squat 4×10, Leg Press 3×12<br>Sat: Shoulders — OHP 3×10<br>Sun: Rest</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== SESSIONS TAB ===== -->
+    <div id="content-sessions" class="hidden space-y-3">
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+        <div class="flex justify-between items-start mb-3">
+          <div>
+            <p class="text-sm font-medium text-white">Mon, Apr 21</p>
+            <p class="text-xs text-gray-500 mt-0.5">60 mins</p>
+          </div>
+          <span class="text-orange-400 text-sm">★★★★★</span>
+        </div>
+        <p class="text-xs text-gray-400 mb-3 bg-gray-800 rounded-lg px-3 py-2">Felt great today, hit a new PR on deadlifts</p>
+        <div class="border-t border-gray-800 pt-3">
+          <label class="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Your Feedback</label>
+          <textarea rows="2" class="w-full bg-gray-800 text-white rounded-xl px-3 py-2 border border-gray-700 text-sm resize-none outline-none">Good session, maintain form on deadlifts next time.</textarea>
+          <button class="mt-2 bg-orange-500 text-white text-xs px-4 py-1.5 rounded-lg font-medium">Save Feedback</button>
+        </div>
+      </div>
+      <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+        <p class="text-sm font-medium text-white">Wed, Apr 19</p>
+        <p class="text-xs text-gray-500 mt-0.5">45 mins</p>
+      </div>
+    </div>
+
+    <!-- ===== PROGRESS TAB ===== -->
+    <div id="content-progress" class="hidden">
+      <div class="bg-gray-900 rounded-2xl p-10 border border-gray-800 text-center text-gray-500 text-sm">
+        Charts — Activities/week · Minutes/week
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentTab = 'profile'
+
+    const PT_TABS = ['profile', 'plans', 'sessions', 'progress']
+    const MEMBER_TABS = ['profile']
+
+    function buildTabs(tabs) {
+      const labels = { profile: 'Profile', plans: 'Plans', sessions: 'Sessions', progress: 'Progress' }
+      const bar = document.getElementById('tab-bar-wrap')
+      if (tabs.length === 1) {
+        bar.innerHTML = ''
+        return
+      }
+      bar.innerHTML = `<div class="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
+        ${tabs.map(t => `
+          <button onclick="setTab('${t}')" id="tab-${t}"
+            class="flex-1 py-2 text-xs font-medium rounded-lg transition ${t === currentTab ? 'tab-active' : 'tab-inactive'}">
+            ${labels[t]}
+          </button>`).join('')}
+      </div>`
+    }
+
+    function buildStats(type) {
+      const grid = document.getElementById('stats-grid')
+      if (type === 'member') {
+        grid.className = 'px-4 pt-4 grid grid-cols-2 gap-3 mb-1'
+        grid.innerHTML = `
+          <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+            <p class="text-xl font-bold text-orange-500">3 Months</p>
+            <p class="text-xs text-gray-500 mt-1">Current Plan</p>
+          </div>
+          <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+            <p class="text-xl font-bold text-orange-500">82</p>
+            <p class="text-xs text-gray-500 mt-1">Days Left</p>
+          </div>`
+      } else {
+        grid.className = 'px-4 pt-4 grid grid-cols-3 gap-3 mb-1'
+        grid.innerHTML = `
+          <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+            <p class="text-xl font-bold text-orange-500">24</p>
+            <p class="text-xs text-gray-500 mt-1">Sessions</p>
+          </div>
+          <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+            <p class="text-xl font-bold text-orange-500">1,440</p>
+            <p class="text-xs text-gray-500 mt-1">Minutes</p>
+          </div>
+          <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+            <p class="text-xl font-bold text-orange-500">82</p>
+            <p class="text-xs text-gray-500 mt-1">Days Left</p>
+          </div>`
+      }
+    }
+
+    function setType(type) {
+      const isPT = type === 'pt'
+      const tabs = isPT ? PT_TABS : MEMBER_TABS
+
+      // ensure active tab exists in this type's tab set
+      if (!tabs.includes(currentTab)) { currentTab = 'profile' }
+
+      document.getElementById('pt-badge').classList.toggle('hidden', !isPT)
+      document.getElementById('trainer-section').classList.toggle('hidden', !isPT)
+
+      buildStats(type)
+      buildTabs(tabs)
+
+      // show correct content panels
+      PT_TABS.forEach(t => {
+        const el = document.getElementById('content-' + t)
+        el.classList.toggle('hidden', t !== currentTab)
+      })
+
+      // control buttons
+      document.getElementById('btn-member').className = isPT
+        ? 'px-3 py-1.5 rounded-lg text-xs border border-blue-800 text-blue-400 font-medium'
+        : 'px-3 py-1.5 rounded-lg text-xs border border-blue-600 bg-blue-700 text-white font-medium'
+      document.getElementById('btn-pt').className = isPT
+        ? 'px-3 py-1.5 rounded-lg text-xs border border-blue-600 bg-blue-700 text-white font-medium'
+        : 'px-3 py-1.5 rounded-lg text-xs border border-blue-800 text-blue-400 font-medium'
+    }
+
+    function setTab(tab) {
+      currentTab = tab
+      PT_TABS.forEach(t => {
+        const btn = document.getElementById('tab-' + t)
+        const content = document.getElementById('content-' + t)
+        if (btn) btn.className = `flex-1 py-2 text-xs font-medium rounded-lg transition ${t === tab ? 'tab-active' : 'tab-inactive'}`
+        if (content) content.classList.toggle('hidden', t !== tab)
+      })
+    }
+
+    function toggleMembership() {
+      const panel = document.getElementById('membership-actions')
+      const btn = document.getElementById('membership-toggle-btn')
+      const opening = panel.classList.contains('hidden')
+      panel.classList.toggle('hidden', !opening)
+      btn.textContent = opening ? '− Close' : '+ Renew / Edit Membership'
+    }
+
+    // init
+    setType('member')
+  </script>
+</body>
+</html>
