@@ -44,6 +44,7 @@ type ClientProfile = {
   goal: string | null
   trainer_name: string | null
   diet_plan: string | null
+  client_type: string | null
 }
 
 
@@ -108,7 +109,8 @@ export default function ClientDetailPage() {
   const [editClientForm, setEditClientForm] = useState({
     full_name: '', phone: '',
     plan_type: '1 Month', amount_paid: '',
-    start_date: new Date().toISOString().split('T')[0], end_date: ''
+    start_date: new Date().toISOString().split('T')[0], end_date: '',
+    client_type: 'member'
   })
   const [savingEdit, setSavingEdit] = useState(false)
   const [editMessage, setEditMessage] = useState('')
@@ -320,14 +322,16 @@ const handleResetPassword = async () => {
       body: JSON.stringify({ user_id: clientId, full_name: editClientForm.full_name, phone: editClientForm.phone })
     })
     const result = await response.json()
-    setSavingEdit(false)
     if (result.error) {
+      setSavingEdit(false)
       setEditMessage('Error: ' + result.error)
-    } else {
-      setEditMessage('Saved! ✓')
-      initialize()
-      setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
+      return
     }
+    await supabase.from('profiles').update({ client_type: editClientForm.client_type }).eq('id', clientId)
+    setSavingEdit(false)
+    setEditMessage('Saved! ✓')
+    initialize()
+    setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }
 
   const handleRenewMembership = async () => {
@@ -435,7 +439,8 @@ const handleResetPassword = async () => {
                 plan_type: latest?.plan_type || '1 Month',
                 amount_paid: latest?.amount_paid?.toString() || '',
                 start_date: latest?.start_date || new Date().toISOString().split('T')[0],
-                end_date: latest?.end_date || ''
+                end_date: latest?.end_date || '',
+                client_type: client?.client_type || 'member'
               })
               setShowEditClient(!showEditClient)
             }}
@@ -453,7 +458,12 @@ const handleResetPassword = async () => {
               <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
             </div>
             <div>
-              <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
+                {client?.client_type === 'pt' && (
+                  <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
+                )}
+              </div>
               <p className="text-xs text-gray-400">{client?.email}</p>
               {client?.phone && (
                 <p className="text-xs text-gray-400">{client?.phone}</p>
@@ -478,6 +488,13 @@ const handleResetPassword = async () => {
               value={editClientForm.phone}
               onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <label className="flex items-center gap-3 cursor-pointer py-1">
+              <input type="checkbox"
+                checked={editClientForm.client_type === 'pt'}
+                onChange={e => setEditClientForm({ ...editClientForm, client_type: e.target.checked ? 'pt' : 'member' })}
+                className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
+              <span className="text-sm text-gray-300">Personal Training (PT) member</span>
+            </label>
             {editMessage && (
               <p className={`text-sm ${editMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{editMessage}</p>
             )}
@@ -969,7 +986,7 @@ const handleResetPassword = async () => {
       </div>
 
       {/* Trainer + Diet Plan — Editable */}
-      <div className="border-t border-gray-800 pt-4 space-y-4">
+      <div className={`border-t pt-4 space-y-4 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
         <div className="flex justify-between items-center">
           <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
           <button

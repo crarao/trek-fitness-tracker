@@ -18,6 +18,7 @@ type Client = {
   email: string
   phone: string
   created_at: string
+  client_type: string | null
   memberships: Membership[]
 }
 
@@ -76,7 +77,8 @@ export default function CompanyAdminPage() {
   const [newClient, setNewClient] = useState({
     full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
     plan_type: '1 Month', amount_paid: '',
-    start_date: new Date().toISOString().split('T')[0], end_date: ''
+    start_date: new Date().toISOString().split('T')[0], end_date: '',
+    client_type: 'member'
   })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -228,7 +230,8 @@ export default function CompanyAdminPage() {
         role: 'client',
         phone: newClient.phone,
         trainer_name: newClient.trainer_name,
-        diet_plan: newClient.diet_plan
+        diet_plan: newClient.diet_plan,
+        client_type: newClient.client_type
       })
     })
 
@@ -255,7 +258,8 @@ export default function CompanyAdminPage() {
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
-      start_date: new Date().toISOString().split('T')[0], end_date: ''
+      start_date: new Date().toISOString().split('T')[0], end_date: '',
+      client_type: 'member'
     })
     setShowForm(false)
     setSaving(false)
@@ -298,6 +302,7 @@ export default function CompanyAdminPage() {
   const revenueChange = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
 
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
+  const ptCount = clients.filter(c => c.client_type === 'pt').length
 
   const filteredClients = clients
     .filter(c => activeFilter === 'all' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -438,7 +443,7 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Members</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p className="text-xs text-gray-600 mt-1">All statuses</p>
+          <p className="text-xs text-gray-600 mt-1">All statuses{ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
         <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
@@ -626,7 +631,12 @@ export default function CompanyAdminPage() {
                             <span className="text-white text-xs sm:text-sm font-bold">{initials(client.full_name)}</span>
                           </div>
                           <div>
-                            <p className="font-medium text-white text-sm">{client.full_name}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-medium text-white text-sm">{client.full_name}</p>
+                              {client.client_type === 'pt' && (
+                                <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-500">{client.phone || client.email}</p>
                           </div>
                         </div>
@@ -746,6 +756,13 @@ export default function CompanyAdminPage() {
                   onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
                   rows={2}
                   className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
+                <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
+                  <input type="checkbox"
+                    checked={newClient.client_type === 'pt'}
+                    onChange={e => setNewClient({ ...newClient, client_type: e.target.checked ? 'pt' : 'member' })}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
+                  <span className="text-sm text-gray-300">Personal Training (PT) member</span>
+                </label>
               </div>
               {message && (
                 <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>
