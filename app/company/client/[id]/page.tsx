@@ -77,6 +77,18 @@ type Feedback = {
   admin_feedback: string
 }
 
+function daysLeftFromDate(endDate: string): number {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.ceil((new Date(endDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function elapsedPct(startDate: string, endDate: string): number {
+  const total = new Date(endDate).getTime() - new Date(startDate).getTime()
+  const elapsed = Date.now() - new Date(startDate).getTime()
+  return Math.min(Math.max((elapsed / total) * 100, 0), 100)
+}
+
 export default function ClientDetailPage() {
   const router = useRouter()
   const params = useParams()
@@ -86,7 +98,7 @@ export default function ClientDetailPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('plans')
+  const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('profile')
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '', workout_time: '' })
   const [saving, setSaving] = useState(false)
@@ -606,31 +618,72 @@ const handleResetPassword = async () => {
 
       {/* Stats */}
       <div className="max-w-2xl mx-auto px-6 pt-5 grid grid-cols-2 gap-3 mb-2">
-        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
-          <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
-          <p className="text-xs text-gray-500 mt-1">Total Activities</p>
-        </div>
-        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
-          <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
-          <p className="text-xs text-gray-500 mt-1">Total Minutes</p>
-        </div>
+        {client?.client_type === 'pt' ? (
+          <>
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+              <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
+              <p className="text-xs text-gray-500 mt-1">Total Activities</p>
+            </div>
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+              <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
+              <p className="text-xs text-gray-500 mt-1">Total Minutes</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+              <p className="text-2xl font-bold text-orange-500">{memberships[0]?.plan_type || '—'}</p>
+              <p className="text-xs text-gray-500 mt-1">Current Plan</p>
+              {memberships[0] && (
+                <p className="text-xs text-gray-600 mt-1">₹{Number(memberships[0].amount_paid).toLocaleString('en-IN')}</p>
+              )}
+            </div>
+            <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+              {memberships[0] ? (() => {
+                const days = daysLeftFromDate(memberships[0].end_date)
+                const pct = elapsedPct(memberships[0].start_date, memberships[0].end_date)
+                const color = days < 0 ? 'text-red-400' : days <= 11 ? 'text-amber-400' : 'text-green-400'
+                const barColor = days < 0 ? 'bg-red-500' : days <= 11 ? 'bg-amber-500' : 'bg-green-500'
+                return (
+                  <>
+                    <p className={`text-2xl font-bold ${color}`}>{Math.abs(days)}</p>
+                    <p className="text-xs text-gray-500 mt-1">{days < 0 ? 'Days Overdue' : 'Days Left'}</p>
+                    <div className="w-full bg-gray-700 rounded-full h-1.5 mt-2">
+                      <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </>
+                )
+              })() : (
+                <>
+                  <p className="text-2xl font-bold text-gray-600">—</p>
+                  <p className="text-xs text-gray-500 mt-1">No membership</p>
+                </>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="max-w-2xl mx-auto px-6 mt-4">
-        <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
-  {(['plans', 'sessions', 'progress', 'profile'] as const).map(tab => (
-    <button key={tab} onClick={() => setActiveTab(tab)}
-      className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
-        ? 'bg-orange-500 text-white'
-        : 'text-gray-400 hover:text-white'}`}>
-      {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
-    </button>
-  ))}
-</div>
-      </div>
+      {/* Tabs — PT members only */}
+      {client?.client_type === 'pt' && (
+        <div className="max-w-2xl mx-auto px-6 mt-4">
+          <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
+            {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
+                  ? 'bg-orange-500 text-white'
+                  : 'text-gray-400 hover:text-white'}`}>
+                {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-2xl mx-auto px-6 pb-8">
+
+        {/* PLANS / SESSIONS / PROGRESS — PT members only */}
+        {client?.client_type === 'pt' && (<>
 
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
@@ -916,8 +969,10 @@ const handleResetPassword = async () => {
             )}
           </div>
         )}
-        {/* PROFILE TAB */}
-{activeTab === 'profile' && (
+        </>)}
+
+        {/* PROFILE — always for regular member, tab-conditional for PT */}
+        {(client?.client_type !== 'pt' || activeTab === 'profile') && (
   <div className="space-y-4">
     <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
       <h2 className="font-semibold text-white">Client Fitness Profile</h2>
