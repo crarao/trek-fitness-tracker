@@ -19,6 +19,8 @@ type Company = {
   client_limit: number
   is_trial: boolean
   notes: string | null
+  client_module_enabled: boolean
+  pt_limit: number | null
 }
 
 type Client = {
@@ -217,6 +219,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         feedback_enabled: editingCompany.feedback_enabled,
         ai_insights_enabled: editingCompany.ai_insights_enabled,
         session_notes_enabled: editingCompany.session_notes_enabled,
+        client_module_enabled: editingCompany.client_module_enabled,
+        pt_limit: editingCompany.pt_limit || null,
         client_limit: editingCompany.client_limit,
         is_trial: editingCompany.is_trial,
         notes: editingCompany.notes || null
@@ -517,16 +521,38 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           Remove Trial (Paid Customer)
                         </button>
 
-                        <div>
-                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Client Limit</label>
-                          <input type="number" value={editingCompany.client_limit || 50}
-                            onChange={e => setEditingCompany({ ...editingCompany, client_limit: parseInt(e.target.value) || 50 })}
-                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Client Limit <span className="normal-case text-gray-600">(Manage)</span></label>
+                            <input type="number" value={editingCompany.client_limit || 50}
+                              onChange={e => setEditingCompany({ ...editingCompany, client_limit: parseInt(e.target.value) || 50 })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">PT Limit <span className="normal-case text-gray-600">(Train/Bundle)</span></label>
+                            <input type="number" placeholder="None"
+                              value={editingCompany.pt_limit ?? ''}
+                              onChange={e => setEditingCompany({ ...editingCompany, pt_limit: e.target.value ? parseInt(e.target.value) : null })}
+                              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                          </div>
                         </div>
 
                         {/* Toggles */}
                         <div className="border-t border-gray-800 pt-4 space-y-3">
                           <p className="text-xs text-gray-500 uppercase tracking-wider">Feature Toggles</p>
+                          <div className="flex justify-between items-center bg-gray-800/50 rounded-xl px-3 py-2.5">
+                            <div>
+                              <p className="text-sm text-white">Client Training Module</p>
+                              <p className="text-xs text-gray-500">Plans, sessions, progress tabs for PT members</p>
+                            </div>
+                            <button
+                              onClick={() => setEditingCompany({ ...editingCompany, client_module_enabled: !editingCompany.client_module_enabled })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.client_module_enabled
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.client_module_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
                           <div className="flex justify-between items-center">
                             <div>
                               <p className="text-sm text-white">Client Feedback</p>

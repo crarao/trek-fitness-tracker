@@ -72,6 +72,7 @@ export default function CompanyAdminPage() {
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [clientLimit, setClientLimit] = useState<number>(50)
+  const [ptLimit, setPtLimit] = useState<number | null>(null)
   const [trialInfo, setTrialInfo] = useState<{ trial_end: string; is_active: boolean; is_trial: boolean } | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({
@@ -122,12 +123,13 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url, trial_end, is_active, client_limit, is_trial')
+      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
     setClientLimit(company?.client_limit || 50)
+    setPtLimit(company?.pt_limit ?? null)
     setLogoUrl(company?.logo_url || '')
     setTrialInfo({
       trial_end: company?.trial_end,
@@ -448,7 +450,7 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Members</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p className="text-xs text-gray-600 mt-1">All statuses{ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
+          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
         <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>

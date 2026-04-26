@@ -155,7 +155,7 @@ export default function ClientDetailPage() {
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(business_type, feedback_enabled)')
+      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled)')
       .eq('id', clientId)
       .single()
     setClient(clientData)
@@ -677,8 +677,8 @@ const handleResetPassword = async () => {
         )}
       </div>
 
-      {/* Tabs — PT members only */}
-      {client?.client_type === 'pt' && (
+      {/* Tabs — PT members only, requires client module */}
+      {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
         <div className="max-w-2xl mx-auto px-6 mt-4">
           <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
             {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
@@ -695,8 +695,8 @@ const handleResetPassword = async () => {
 
       <div className="max-w-2xl mx-auto px-6 pb-8">
 
-        {/* PLANS / SESSIONS / PROGRESS — PT members only */}
-        {client?.client_type === 'pt' && (<>
+        {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
+        {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
 
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
