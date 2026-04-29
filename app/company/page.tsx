@@ -20,6 +20,7 @@ type Client = {
   created_at: string
   client_type: string | null
   memberships: Membership[]
+  archived_at: string | null
 }
 
 const AVATAR_COLORS = [
@@ -88,10 +89,12 @@ export default function CompanyAdminPage() {
   const [passwordMessage, setPasswordMessage] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
   const [logoSaved, setLogoSaved] = useState(false)
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'expiring' | 'expired'>('all')
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'expiring' | 'expired' | 'archived'>('all')
+  const [archivedClients, setArchivedClients] = useState<Client[]>([])
   const [showSettingsPasswords, setShowSettingsPasswords] = useState(false)
   const [showNewClientPassword, setShowNewClientPassword] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [showRevenueDrillIn, setShowRevenueDrillIn] = useState(false)
 
   useEffect(() => { initialize() }, [])
 
@@ -141,26 +144,40 @@ export default function CompanyAdminPage() {
   }
 
   const fetchClients = async (cId: string) => {
-    const [{ data: profiles }, { data: memberships }] = await Promise.all([
+    const [{ data: profiles }, { data: archivedProfiles }, { data: memberships }] = await Promise.all([
       supabase
         .from('profiles')
         .select('*')
         .eq('company_id', cId)
         .eq('role', 'client')
+        .is('archived_at', null)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('company_id', cId)
+        .eq('role', 'client')
+        .not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false }),
       supabase
         .from('memberships')
         .select('*')
         .eq('company_id', cId)
     ])
 
-    const clientsWithMemberships: Client[] = (profiles || []).map(p => ({
+    const withMemberships = (list: any[]) => list.map(p => ({
       ...p,
-      memberships: (memberships || []).filter(m => m.profile_id === p.id)
+      memberships: (memberships || []).filter((m: any) => m.profile_id === p.id)
     }))
 
-    setClients(clientsWithMemberships)
+    setClients(withMemberships(profiles || []))
+    setArchivedClients(withMemberships(archivedProfiles || []))
     setLoading(false)
+  }
+
+  const handleRestoreClient = async (clientId: string) => {
+    await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
+    fetchClients(companyId!)
   }
 
   const handleLogout = async () => {
@@ -202,6 +219,7 @@ export default function CompanyAdminPage() {
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId!)
       .eq('role', 'client')
+      .is('archived_at', null)
 
     if ((count || 0) >= clientLimit) {
       setMessage(`Client limit reached (${clientLimit}). Contact CoachBoard to increase your limit.`)
@@ -308,11 +326,34 @@ export default function CompanyAdminPage() {
 
   const revenueChange = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
 
+  const monthlyRevenueTrend = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
+    const m = d.getMonth()
+    const y = d.getFullYear()
+    const revenue = allMemberships
+      .filter(mem => { const md = new Date(mem.start_date); return md.getMonth() === m && md.getFullYear() === y })
+      .reduce((sum, mem) => sum + (Number(mem.amount_paid) || 0), 0)
+    return { label: d.toLocaleString('en-IN', { month: 'short' }), revenue, isCurrentMonth: i === 5 }
+  })
+  const maxMonthlyRevenue = Math.max(...monthlyRevenueTrend.map(m => m.revenue), 1)
+
+  const planColors: Record<string, string> = {
+    '1 Month': 'bg-blue-500', '3 Months': 'bg-teal-500',
+    '6 Months': 'bg-green-500', '1 Year': 'bg-emerald-400'
+  }
+  const thisMonthByPlan = ['1 Month', '3 Months', '6 Months', '1 Year'].map(plan => {
+    const mems = allMemberships.filter(m => {
+      const d = new Date(m.start_date)
+      return d.getMonth() === thisMonth && d.getFullYear() === thisYear && m.plan_type === plan
+    })
+    return { plan, revenue: mems.reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0), count: mems.length }
+  }).filter(p => p.revenue > 0)
+
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
   const ptCount = clients.filter(c => c.client_type === 'pt').length
 
-  const filteredClients = clients
-    .filter(c => activeFilter === 'all' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
+  const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
+    .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
     .filter(c => {
       if (!searchQuery.trim()) return true
       const q = searchQuery.toLowerCase()
@@ -465,8 +506,13 @@ export default function CompanyAdminPage() {
           <p className="text-3xl font-bold text-red-400">{statusCounts.expired}</p>
           <p className="text-xs text-gray-600 mt-1">Not renewed</p>
         </div>
-        <div className="bg-gray-900 border border-green-900/50 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">This Month</p>
+        <div
+          className={`bg-gray-900 border rounded-2xl p-4 cursor-pointer select-none transition ${showRevenueDrillIn ? 'border-green-700' : 'border-green-900/50'}`}
+          onClick={() => setShowRevenueDrillIn(!showRevenueDrillIn)}>
+          <div className="flex justify-between items-start">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">This Month</p>
+            <span className={`text-gray-500 text-sm transition-transform inline-block ${showRevenueDrillIn ? 'rotate-180' : ''}`}>▾</span>
+          </div>
           <p className="text-3xl font-bold text-green-400">
             ₹{thisMonthRevenue >= 100000
               ? `${(thisMonthRevenue / 100000).toFixed(1)}L`
@@ -485,6 +531,65 @@ export default function CompanyAdminPage() {
           )}
         </div>
       </div>
+
+      {/* Revenue drill-in */}
+      {showRevenueDrillIn && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-green-900/30 rounded-2xl p-5 space-y-5">
+
+            {/* By plan type */}
+            {thisMonthByPlan.length > 0 ? (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
+                  {now.toLocaleString('en-IN', { month: 'long' })} — by plan
+                </p>
+                <div className="space-y-2.5">
+                  {thisMonthByPlan.map(({ plan, revenue, count }) => {
+                    const pct = thisMonthRevenue > 0 ? Math.round((revenue / thisMonthRevenue) * 100) : 0
+                    return (
+                      <div key={plan} className="flex items-center gap-3">
+                        <p className="text-xs text-gray-400 w-20 flex-shrink-0">{plan}</p>
+                        <div className="flex-1 bg-gray-800 rounded-full h-2">
+                          <div className={`h-2 rounded-full ${planColors[plan]}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <p className="text-xs text-gray-400 text-right flex-shrink-0 w-28">
+                          ₹{revenue.toLocaleString('en-IN')} <span className="text-gray-600">({count})</span>
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600">No revenue recorded this month yet.</p>
+            )}
+
+            {/* Monthly trend */}
+            <div className="border-t border-gray-800 pt-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Last 6 months</p>
+              <div className="space-y-2">
+                {monthlyRevenueTrend.map(({ label, revenue, isCurrentMonth }) => {
+                  const pct = Math.round((revenue / maxMonthlyRevenue) * 100)
+                  return (
+                    <div key={label} className="flex items-center gap-3">
+                      <p className={`text-xs w-8 flex-shrink-0 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>{label}</p>
+                      <div className="flex-1 bg-gray-800 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${isCurrentMonth ? 'bg-green-500' : 'bg-gray-600'}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className={`text-xs text-right flex-shrink-0 w-20 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>
+                        {revenue > 0
+                          ? `₹${revenue >= 100000 ? `${(revenue / 100000).toFixed(1)}L` : revenue >= 1000 ? `${(revenue / 1000).toFixed(1)}K` : revenue.toLocaleString('en-IN')}`
+                          : '—'}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* CoachBoard subscription status */}
       {trialInfo?.trial_end && (
@@ -576,6 +681,15 @@ export default function CompanyAdminPage() {
                     )}
                   </button>
                 ))}
+                <button onClick={() => setActiveFilter('archived')}
+                  className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
+                    activeFilter === 'archived' ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
+                  }`}>
+                  Archived
+                  {archivedClients.length > 0 && (
+                    <span className="ml-1 text-xs opacity-60">({archivedClients.length})</span>
+                  )}
+                </button>
               </div>
             </div>
             <div className="relative">
@@ -605,7 +719,9 @@ export default function CompanyAdminPage() {
             <div className="px-6 py-12 text-center text-gray-500 text-sm">Loading...</div>
           ) : filteredClients.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
-              {clients.length === 0
+              {activeFilter === 'archived'
+                ? 'No archived members.'
+                : clients.length === 0
                 ? 'No members yet. Add your first one!'
                 : searchQuery.trim()
                 ? `No members match "${searchQuery}".`
@@ -685,7 +801,12 @@ export default function CompanyAdminPage() {
                         {m ? `${fmtDate(m.start_date)} → ${fmtDate(m.end_date)}` : '—'}
                       </td>
                       <td className="px-4 py-4">
-                        {m ? (
+                        {activeFilter === 'archived' ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-gray-800 text-gray-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+                            Archived
+                          </span>
+                        ) : m ? (
                           <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
                             {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -706,11 +827,19 @@ export default function CompanyAdminPage() {
                         ) : <span className="text-gray-600 text-sm">—</span>}
                       </td>
                       <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={handleAction}
-                          className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${actionStyle.cls}`}>
-                          {actionStyle.label}
-                        </button>
+                        {activeFilter === 'archived' ? (
+                          <button
+                            onClick={() => handleRestoreClient(client.id)}
+                            className="text-xs px-3 py-1.5 rounded-lg border transition font-medium border-green-800 text-green-400 hover:bg-green-900/30">
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleAction}
+                            className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${actionStyle.cls}`}>
+                            {actionStyle.label}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )

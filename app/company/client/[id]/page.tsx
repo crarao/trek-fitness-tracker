@@ -45,6 +45,7 @@ type ClientProfile = {
   trainer_name: string | null
   diet_plan: string | null
   client_type: string | null
+  archived_at: string | null
 }
 
 
@@ -370,6 +371,9 @@ const handleResetPassword = async () => {
       start_date: editClientForm.start_date,
       end_date: editClientForm.end_date
     })
+    if (client?.archived_at) {
+      await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
+    }
     setMembershipMessage('Membership renewed! ✓')
     setSavingMembership(false)
     setTimeout(() => setMembershipMessage(''), 3000)
@@ -401,6 +405,17 @@ const handleResetPassword = async () => {
       body: JSON.stringify({ user_id: clientId })
     })
     router.push('/company')
+  }
+
+  const handleArchiveClient = async () => {
+    if (!confirm(`Archive ${client?.full_name}? They will be hidden from the dashboard but all data is kept.`)) return
+    await supabase.from('profiles').update({ archived_at: new Date().toISOString() }).eq('id', clientId)
+    router.push('/company')
+  }
+
+  const handleUnarchiveClient = async () => {
+    await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
+    initialize()
   }
 
   const getChartData = () => {
@@ -472,6 +487,19 @@ const handleResetPassword = async () => {
             className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
             Edit
           </button>
+          {client?.archived_at ? (
+            <button
+              onClick={handleUnarchiveClient}
+              className="text-xs text-green-500 hover:text-green-400 border border-green-900 hover:border-green-500 px-3 py-1.5 rounded-lg transition">
+              Restore
+            </button>
+          ) : (
+            <button
+              onClick={handleArchiveClient}
+              className="text-xs text-gray-500 hover:text-amber-400 border border-gray-700 hover:border-amber-600 px-3 py-1.5 rounded-lg transition">
+              Archive
+            </button>
+          )}
           <button
             onClick={handleDeleteClient}
             disabled={deletingClient}
@@ -487,6 +515,9 @@ const handleResetPassword = async () => {
                 <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
                 {client?.client_type === 'pt' && (
                   <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
+                )}
+                {client?.archived_at && (
+                  <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
                 )}
               </div>
               <p className="text-xs text-gray-400">{client?.email}</p>
@@ -649,6 +680,13 @@ const handleResetPassword = async () => {
               <p className="text-xs text-gray-500 mt-1">Current Plan</p>
               {memberships[0] && (
                 <p className="text-xs text-gray-600 mt-1">₹{Number(memberships[0].amount_paid).toLocaleString('en-IN')}</p>
+              )}
+              {memberships[0] && (
+                <p className="text-xs text-gray-600 mt-1">
+                  {new Date(memberships[0].start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  {' → '}
+                  {new Date(memberships[0].end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </p>
               )}
             </div>
             <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
@@ -987,6 +1025,59 @@ const handleResetPassword = async () => {
         {/* PROFILE — always for regular member, tab-conditional for PT */}
         {(client?.client_type !== 'pt' || activeTab === 'profile') && (
   <div className="space-y-4">
+
+    {/* Membership card — PT only (regular members see this in stat cards at top) */}
+    {client?.client_type === 'pt' && (
+      <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-3">
+        <p className="text-xs text-gray-500 uppercase tracking-wider">Membership</p>
+        {memberships.length === 0 ? (
+          <p className="text-sm text-gray-600">No membership on record.</p>
+        ) : (
+          <>
+            {(() => {
+              const m = memberships[0]
+              const days = daysLeftFromDate(m.end_date)
+              const pct = elapsedPct(m.start_date, m.end_date)
+              const color = days < 0 ? 'text-red-400' : days <= 11 ? 'text-amber-400' : 'text-green-400'
+              const barColor = days < 0 ? 'bg-red-500' : days <= 11 ? 'bg-amber-500' : 'bg-green-500'
+              return (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{m.plan_type}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(m.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {' → '}
+                        {new Date(m.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-bold ${color}`}>{Math.abs(days)} {days < 0 ? 'days overdue' : 'days left'}</p>
+                      <p className="text-xs text-gray-500">₹{Number(m.amount_paid).toLocaleString('en-IN')}</p>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-1.5">
+                    <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              )
+            })()}
+            {memberships.length > 1 && (
+              <div className="border-t border-gray-800 pt-3 space-y-2">
+                <p className="text-xs text-gray-600 uppercase tracking-wider">History</p>
+                {memberships.slice(1).map(m => (
+                  <div key={m.id} className="flex justify-between items-center text-xs text-gray-500">
+                    <span>{m.plan_type} · {new Date(m.start_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })} – {new Date(m.end_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                    <span>₹{Number(m.amount_paid).toLocaleString('en-IN')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )}
+
     <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
 
       {/* Card header with Edit button */}
