@@ -144,7 +144,11 @@ export default function CompanyAdminPage() {
   }
 
   const fetchClients = async (cId: string) => {
-    const [{ data: profiles }, { data: archivedProfiles }, { data: memberships }] = await Promise.all([
+    const [
+      { data: profiles },
+      { data: archivedProfiles },
+      { data: memberships, error: membershipsError }
+    ] = await Promise.all([
       supabase
         .from('profiles')
         .select('*')
@@ -164,6 +168,8 @@ export default function CompanyAdminPage() {
         .select('*')
         .eq('company_id', cId)
     ])
+
+    if (membershipsError) console.error('Memberships fetch error:', membershipsError)
 
     const withMemberships = (list: any[]) => list.map(p => ({
       ...p,
