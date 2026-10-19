@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 
+export const maxDuration = 60
+
 const client = new Anthropic()
 
 const coachingStyles: Record<string, string> = {
@@ -19,7 +21,7 @@ export async function POST(request: Request) {
     const businessType = profile.business_type || 'gym'
     const style = coachingStyles[businessType] || coachingStyles.general
 
-    const prompt = `You are an experienced ${businessType} coach creating a weekly training plan structure for a client.
+    const prompt = `You are an experienced ${businessType} coach creating a detailed weekly training plan for a client.
 
 Coaching approach: ${style}
 
@@ -32,21 +34,27 @@ Available Days: ${profile.available_days}
 Goal: ${profile.goal}
 Medical Conditions / Injuries: ${profile.medical_conditions || 'None'}
 
-Output ONLY a list of day headings — one line per day. No exercises, no descriptions, no extra text.
-Format exactly like this example:
-Day 1 – Lower Body Strength (Injury Safe) + Core Stability
-Day 2 – Upper Body Push (Shoulder-Friendly) + Cardio
-Day 3 – Active Recovery + Mobility + Rehab
+PRIORITY RULES (these override the coaching approach above):
+- Treat every instruction in the Goal and Medical Conditions fields as a hard requirement, including schedule, rest days, equipment and exercise preferences.
+- If machines are excluded, do NOT use any machine or cable station (no cable exercises, pec deck, leg press, leg curl, lat pulldown, smith machine). Free weights, bodyweight and outdoor exercises are allowed unless also excluded.
+- If the client has knee pain, avoid deep or heavy loaded knee flexion (back squats, deep lunges, jumping) and prefer knee-friendly alternatives (glute bridges, hip thrusts, step-ups to a low box, wall sits with limited range).
+- Never include exercises that could aggravate the listed medical conditions or injuries.
+- Match the exact number of workout days and rest days requested.
+- Before answering, silently check every exercise against these rules and replace any that break them.
+- Schedule workouts ONLY on the client's Available Days. Every other day of the week must be "REST DAY" (optional light walk/stretching only).
 
-Rules:
-- Cover only the client's available days (skip rest days if not listed, or label them Rest)
-- Each heading must reflect their goal and any injuries or limitations
-- Keep each heading concise — session focus + any relevant modifier in brackets
-- Output nothing else. No intro, no sign-off, no blank lines before or after the list.`
+FORMAT (plain text, no markdown symbols like # or **):
+Day 1 – <Session focus> (<modifier>)
+- <Exercise> – <sets> x <reps or time>, rest <seconds>s
+- ... (5–7 exercises per day, including a warm-up and cool-down line)
+
+Leave one blank line between days. Cover only the client's available days.
+End with one line: "Note: Review with your coach before starting. Not medical advice."
+Output nothing else — no intro, no sign-off.`
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }]
     })
 
