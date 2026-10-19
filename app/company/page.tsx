@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
 
 type Membership = {
   id: string
@@ -72,6 +73,7 @@ export default function CompanyAdminPage() {
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
+  const [currency, setCurrency] = useState<string | null>(null)
   const [clientLimit, setClientLimit] = useState<number>(50)
   const [ptLimit, setPtLimit] = useState<number | null>(null)
   const [trialInfo, setTrialInfo] = useState<{ trial_end: string; is_active: boolean; is_trial: boolean } | null>(null)
@@ -126,11 +128,12 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit')
+      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
+    setCurrency(company?.currency || 'INR')
     setClientLimit(company?.client_limit || 50)
     setPtLimit(company?.pt_limit ?? null)
     setLogoUrl(company?.logo_url || '')
@@ -513,7 +516,7 @@ export default function CompanyAdminPage() {
           <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
           <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
           {expiringSoonRevenue > 0 && (
-            <p className="text-xs text-amber-700 mt-0.5">₹{expiringSoonRevenue.toLocaleString('en-IN')} at risk</p>
+            <p className="text-xs text-amber-700 mt-0.5">{formatMoney(expiringSoonRevenue, currency)} at risk</p>
           )}
         </div>
         <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
@@ -529,11 +532,7 @@ export default function CompanyAdminPage() {
             <span className={`text-gray-500 text-sm transition-transform inline-block ${showRevenueDrillIn ? 'rotate-180' : ''}`}>▾</span>
           </div>
           <p className="text-3xl font-bold text-green-400">
-            ₹{thisMonthRevenue >= 100000
-              ? `${(thisMonthRevenue / 100000).toFixed(1)}L`
-              : thisMonthRevenue >= 1000
-              ? `${(thisMonthRevenue / 1000).toFixed(1)}K`
-              : thisMonthRevenue.toLocaleString('en-IN')}
+            {formatMoneyCompact(thisMonthRevenue, currency)}
           </p>
           {revenueChange !== null ? (
             <p className={`text-xs mt-1 font-medium ${revenueChange >= 0 ? 'text-green-500' : 'text-red-400'}`}>
@@ -568,7 +567,7 @@ export default function CompanyAdminPage() {
                           <div className={`h-2 rounded-full ${planColors[plan]}`} style={{ width: `${pct}%` }} />
                         </div>
                         <p className="text-xs text-gray-400 text-right flex-shrink-0 w-28">
-                          ₹{revenue.toLocaleString('en-IN')} <span className="text-gray-600">({count})</span>
+                          {formatMoney(revenue, currency)} <span className="text-gray-600">({count})</span>
                         </p>
                       </div>
                     )
@@ -593,7 +592,7 @@ export default function CompanyAdminPage() {
                       </div>
                       <p className={`text-xs text-right flex-shrink-0 w-20 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>
                         {revenue > 0
-                          ? `₹${revenue >= 100000 ? `${(revenue / 100000).toFixed(1)}L` : revenue >= 1000 ? `${(revenue / 1000).toFixed(1)}K` : revenue.toLocaleString('en-IN')}`
+                          ? formatMoneyCompact(revenue, currency)
                           : '—'}
                       </p>
                     </div>
@@ -810,7 +809,7 @@ export default function CompanyAdminPage() {
                       </td>
                       <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
                       <td className="hidden sm:table-cell px-4 py-4 text-sm font-medium text-white">
-                        {m ? `₹${Number(m.amount_paid).toLocaleString('en-IN')}` : '—'}
+                        {m ? formatMoney(Number(m.amount_paid), currency) : '—'}
                       </td>
                       <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
                         {m ? `${fmtDate(m.start_date)} → ${fmtDate(m.end_date)}` : '—'}
@@ -909,7 +908,7 @@ export default function CompanyAdminPage() {
                   <option>6 Months</option>
                   <option>1 Year</option>
                 </select>
-                <input type="number" placeholder="Amount paid (₹)"
+                <input type="number" placeholder={currency ? `Amount paid (${currencySymbol(currency)})` : 'Amount paid'}
                   value={newClient.amount_paid}
                   onChange={e => setNewClient({ ...newClient, amount_paid: e.target.value })}
                   className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />

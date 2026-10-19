@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
+import { formatMoney, currencySymbol } from '@/lib/currency'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -156,7 +157,7 @@ export default function ClientDetailPage() {
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled)')
+      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency)')
       .eq('id', clientId)
       .single()
     setClient(clientData)
@@ -449,6 +450,8 @@ const handleResetPassword = async () => {
 
   const chartData = getChartData()
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
+  // null until the client/company row has loaded; INR only if the company's currency is empty
+  const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -581,7 +584,7 @@ const handleResetPassword = async () => {
                   <option>6 Months</option>
                   <option>1 Year</option>
                 </select>
-                <input type="number" placeholder="Amount paid (₹)"
+                <input type="number" placeholder={currency ? `Amount paid (${currencySymbol(currency)})` : 'Amount paid'}
                   value={editClientForm.amount_paid}
                   onChange={e => setEditClientForm({ ...editClientForm, amount_paid: e.target.value })}
                   className="bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
@@ -679,7 +682,7 @@ const handleResetPassword = async () => {
               <p className="text-2xl font-bold text-orange-500">{memberships[0]?.plan_type || '—'}</p>
               <p className="text-xs text-gray-500 mt-1">Current Plan</p>
               {memberships[0] && (
-                <p className="text-xs text-gray-600 mt-1">₹{Number(memberships[0].amount_paid).toLocaleString('en-IN')}</p>
+                <p className="text-xs text-gray-600 mt-1">{formatMoney(Number(memberships[0].amount_paid), currency)}</p>
               )}
               {memberships[0] && (
                 <p className="text-xs text-gray-600 mt-1">
@@ -1053,7 +1056,7 @@ const handleResetPassword = async () => {
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-bold ${color}`}>{Math.abs(days)} {days < 0 ? 'days overdue' : 'days left'}</p>
-                      <p className="text-xs text-gray-500">₹{Number(m.amount_paid).toLocaleString('en-IN')}</p>
+                      <p className="text-xs text-gray-500">{formatMoney(Number(m.amount_paid), currency)}</p>
                     </div>
                   </div>
                   <div className="w-full bg-gray-700 rounded-full h-1.5">
@@ -1068,7 +1071,7 @@ const handleResetPassword = async () => {
                 {memberships.slice(1).map(m => (
                   <div key={m.id} className="flex justify-between items-center text-xs text-gray-500">
                     <span>{m.plan_type} · {new Date(m.start_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })} – {new Date(m.end_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
-                    <span>₹{Number(m.amount_paid).toLocaleString('en-IN')}</span>
+                    <span>{formatMoney(Number(m.amount_paid), currency)}</span>
                   </div>
                 ))}
               </div>
