@@ -384,6 +384,14 @@ export default function CompanyAdminPage() {
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
         <div className="flex flex-wrap justify-between items-center gap-3">
+          <div className="flex items-center gap-3">
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt={companyName}
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-gray-700"
+              />
+            )}
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-xl sm:text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
@@ -393,6 +401,7 @@ export default function CompanyAdminPage() {
               </span>
             </div>
             <p className="text-xs text-gray-500">Company Admin</p>
+          </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
