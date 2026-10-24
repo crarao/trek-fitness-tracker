@@ -36,9 +36,13 @@ export function summarizePlan(text: string): PlanSummary {
     const m = line.match(HEADING)
     if (!m) continue
     const raw = m[1].toLowerCase().replace(/\s+/g, ' ')
-    const label = DAYS[raw] ?? raw.replace(/^day\s*/, 'Day ')
+    let label = DAYS[raw] ?? raw.replace(/^day\s*/, 'Day ')
+    let rest = m[2]
+    // "Day 1 – Tuesday – Upper Body" -> use the weekday as the label
+    const inner = rest.match(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b\s*(?:[–—:\-]\s*)?(.*)$/i)
+    if (inner) { label = DAYS[inner[1].toLowerCase()]; rest = inner[2] }
     const isRest = /\brest\b/i.test(line)
-    let focus = isRest ? 'Rest' : m[2].replace(/\(.*?\)/g, '').replace(/[:\s]+$/, '').trim()
+    let focus = isRest ? 'Rest' : rest.replace(/\(.*?\)/g, '').replace(/[:\s]+$/, '').trim()
     if (focus.length > 28) focus = focus.slice(0, 27).trimEnd() + '…'
     days.push(focus ? `${label} · ${focus}` : label)
     if (!isRest) workoutDays++

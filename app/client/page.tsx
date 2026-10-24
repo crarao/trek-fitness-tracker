@@ -135,7 +135,7 @@ if (prof) {
       // Start on this week's plan if there is one, otherwise the newest
       const current = plansData.find(p => weekStatus(p.week_start) === 'current')
       setActivePlanId((current || plansData[0]).id)
-      setPlanOpen(true)
+      setPlanOpen(!!current) // full text open only for this week's plan
     }
 
     const { data: sessionsData } = await supabase
@@ -501,6 +501,9 @@ const handleChangePassword = async () => {
                     </p>
                     {weekStatus(activePlan.week_start) === 'current' && (
                       <span className="inline-block text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full mb-2">This week</span>
+                    )}
+                    {weekStatus(activePlan.week_start) === 'upcoming' && (
+                      <span className="inline-block text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full mb-2">Upcoming</span>
                     )}
                     {activePlan.workout_time && (
                       <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
