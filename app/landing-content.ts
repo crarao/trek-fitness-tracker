@@ -7,8 +7,8 @@ export const CONTACT_EMAIL = 'crarao@gmail.com'
 
 export const DEMO_SUBJECT = 'CoachBoard demo'
 
-// Shown in the page footer
-export const INSTAGRAM_HANDLE = 'getcoachboard.in'
+// Shown in the contact box under the form
+export const INSTAGRAM_HANDLE = 'coachboard.in'
 export const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_HANDLE}/`
 
 // Testimonials appear on the page automatically once this list has at least one entry.

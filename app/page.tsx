@@ -240,6 +240,19 @@ export default async function Home() {
             <div className="mt-8 max-w-2xl">
               <ContactForm />
             </div>
+            <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-base text-white/90">
+              Prefer Instagram?
+              <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer"
+                className="cb-focus inline-flex items-center gap-1.5 rounded font-semibold text-white underline underline-offset-4 decoration-white/50 hover:decoration-white"
+                aria-label={`Message CoachBoard on Instagram, @${INSTAGRAM_HANDLE}`}>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="5" />
+                  <circle cx="12" cy="12" r="4" />
+                  <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+                </svg>
+                Message @{INSTAGRAM_HANDLE}
+              </a>
+            </p>
           </div>
         </section>
       </main>
@@ -247,15 +260,7 @@ export default async function Home() {
       <footer className="border-t" style={{ borderColor: C.line }}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-sm sm:px-8" style={{ color: C.steel }}>
           <p>© {new Date().getFullYear()} CoachBoard</p>
-          <div className="flex flex-wrap items-center gap-5">
-            <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" className="cb-focus inline-flex items-center gap-1.5 rounded hover:underline" aria-label={`CoachBoard on Instagram, @${INSTAGRAM_HANDLE}`}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <rect x="3" y="3" width="18" height="18" rx="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-              </svg>
-              @{INSTAGRAM_HANDLE}
-            </a>
+          <div className="flex gap-5">
             <Link href="/login" className="cb-focus rounded hover:underline">Log in</Link>
             <a href={contactHref} className="cb-focus rounded hover:underline">Contact</a>
           </div>
