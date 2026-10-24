@@ -12,6 +12,7 @@ type Membership = {
   amount_paid: number
   start_date: string
   end_date: string
+  created_at?: string
 }
 
 type Client = {
@@ -40,7 +41,10 @@ function initials(name: string) {
 
 function latestMembership(memberships: Membership[]): Membership | null {
   if (!memberships?.length) return null
-  return [...memberships].sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime())[0]
+  // Latest start date wins; if two start the same day, the most recently created one is current
+  return [...memberships].sort((a, b) =>
+    (b.start_date.localeCompare(a.start_date)) || ((b.created_at || '').localeCompare(a.created_at || ''))
+  )[0]
 }
 
 function daysLeft(endDate: string): number {

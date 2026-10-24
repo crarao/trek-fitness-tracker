@@ -57,6 +57,7 @@ type Membership = {
   amount_paid: number
   start_date: string
   end_date: string
+  created_at?: string
 }
 
 type Plan = {
@@ -142,6 +143,8 @@ export default function ClientDetailPage() {
   const [editMessage, setEditMessage] = useState('')
   const [savingMembership, setSavingMembership] = useState(false)
   const [membershipMessage, setMembershipMessage] = useState('')
+  // Renew = new entry starting after the current one; Correct = edit the current entry
+  const [membershipMode, setMembershipMode] = useState<'renew' | 'correct'>('renew')
   const [deletingClient, setDeletingClient] = useState(false)
   const [editingClientProfile, setEditingClientProfile] = useState(false)
   const [clientProfileForm, setClientProfileForm] = useState({
@@ -213,6 +216,7 @@ export default function ClientDetailPage() {
       .select('*')
       .eq('profile_id', clientId)
       .order('start_date', { ascending: false })
+      .order('created_at', { ascending: false })
     setMemberships(membershipsData || [])
 
     const { data: plansData } = await supabase
@@ -491,10 +495,43 @@ const handleResetPassword = async () => {
     setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }
 
+  const todayLocal = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // A renewal starts when the current membership ends (if it hasn't ended yet), otherwise today
+  const renewalStartDate = () => {
+    const latest = memberships[0]
+    const today = todayLocal()
+    return latest?.end_date && latest.end_date > today ? latest.end_date : today
+  }
+
+  const switchMembershipMode = (mode: 'renew' | 'correct') => {
+    const latest = memberships[0]
+    setMembershipMode(mode)
+    setMembershipMessage('')
+    if (mode === 'correct' && latest) {
+      setEditClientForm(prev => ({
+        ...prev,
+        plan_type: latest.plan_type,
+        amount_paid: latest.amount_paid?.toString() || '',
+        start_date: latest.start_date,
+        end_date: latest.end_date,
+      }))
+    } else {
+      setEditClientForm(prev => ({ ...prev, start_date: renewalStartDate() }))
+    }
+  }
+
   const handleRenewMembership = async () => {
     if (!companyId) return
+    if (!editClientForm.start_date || !editClientForm.end_date) {
+      showToast('Pick a start date for the renewal', 'error')
+      return
+    }
     setSavingMembership(true)
-    await supabase.from('memberships').insert({
+    const { error: renewError } = await supabase.from('memberships').insert({
       profile_id: clientId,
       company_id: companyId,
       plan_type: editClientForm.plan_type,
@@ -502,12 +539,20 @@ const handleResetPassword = async () => {
       start_date: editClientForm.start_date,
       end_date: editClientForm.end_date
     })
+    if (renewError) {
+      setSavingMembership(false)
+      showToast('Could not renew: ' + renewError.message, 'error')
+      return
+    }
     if (client?.archived_at) {
       await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
     }
-    setMembershipMessage('Membership renewed! ✓')
-    showToast('Membership renewed ✓')
+    setMembershipMessage('')
+    showToast(`Membership renewed ✓ ${formatDate(editClientForm.start_date, country, 'dayMonth')} → ${formatDate(editClientForm.end_date, country, 'medium')}`)
     setSavingMembership(false)
+    // Close the edit panel so the updated membership card is what the coach sees
+    setShowEditClient(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
   }
@@ -516,15 +561,22 @@ const handleResetPassword = async () => {
     const latest = memberships[0]
     if (!latest) return
     setSavingMembership(true)
-    await supabase.from('memberships').update({
+    const { error: correctError } = await supabase.from('memberships').update({
       plan_type: editClientForm.plan_type,
       amount_paid: parseFloat(editClientForm.amount_paid) || 0,
       start_date: editClientForm.start_date,
       end_date: editClientForm.end_date
     }).eq('id', latest.id)
-    setMembershipMessage('Membership corrected! ✓')
+    if (correctError) {
+      setSavingMembership(false)
+      showToast('Could not save the correction: ' + correctError.message, 'error')
+      return
+    }
+    setMembershipMessage('')
     showToast('Membership corrected ✓')
     setSavingMembership(false)
+    setShowEditClient(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
   }
@@ -623,10 +675,13 @@ const handleResetPassword = async () => {
                 phone: client?.phone || '',
                 plan_type: latest?.plan_type || '1 Month',
                 amount_paid: latest?.amount_paid?.toString() || '',
-                start_date: latest?.start_date || new Date().toISOString().split('T')[0],
-                end_date: latest?.end_date || '',
+                // Opens in Renew mode: dates start after the current membership (or today)
+                start_date: renewalStartDate(),
+                end_date: '',
                 client_type: client?.client_type || 'member'
               })
+              setMembershipMode('renew')
+              setMembershipMessage('')
               setShowEditClient(!showEditClient)
             }}
             className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
@@ -716,6 +771,22 @@ const handleResetPassword = async () => {
                   </span>
                 )}
               </div>
+              {memberships[0] && (
+                <div className="flex gap-1 bg-gray-800 p-1 rounded-xl w-fit" role="tablist">
+                  {(['renew', 'correct'] as const).map(mode => (
+                    <button key={mode} role="tab" aria-selected={membershipMode === mode}
+                      onClick={() => switchMembershipMode(mode)}
+                      className={`px-4 py-1.5 text-xs font-medium rounded-lg transition ${membershipMode === mode ? 'bg-orange-500 text-white' : 'text-gray-400 hover:text-white'}`}>
+                      {mode === 'renew' ? 'Renew' : 'Correct current'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-gray-500">
+                {membershipMode === 'renew'
+                  ? 'Adds a new membership. It starts when the current one ends (or today if it has already ended). History is kept.'
+                  : 'Fixes a mistake in the current membership. No new entry is added.'}
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 <select
                   value={editClientForm.plan_type}
@@ -754,23 +825,21 @@ const handleResetPassword = async () => {
               {membershipMessage && (
                 <p className="text-green-400 text-sm">{membershipMessage}</p>
               )}
-              <div className="flex gap-2">
+              {membershipMode === 'renew' || !memberships[0] ? (
                 <button
                   onClick={handleRenewMembership}
-                  disabled={savingMembership}
-                  className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-                  {savingMembership ? 'Saving...' : 'Renew Membership'}
+                  disabled={savingMembership || !editClientForm.start_date}
+                  className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                  {savingMembership ? 'Saving...' : memberships[0] ? 'Renew membership' : 'Add membership'}
                 </button>
-                {memberships[0] && (
-                  <button
-                    onClick={handleCorrectMembership}
-                    disabled={savingMembership}
-                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-                    Correct Current
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-gray-600">Renew adds a new entry (keeps history). Correct updates the current entry (for fixing mistakes).</p>
+              ) : (
+                <button
+                  onClick={handleCorrectMembership}
+                  disabled={savingMembership}
+                  className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                  {savingMembership ? 'Saving...' : 'Save correction'}
+                </button>
+              )}
             </div>
 
           </div>

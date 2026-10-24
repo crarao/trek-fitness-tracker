@@ -18,6 +18,9 @@ _Last updated: 24 Oct 2026_
 - [x] **#10 US coach's company and sample clients** — done manually by Anand
 - [x] **#23 Landing page for getcoachboard.com** — public home page, no pricing, contact form saved to `contact_requests` and shown in /admin → Requests, share preview card (#8)
 - [x] **Super admin fixes** — in-app confirm box for delete, Create Company validates before saving (no orphan/duplicate companies), client/PT limit boxes fixed, reset password for company admin and partners, phone-friendly company list (#6, #9)
+- [x] **#1 (part) RLS critical fixes** — run in Supabase 24 Oct: `memberships` RLS on with 3 rules (staff own gym, clients own, super admin all); trigger `protect_profile_columns` stops anyone but super admin / server changing `role` or `company_id`. Undo: `alter table public.memberships disable row level security; alter table public.profiles disable trigger protect_profile_columns;`
+- [x] **#24 Plans tab polish** — clearer buttons, week defaults to Monday, panels scroll into view, new card highlighted, missing-profile note (#15)
+- [x] **#28 Membership renew fix** — Edit opens in Renew mode with dates starting after the current membership (or today); separate Correct mode; saves checked with red errors; same-day tie goes to the newest entry (#16)
 - [x] **#4 Role check at the door** — `middleware.ts` renamed to `proxy.ts` (Next 16); each section only opens for the right role, others go to their own home (#14)
 - [x] **#3 `.claude/settings.local.json` no longer tracked** — approved by Anand; added to `.gitignore` (#13)
 - [x] **No-deletion rule for Claude** — CLAUDE.md Rule #1 + `.claude/settings.json` deny list (#2)
@@ -26,19 +29,13 @@ _Last updated: 24 Oct 2026_
 
 ## P0 — Security (before more real customers)
 
-- [ ] **#1 RLS gap** — one gym's owner can read another gym's data if they know its `company_id`. Biggest remaining risk; also blocks anything medical. Needs SQL policies run in Supabase (desktop job).
-
-## P1 — Plans tab polish (leftovers from the 22 Oct phone-testing list, Tasks 1–3)
-
-- [ ] **#24 Plans tab details**
-  - Buttons: "✨ Create plan with AI" and "✍️ Write plan manually", plus helper line: "Create a weekly plan, review it, then pick the week to assign it to the client."
-  - Manual form submit button says "Assign plan to client".
-  - "Week starting" defaults to next Monday in both panels.
-  - Opening a panel scrolls it into view.
-  - After assigning: highlight the new plan card for ~2 s; message reads "✓ Plan assigned for week of <date>".
-  - Disable both plan buttons while the AI is working; indeterminate progress bar in the working panel.
-  - Yellow note if goal, fitness level or available days are missing in Profile (don't block generation).
-  - Keep as is (decided): messages stay big and centred; AI timeout stays 60 s to match the server limit.
+- [ ] **#1 RLS: remaining rules** — RLS was already on for most tables (audit 24 Oct). Done so far: `memberships` closed and role/company lock on profiles (see Done). Still to fix:
+  - Any member of a gym (incl. clients) can update their company row: trial end, client limit, active status. Restrict to company admin + protect billing columns.
+  - Clients can read every profile in their gym (phones, medical conditions). Clients should see only themselves; staff their gym.
+  - Logged-out visitors can read all companies (incl. internal notes, emails) via "Anyone can read company branding". Limit to what the login page needs.
+  - Partners are missing from weekly_plans / logged_sessions / session_feedback rules (staff can't assign plans).
+  - `client_goals` has RLS on but no rules (probably unused).
+  - Do with an undo script per change, at the computer, then test as super admin, coach, partner and client.
 
 ## P2 — Speed (phone app feels slow)
 
