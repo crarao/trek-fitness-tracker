@@ -50,6 +50,8 @@ companies
   ├── client_limit, pt_limit
   ├── feedback_enabled, ai_insights_enabled, session_notes_enabled
   ├── client_module_enabled
+  ├── country (IN | US, default IN)   ← drives currency, date format, client login method
+  ├── currency (INR | USD)            ← set from country by super admin
   └── business_type (gym | trek | pilates | yoga | cycling | general)
 
 profiles (one per user, linked to a company)
@@ -262,6 +264,8 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 **AI calls:** Claude Haiku via `@anthropic-ai/sdk`. Plans use `max_tokens: 300` (heading-only format). Insights use `max_tokens: 200`. Business type always passed as context.
 
 **Component structure:** Pages are monolithic `'use client'` files. No shared component library. Build inline per page.
+
+**Country & dates:** Never hard-code `'en-IN'`, `'en'`, `toLocaleDateString()` or `new Date('YYYY-MM-DD')` for display. Use `lib/locale.ts` (`formatDate(value, country, style)`, `loginMethod`, `dialCode`, `phonePlaceholder`) with the company's `country`. Date-only DB values must go through `parseDate`/`formatDate` so they don't shift a day in US timezones. Money uses `lib/currency.ts`.
 
 **Membership latest record:** Always sort by `start_date DESC`, take index `[0]`. This is the active plan.
 

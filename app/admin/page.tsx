@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate } from '@/lib/locale'
 
 type Company = {
   id: string
@@ -21,6 +22,7 @@ type Company = {
   notes: string | null
   client_module_enabled: boolean
   pt_limit: number | null
+  country: string | null
 }
 
 type Client = {
@@ -49,6 +51,7 @@ export default function AdminPage() {
   email: '', 
   adminPassword: '', 
   phone: '',
+  country: 'IN' as Country,
   trial_start: new Date().toISOString().split('T')[0],
   trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 })
@@ -151,7 +154,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
     const { data: company, error: companyError } = await supabase
   .from('companies')
-  .insert({ name: newCompany.name, email: resolvedEmail, phone: newCompany.phone })
+  .insert({ name: newCompany.name, email: resolvedEmail, phone: newCompany.phone, country: newCompany.country, currency: currencyForCountry(newCompany.country) })
   .select()
   .single()
 
@@ -186,6 +189,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   email: '', 
   adminPassword: '', 
   phone: '',
+  country: 'IN' as Country,
   trial_start: new Date().toISOString().split('T')[0],
   trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 })
@@ -223,7 +227,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         pt_limit: editingCompany.pt_limit || null,
         client_limit: editingCompany.client_limit,
         is_trial: editingCompany.is_trial,
-        notes: editingCompany.notes || null
+        notes: editingCompany.notes || null,
+        country: normalizeCountry(editingCompany.country),
+        currency: currencyForCountry(normalizeCountry(editingCompany.country))
       })
       .eq('id', editingCompany.id)
     setEditMessage('Saved! ✓')
@@ -374,6 +380,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Country <span className="normal-case text-gray-600">— sets currency, date format and how clients log in</span></label>
+                  <select value={newCompany.country}
+                    onChange={(e) => setNewCompany({ ...newCompany, country: normalizeCountry(e.target.value) })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                    {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label} ({c.currency})</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Admin Login <span className="normal-case text-gray-600">— email or 10-digit phone, this becomes the login credential</span></label>
                   <input type="text" placeholder="Email or phone number"
                     value={newCompany.email}
@@ -453,15 +467,15 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 · {new Date(company.trial_end) < new Date()
                                   ? company.is_trial ? 'Trial expired' : 'Subscription expired'
                                   : company.is_trial
-                                    ? `Trial ends ${new Date(company.trial_end).toLocaleDateString()}`
-                                    : `Subscription until ${new Date(company.trial_end).toLocaleDateString()}`}
+                                    ? `Trial ends ${formatDate(company.trial_end, normalizeCountry(company.country), 'medium')}`
+                                    : `Subscription until ${formatDate(company.trial_end, normalizeCountry(company.country), 'medium')}`}
                               </span>
                             )}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <p className="text-xs text-gray-600">{new Date(company.created_at).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-600">{formatDate(company.created_at, normalizeCountry(company.country), 'medium')}</p>
                         <button
                           onClick={() => setEditingCompany(editingCompany?.id === company.id ? null : { ...company })}
                           className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
@@ -498,6 +512,15 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <input type="tel" value={editingCompany.phone || ''}
                             onChange={e => setEditingCompany({ ...editingCompany, phone: e.target.value })}
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Country <span className="normal-case text-gray-600">— also sets currency</span></label>
+                          <select value={normalizeCountry(editingCompany.country)}
+                            onChange={e => setEditingCompany({ ...editingCompany, country: e.target.value })}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label} ({c.currency})</option>)}
+                          </select>
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">

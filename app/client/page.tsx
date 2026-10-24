@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -99,7 +100,7 @@ const [profileMessage, setProfileMessage] = useState('')
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled)')
+      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country)')
       .eq('id', user.id)
       .single()
 
@@ -304,7 +305,7 @@ const handleChangePassword = async () => {
     const labels = sortedWeeks.map(w => {
       const parts = w.split('-')
       const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-      return date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+      return formatDate(date, country, 'dayMonth')
     })
 
     return {
@@ -314,6 +315,8 @@ const handleChangePassword = async () => {
     }
   }
 
+  // Company country drives date format; null until the profile has loaded
+  const country: Country | null = profile ? normalizeCountry(profile.companies?.country) : null
   const chartData = getChartData()
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   const currentStreak = (() => {
@@ -477,7 +480,7 @@ const handleChangePassword = async () => {
                       className={`text-xs px-3 py-1.5 rounded-full border transition ${activePlanId === plan.id
                         ? 'bg-orange-500 border-orange-500 text-white'
                         : 'border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'}`}>
-                      {new Date(plan.week_start).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                      {formatDate(plan.week_start, country, 'dayMonth')}
                     </button>
                   ))}
                 </div>
@@ -486,7 +489,7 @@ const handleChangePassword = async () => {
                   <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
                     <p className="text-base font-semibold mb-1">
-                      {new Date(activePlan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
+                      {formatDate(activePlan.week_start, country, 'long')}
                     </p>
                     {activePlan.workout_time && (
                       <p className="text-xs text-orange-400 mb-4">⏰ Workout time: {activePlan.workout_time}</p>
@@ -541,7 +544,7 @@ const handleChangePassword = async () => {
                 <option value="">— None —</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>
-                    Week of {new Date(p.week_start).toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                    Week of {formatDate(p.week_start, country, 'dayMonth')}
                   </option>
                 ))}
               </select>
@@ -705,7 +708,7 @@ const handleChangePassword = async () => {
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <p className="text-sm font-medium text-white">
-                          {new Date(session.session_date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes</p>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
+import { type Country, normalizeCountry, formatDate, dialCode } from '@/lib/locale'
 
 type Membership = {
   id: string
@@ -63,8 +64,8 @@ function elapsedPct(m: Membership): number {
   return Math.min(Math.max((elapsed / total) * 100, 0), 100)
 }
 
-function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+function fmtDate(d: string, country: Country | null) {
+  return formatDate(d, country, 'dayMonth')
 }
 
 export default function CompanyAdminPage() {
@@ -74,6 +75,7 @@ export default function CompanyAdminPage() {
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [currency, setCurrency] = useState<string | null>(null)
+  const [country, setCountry] = useState<Country | null>(null)
   const [clientLimit, setClientLimit] = useState<number>(50)
   const [ptLimit, setPtLimit] = useState<number | null>(null)
   const [trialInfo, setTrialInfo] = useState<{ trial_end: string; is_active: boolean; is_trial: boolean } | null>(null)
@@ -128,12 +130,13 @@ export default function CompanyAdminPage() {
 
     const { data: company } = await supabase
       .from('companies')
-      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency')
+      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country')
       .eq('id', profile.company_id)
       .single()
 
     setCompanyName(company?.name || '')
     setCurrency(company?.currency || 'INR')
+    setCountry(normalizeCountry(company?.country))
     setClientLimit(company?.client_limit || 50)
     setPtLimit(company?.pt_limit ?? null)
     setLogoUrl(company?.logo_url || '')
@@ -342,7 +345,7 @@ export default function CompanyAdminPage() {
     const revenue = allMemberships
       .filter(mem => { const md = new Date(mem.start_date); return md.getMonth() === m && md.getFullYear() === y })
       .reduce((sum, mem) => sum + (Number(mem.amount_paid) || 0), 0)
-    return { label: d.toLocaleString('en-IN', { month: 'short' }), revenue, isCurrentMonth: i === 5 }
+    return { label: formatDate(d, country, 'month'), revenue, isCurrentMonth: i === 5 }
   })
   const maxMonthlyRevenue = Math.max(...monthlyRevenueTrend.map(m => m.revenue), 1)
 
@@ -475,8 +478,8 @@ export default function CompanyAdminPage() {
         <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3">
           <p className="text-amber-400 text-sm">
             {trialInfo.is_trial
-              ? `⚠️ Trial ends in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to continue.`
-              : `📅 Subscription renews in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${new Date(trialInfo.trial_end).toLocaleDateString()}). Contact CoachBoard to renew.`}
+              ? `⚠️ Trial ends in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${formatDate(trialInfo.trial_end, country, 'medium')}). Contact CoachBoard to continue.`
+              : `📅 Subscription renews in ${trialDaysLeft()} day${trialDaysLeft() === 1 ? '' : 's'} (${formatDate(trialInfo.trial_end, country, 'medium')}). Contact CoachBoard to renew.`}
           </p>
         </div>
       )}
@@ -540,7 +543,7 @@ export default function CompanyAdminPage() {
             </p>
           ) : (
             <p className="text-xs text-gray-600 mt-1">
-              {new Date().toLocaleString('en-IN', { month: 'long' })}
+              {formatDate(new Date(), country, 'monthLong')}
             </p>
           )}
         </div>
@@ -555,7 +558,7 @@ export default function CompanyAdminPage() {
             {thisMonthByPlan.length > 0 ? (
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
-                  {now.toLocaleString('en-IN', { month: 'long' })} — by plan
+                  {formatDate(now, country, 'monthLong')} — by plan
                 </p>
                 <div className="space-y-2.5">
                   {thisMonthByPlan.map(({ plan, revenue, count }) => {
@@ -610,7 +613,7 @@ export default function CompanyAdminPage() {
         <div className="px-4 sm:px-8 pt-3">
           {(() => {
             const days = trialDaysLeft() ?? 0
-            const expiry = new Date(trialInfo.trial_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+            const expiry = formatDate(trialInfo.trial_end, country, 'medium')
             const color = days < 0 ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
             const borderColor = days < 0 ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
             return (
@@ -777,11 +780,11 @@ export default function CompanyAdminPage() {
                   const handleAction = () => {
                     const phone = client.phone?.replace(/\D/g, '')
                     if (status === 'expiring' && phone?.length === 10) {
-                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? new Date(m.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}. Renew now to keep going! 💪`
-                      window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? formatDate(m.end_date, country, 'dayMonth') : ''}. Renew now to keep going! 💪`
+                      window.open(`https://wa.me/${dialCode(country ?? 'IN')}${phone}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else if (status === 'expired' && phone?.length === 10) {
                       const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
-                      window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                      window.open(`https://wa.me/${dialCode(country ?? 'IN')}${phone}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else {
                       router.push(`/company/client/${client.id}`)
                     }
@@ -812,7 +815,7 @@ export default function CompanyAdminPage() {
                         {m ? formatMoney(Number(m.amount_paid), currency) : '—'}
                       </td>
                       <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
-                        {m ? `${fmtDate(m.start_date)} → ${fmtDate(m.end_date)}` : '—'}
+                        {m ? `${fmtDate(m.start_date, country)} → ${fmtDate(m.end_date, country)}` : '—'}
                       </td>
                       <td className="px-4 py-4">
                         {activeFilter === 'archived' ? (
