@@ -329,6 +329,7 @@ const handleSaveClientProfile = async () => {
     })
     .eq('id', clientId)
   setClientProfileMessage('Saved! ✓')
+  showToast('Profile saved ✓')
   setSavingClientProfile(false)
   setEditingClientProfile(false)
   setTimeout(() => setClientProfileMessage(''), 3000)
@@ -426,6 +427,7 @@ const handleResetPassword = async () => {
     setResetMessage('Error: ' + result.error)
   } else {
     setResetMessage('Password reset successfully! ✓')
+    showToast('Password reset ✓')
     setNewPassword('')
     setTimeout(() => {
       setShowResetPassword(false)
@@ -456,6 +458,7 @@ const handleResetPassword = async () => {
     await supabase.from('profiles').update({ client_type: editClientForm.client_type }).eq('id', clientId)
     setSavingEdit(false)
     setEditMessage('Saved! ✓')
+    showToast('Member updated ✓')
     initialize()
     setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }
@@ -475,6 +478,7 @@ const handleResetPassword = async () => {
       await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
     }
     setMembershipMessage('Membership renewed! ✓')
+    showToast('Membership renewed ✓')
     setSavingMembership(false)
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
@@ -491,6 +495,7 @@ const handleResetPassword = async () => {
       end_date: editClientForm.end_date
     }).eq('id', latest.id)
     setMembershipMessage('Membership corrected! ✓')
+    showToast('Membership corrected ✓')
     setSavingMembership(false)
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
@@ -565,7 +570,7 @@ const handleResetPassword = async () => {
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
-            className={`min-w-[240px] max-w-sm text-center px-8 py-5 rounded-2xl text-base font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
             {toast.text}
           </div>
         </div>
@@ -711,6 +716,12 @@ const handleResetPassword = async () => {
                     onChange={e => setEditClientForm({ ...editClientForm, end_date: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 </div>
+                {editClientForm.start_date && (
+                  <p className="col-span-2 -mt-1 text-xs text-gray-400">
+                    {formatDate(editClientForm.start_date, country, 'medium')}
+                    {editClientForm.end_date ? ` → ${formatDate(editClientForm.end_date, country, 'medium')}` : ''}
+                  </p>
+                )}
               </div>
               {membershipMessage && (
                 <p className="text-green-400 text-sm">{membershipMessage}</p>
@@ -924,7 +935,8 @@ const handleResetPassword = async () => {
       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
       <input type="date" value={aiPlanMeta.week_start}
         onChange={e => setAiPlanMeta({ ...aiPlanMeta, week_start: e.target.value })}
-        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-3" />
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-1" />
+      <p className="text-xs text-gray-400 mb-3">{aiPlanMeta.week_start ? `Week of ${formatDate(aiPlanMeta.week_start, country, 'long')}` : '\u00a0'}</p>
       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
       <input type="time" value={aiPlanMeta.workout_time}
         onChange={e => setAiPlanMeta({ ...aiPlanMeta, workout_time: e.target.value })}
@@ -947,6 +959,7 @@ const handleResetPassword = async () => {
                   <input type="date" value={newPlan.week_start}
                     onChange={e => setNewPlan({ ...newPlan, week_start: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                  {newPlan.week_start && <p className="text-xs text-gray-400 mt-1">Week of {formatDate(newPlan.week_start, country, 'long')}</p>}
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
@@ -993,6 +1006,7 @@ const handleResetPassword = async () => {
           value={editingPlan.week_start}
           onChange={e => setEditingPlan({ ...editingPlan, week_start: e.target.value })}
           className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+        {editingPlan.week_start && <p className="text-xs text-gray-400 -mt-1">Week of {formatDate(editingPlan.week_start, country, 'long')}</p>}
         <div>
           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
           <input type="time" value={editingPlan.workout_time || ''}

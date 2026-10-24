@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder } from '@/lib/locale'
 
 type Membership = {
   id: string
@@ -76,6 +76,13 @@ export default function CompanyAdminPage() {
   const [companyName, setCompanyName] = useState('')
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ text, kind })
+    toastTimer.current = setTimeout(() => setToast(null), 3000)
+  }
   const [clientLimit, setClientLimit] = useState<number>(50)
   const [ptLimit, setPtLimit] = useState<number | null>(null)
   const [trialInfo, setTrialInfo] = useState<{ trial_end: string; is_active: boolean; is_trial: boolean } | null>(null)
@@ -211,6 +218,7 @@ export default function CompanyAdminPage() {
       setPasswordMessage('Error: ' + error.message)
     } else {
       setPasswordMessage('Password changed successfully! ✓')
+      showToast('Password changed ✓')
       setPasswordData({ newPassword: '', confirmPassword: '' })
       setTimeout(() => { setShowSettings(false); setPasswordMessage('') }, 2000)
     }
@@ -219,6 +227,7 @@ export default function CompanyAdminPage() {
   const handleSaveLogo = async () => {
     await supabase.from('companies').update({ logo_url: logoUrl }).eq('id', companyId!)
     setLogoSaved(true)
+    showToast('Logo saved ✓')
     setTimeout(() => setLogoSaved(false), 2000)
   }
 
@@ -239,14 +248,23 @@ export default function CompanyAdminPage() {
       return
     }
 
-    const resolvedEmail = newClient.email
-      ? newClient.email
-      : /^\d{10}$/.test(newClient.phone.trim())
-        ? `${newClient.phone.trim()}@getcoachboard.in`
-        : ''
+    // Login rule comes from the company's country (lib/locale.ts):
+    // India → email if given, else 10-digit phone ({phone}@getcoachboard.in)
+    // US → email only; phone is saved for contact, never used as a login
+    const method = loginMethod(country ?? 'IN')
+    const enteredEmail = newClient.email.trim()
+    const resolvedEmail = method === 'email'
+      ? (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enteredEmail) ? enteredEmail : '')
+      : enteredEmail
+        ? enteredEmail
+        : /^\d{10}$/.test(newClient.phone.trim())
+          ? `${newClient.phone.trim()}@getcoachboard.in`
+          : ''
 
     if (!resolvedEmail) {
-      setMessage('Error: Enter a valid email or 10-digit phone number')
+      setMessage(method === 'email'
+        ? 'Error: Enter the client\'s email — US clients log in with email'
+        : 'Error: Enter a valid email or 10-digit phone number')
       setSaving(false)
       return
     }
@@ -287,6 +305,7 @@ export default function CompanyAdminPage() {
     }
 
     setMessage('Member created successfully!')
+    showToast('Member added ✓')
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
@@ -386,6 +405,14 @@ export default function CompanyAdminPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {toast && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
@@ -881,11 +908,11 @@ export default function CompanyAdminPage() {
                   value={newClient.full_name}
                   onChange={e => setNewClient({ ...newClient, full_name: e.target.value })}
                   className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="tel" placeholder="Phone number (10 digits)"
+                <input type="tel" placeholder={phonePlaceholder(country ?? 'IN')}
                   value={newClient.phone}
                   onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
                   className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="email" placeholder="Email (optional)"
+                <input type="email" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Email (required — used to log in)' : 'Email (optional)'}
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                   className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
@@ -905,7 +932,9 @@ export default function CompanyAdminPage() {
                 <p className="col-span-2 -mt-1 text-xs text-gray-500">
                   {newClient.email.trim()
                     ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.email.trim()}</span></>
-                    : /^\d{10}$/.test(newClient.phone.trim())
+                    : loginMethod(country ?? 'IN') === 'email'
+                      ? 'Client logs in with email — required for US clients. Phone is for contact only.'
+                      : /^\d{10}$/.test(newClient.phone.trim())
                       ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.phone.trim()}</span></>
                       : 'Client logs in with phone (10 digits) or email'}
                 </p>
@@ -936,6 +965,12 @@ export default function CompanyAdminPage() {
                     onChange={e => setNewClient({ ...newClient, end_date: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
                 </div>
+                {newClient.start_date && (
+                  <p className="col-span-2 -mt-1 text-xs text-gray-400">
+                    Membership: {formatDate(newClient.start_date, country, 'medium')}
+                    {newClient.end_date ? ` → ${formatDate(newClient.end_date, country, 'medium')}` : ''}
+                  </p>
+                )}
                 <input type="text" placeholder="Trainer name (optional)"
                   value={newClient.trainer_name}
                   onChange={e => setNewClient({ ...newClient, trainer_name: e.target.value })}

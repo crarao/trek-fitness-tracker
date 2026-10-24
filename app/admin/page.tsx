@@ -57,6 +57,8 @@ export default function AdminPage() {
 })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  // Company row saved but its admin login failed: retry reuses this row instead of creating a duplicate
+  const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null)
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
@@ -140,23 +142,32 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     setSaving(true)
     setMessage('')
 
-    const resolvedEmail = newCompany.email
-      ? newCompany.email
+    // Admin Login field accepts an email or a 10-digit phone
+    const loginInput = newCompany.email.trim()
+    const resolvedEmail = loginInput
+      ? (/^\d{10}$/.test(loginInput) ? `${loginInput}@getcoachboard.in` : loginInput)
       : /^\d{10}$/.test(newCompany.phone.trim())
         ? `${newCompany.phone.trim()}@getcoachboard.in`
         : ''
 
-    if (!resolvedEmail) {
-      setMessage('Error: Enter a valid email or 10-digit phone number')
+    // Check everything BEFORE saving, so a bad input can't leave a company without a login
+    const problem = !newCompany.name.trim()
+      ? 'Enter the company name'
+      : !resolvedEmail
+        ? 'Enter a valid email or 10-digit phone number for the admin login'
+        : newCompany.adminPassword.length < 6
+          ? 'Admin password must be at least 6 characters'
+          : ''
+    if (problem) {
+      setMessage('Error: ' + problem)
       setSaving(false)
       return
     }
 
-    const { data: company, error: companyError } = await supabase
-  .from('companies')
-  .insert({ name: newCompany.name, email: resolvedEmail, phone: newCompany.phone, country: newCompany.country, currency: currencyForCountry(newCompany.country) })
-  .select()
-  .single()
+    const companyFields = { name: newCompany.name, email: resolvedEmail, phone: newCompany.phone, country: newCompany.country, currency: currencyForCountry(newCompany.country) }
+    const { data: company, error: companyError } = pendingCompanyId
+      ? await supabase.from('companies').update(companyFields).eq('id', pendingCompanyId).select().single()
+      : await supabase.from('companies').insert(companyFields).select().single()
 
     if (companyError) {
       setMessage('Error: ' + companyError.message)
@@ -178,11 +189,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
     const result = await response.json()
     if (result.error) {
-      setMessage('Error: ' + result.error)
+      setPendingCompanyId(company.id)
+      setMessage('Error: Company saved, but the admin login could not be created (' + result.error + '). Fix it and tap Create again — it will reuse the same company, not make a new one.')
       setSaving(false)
+      fetchAll()
       return
     }
 
+    setPendingCompanyId(null)
     setMessage('Company created successfully!')
     setNewCompany({ 
   name: '', 
@@ -445,23 +459,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                 {companies.map((company) => (
                   <div key={company.id} className="bg-gray-900 rounded-2xl border border-gray-800 hover:border-gray-700 transition overflow-hidden">
                     {/* Company Row */}
-                    <div className="px-5 py-4 flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
+                    <div className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-9 h-9 shrink-0 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
                           <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="font-medium text-white text-sm">{company.name}</p>
-                          <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
+                          <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
                             <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
                           )}
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-xs ${company.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                            <span className={`text-xs whitespace-nowrap ${company.is_active ? 'text-green-400' : 'text-red-400'}`}>
                               {company.is_active ? '● Active' : '● Inactive'}
                             </span>
                             {company.trial_end && (
-                              <span className="text-xs" style={{
+                              <span className="text-xs whitespace-nowrap" style={{
                                 color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
                               }}>
                                 · {new Date(company.trial_end) < new Date()
@@ -474,8 +488,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <p className="text-xs text-gray-600">{formatDate(company.created_at, normalizeCountry(company.country), 'medium')}</p>
+                      <div className="flex items-center gap-3 shrink-0 pl-12 sm:pl-0">
+                        <p className="text-xs text-gray-600 whitespace-nowrap mr-auto sm:mr-0">Added {formatDate(company.created_at, normalizeCountry(company.country), 'medium')}</p>
                         <button
                           onClick={() => setEditingCompany(editingCompany?.id === company.id ? null : { ...company })}
                           className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
