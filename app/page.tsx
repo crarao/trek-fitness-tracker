@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
-import { TESTIMONIALS } from './landing-content'
+import { TESTIMONIALS, INSTAGRAM_HANDLE, INSTAGRAM_URL } from './landing-content'
 import ContactForm from './contact-form'
 
 // Public home page for getcoachboard.com.
@@ -240,6 +240,19 @@ export default async function Home() {
             <div className="mt-8 max-w-2xl">
               <ContactForm />
             </div>
+            <p className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-base text-white/90">
+              Prefer Instagram?
+              <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer"
+                className="cb-focus inline-flex items-center gap-1.5 rounded font-semibold text-white underline underline-offset-4 decoration-white/50 hover:decoration-white"
+                aria-label={`Message CoachBoard on Instagram, @${INSTAGRAM_HANDLE}`}>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="5" />
+                  <circle cx="12" cy="12" r="4" />
+                  <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+                </svg>
+                Message @{INSTAGRAM_HANDLE}
+              </a>
+            </p>
           </div>
         </section>
       </main>
