@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate } from '@/lib/locale'
@@ -70,14 +70,43 @@ export default function AdminPage() {
   const [savingPartner, setSavingPartner] = useState(false)
   const [partnerMessage, setPartnerMessage] = useState('')
 
+  // Big centred messages (same style as the coach screens)
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ text, kind })
+    toastTimer.current = setTimeout(() => setToast(null), 3000)
+  }
+
+  // In-app confirm box (browser confirm() pop-ups don't show in many in-app browsers)
+  const [confirmBox, setConfirmBox] = useState<{ title: string; body: string; action: string; onConfirm: () => void } | null>(null)
+
+  // Limit boxes keep raw text so they can be cleared while typing
+  const [limitInput, setLimitInput] = useState('')
+  const [ptLimitInput, setPtLimitInput] = useState('')
+
+  // Password reset for the company admin and partner logins
+  const [companyAdmins, setCompanyAdmins] = useState<Partner[]>([])
+  const [resetTarget, setResetTarget] = useState<{ id: string; name: string } | null>(null)
+  const [resetPasswordValue, setResetPasswordValue] = useState('')
+  const [resettingPassword, setResettingPassword] = useState(false)
+
 
   useEffect(() => { fetchAll() }, [])
 
   useEffect(() => {
-    if (!editingCompany) { setCompanyPartners([]); return }
+    if (!editingCompany) { setCompanyPartners([]); setCompanyAdmins([]); setResetTarget(null); return }
     supabase.from('profiles').select('id, full_name, phone')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
       .then(({ data }) => setCompanyPartners(data || []))
+    supabase.from('profiles').select('id, full_name, phone')
+      .eq('company_id', editingCompany.id).eq('role', 'company_admin')
+      .then(({ data }) => setCompanyAdmins(data || []))
+    setLimitInput(editingCompany.client_limit ? String(editingCompany.client_limit) : '')
+    setPtLimitInput(editingCompany.pt_limit != null ? String(editingCompany.pt_limit) : '')
+    setResetTarget(null)
+    setResetPasswordValue('')
   }, [editingCompany?.id])
 
   const fetchAll = async () => {
@@ -198,6 +227,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
     setPendingCompanyId(null)
     setMessage('Company created successfully!')
+    showToast('Company created ✓')
     setNewCompany({ 
   name: '', 
   email: '', 
@@ -212,20 +242,42 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     fetchAll()
   }
 
-  const handleDeleteCompany = async (companyId: string, companyName: string) => {
-    if (!confirm(`Delete "${companyName}" and all its data? This cannot be undone.`)) return
-    await fetch('/api/delete-company', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company_id: companyId })
+  const handleDeleteCompany = (companyId: string, companyName: string) => {
+    setConfirmBox({
+      title: `Delete "${companyName}"?`,
+      body: 'This deletes the company, all its members and their logins. It cannot be undone.',
+      action: 'Delete company',
+      onConfirm: async () => {
+        const response = await fetch('/api/delete-company', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId })
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok || result.error) {
+          showToast('Could not delete: ' + (result.error || 'server error'), 'error')
+        } else {
+          showToast(`${companyName} deleted`)
+        }
+        fetchAll()
+      }
     })
-    fetchAll()
   }
 
   const handleSaveCompany = async () => {
     if (!editingCompany) return
+    const clientLimit = parseInt(limitInput, 10)
+    if (!Number.isInteger(clientLimit) || clientLimit < 1) {
+      showToast('Client limit must be a number, 1 or more', 'error')
+      return
+    }
+    const ptLimit = ptLimitInput.trim() === '' ? null : parseInt(ptLimitInput, 10)
+    if (ptLimit !== null && (!Number.isInteger(ptLimit) || ptLimit < 0)) {
+      showToast('PT limit must be a number, or leave it empty for no limit', 'error')
+      return
+    }
     setSavingCompany(true)
-    await supabase
+    const { error } = await supabase
       .from('companies')
       .update({
         name: editingCompany.name,
@@ -238,16 +290,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ai_insights_enabled: editingCompany.ai_insights_enabled,
         session_notes_enabled: editingCompany.session_notes_enabled,
         client_module_enabled: editingCompany.client_module_enabled,
-        pt_limit: editingCompany.pt_limit || null,
-        client_limit: editingCompany.client_limit,
+        pt_limit: ptLimit,
+        client_limit: clientLimit,
         is_trial: editingCompany.is_trial,
         notes: editingCompany.notes || null,
         country: normalizeCountry(editingCompany.country),
         currency: currencyForCountry(normalizeCountry(editingCompany.country))
       })
       .eq('id', editingCompany.id)
-    setEditMessage('Saved! ✓')
     setSavingCompany(false)
+    if (error) {
+      showToast('Could not save: ' + error.message, 'error')
+      return
+    }
+    setEditMessage('Saved! ✓')
+    showToast('Company saved ✓')
     setTimeout(() => {
       setEditMessage('')
       setEditingCompany(null)
@@ -288,14 +345,68 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     setTimeout(() => setPartnerMessage(''), 3000)
   }
 
-  const handleRemovePartner = async (partnerId: string, partnerName: string) => {
-    if (!confirm(`Remove partner "${partnerName}"? They will no longer be able to log in.`)) return
-    await supabase.from('profiles').delete().eq('id', partnerId)
-    setCompanyPartners(prev => prev.filter(p => p.id !== partnerId))
+  const handleRemovePartner = (partnerId: string, partnerName: string) => {
+    setConfirmBox({
+      title: `Remove partner "${partnerName}"?`,
+      body: 'They will no longer be able to log in to this company.',
+      action: 'Remove partner',
+      onConfirm: async () => {
+        const { error } = await supabase.from('profiles').delete().eq('id', partnerId)
+        if (error) { showToast('Could not remove: ' + error.message, 'error'); return }
+        setCompanyPartners(prev => prev.filter(p => p.id !== partnerId))
+        showToast(`${partnerName} removed`)
+      }
+    })
+  }
+
+  const handleResetLoginPassword = async () => {
+    if (!resetTarget) return
+    if (resetPasswordValue.length < 6) { showToast('Password must be at least 6 characters', 'error'); return }
+    setResettingPassword(true)
+    const response = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: resetTarget.id, newPassword: resetPasswordValue })
+    })
+    const result = await response.json().catch(() => ({}))
+    setResettingPassword(false)
+    if (!response.ok || result.error) {
+      showToast('Could not reset: ' + (result.error || 'server error'), 'error')
+      return
+    }
+    showToast(`Password reset for ${resetTarget.name} ✓`)
+    setResetTarget(null)
+    setResetPasswordValue('')
   }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {toast && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
+        </div>
+      )}
+      {confirmBox && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-5" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6">
+            <p className="text-lg font-semibold text-white">{confirmBox.title}</p>
+            <p className="text-sm text-gray-400 mt-2">{confirmBox.body}</p>
+            <div className="flex gap-2 mt-6">
+              <button autoFocus onClick={() => setConfirmBox(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { const run = confirmBox.onConfirm; setConfirmBox(null); run() }}
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2.5 rounded-xl transition">
+                {confirmBox.action}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
@@ -561,15 +672,15 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Client Limit <span className="normal-case text-gray-600">(Manage)</span></label>
-                            <input type="number" value={editingCompany.client_limit || 50}
-                              onChange={e => setEditingCompany({ ...editingCompany, client_limit: parseInt(e.target.value) || 50 })}
+                            <input type="number" inputMode="numeric" min={1} value={limitInput}
+                              onChange={e => setLimitInput(e.target.value)}
                               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                           </div>
                           <div>
                             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">PT Limit <span className="normal-case text-gray-600">(Train/Bundle)</span></label>
                             <input type="number" placeholder="None"
-                              value={editingCompany.pt_limit ?? ''}
-                              onChange={e => setEditingCompany({ ...editingCompany, pt_limit: e.target.value ? parseInt(e.target.value) : null })}
+                              inputMode="numeric" min={0} value={ptLimitInput}
+                              onChange={e => setPtLimitInput(e.target.value)}
                               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
                           </div>
                         </div>
@@ -657,6 +768,48 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
                         </div>
 
+                        {/* Company admin login: reset password */}
+                        <div className="border-t border-gray-800 pt-4">
+                          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Admin Login</p>
+                          {companyAdmins.length === 0 ? (
+                            <p className="text-xs text-gray-600 mb-3">No admin login found for this company.</p>
+                          ) : (
+                            <div className="space-y-2 mb-3">
+                              {companyAdmins.map(a => (
+                                <div key={a.id} className="flex justify-between items-center gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
+                                  <div className="min-w-0">
+                                    <p className="text-sm text-white">{a.full_name}</p>
+                                    <p className="text-xs text-gray-500 break-all">{editingCompany.email}</p>
+                                  </div>
+                                  <button onClick={() => { setResetTarget({ id: a.id, name: a.full_name }); setResetPasswordValue('') }}
+                                    className="text-xs text-orange-400 hover:text-orange-300 border border-orange-900 px-3 py-1.5 rounded-lg shrink-0 transition">
+                                    Reset password
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {resetTarget && (
+                            <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-3 mb-3 space-y-2">
+                              <p className="text-xs text-gray-400">New password for <span className="text-white">{resetTarget.name}</span> (6+ characters)</p>
+                              <input type="text" autoComplete="new-password" placeholder="New password"
+                                value={resetPasswordValue}
+                                onChange={e => setResetPasswordValue(e.target.value)}
+                                className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              <div className="flex gap-2">
+                                <button onClick={handleResetLoginPassword} disabled={resettingPassword || resetPasswordValue.length < 6}
+                                  className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm py-2 rounded-xl transition disabled:opacity-50">
+                                  {resettingPassword ? 'Resetting...' : 'Reset password'}
+                                </button>
+                                <button onClick={() => { setResetTarget(null); setResetPasswordValue('') }}
+                                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2 rounded-xl transition">
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {/* Partner Logins */}
                         <div className="border-t border-gray-800 pt-4">
                           <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Partner Logins</p>
@@ -670,11 +823,17 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                     <p className="text-sm text-white">{p.full_name}</p>
                                     <p className="text-xs text-gray-500">{p.phone}</p>
                                   </div>
-                                  <button
-                                    onClick={() => handleRemovePartner(p.id, p.full_name)}
-                                    className="text-xs text-red-500 hover:text-red-400 transition">
-                                    Remove
-                                  </button>
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <button onClick={() => { setResetTarget({ id: p.id, name: p.full_name }); setResetPasswordValue('') }}
+                                      className="text-xs text-orange-400 hover:text-orange-300 transition">
+                                      Reset password
+                                    </button>
+                                    <button
+                                      onClick={() => handleRemovePartner(p.id, p.full_name)}
+                                      className="text-xs text-red-500 hover:text-red-400 transition">
+                                      Remove
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
