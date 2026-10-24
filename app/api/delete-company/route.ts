@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { getCaller } from '@/lib/auth-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -10,6 +11,10 @@ export async function POST(request: Request) {
 
   const { company_id } = await request.json()
   if (!company_id) return NextResponse.json({ error: 'company_id required' }, { status: 400 })
+
+  // Only the platform owner can delete a company
+  const { error: callerError } = await getCaller(['super_admin'])
+  if (callerError) return callerError
 
   // Get all profile IDs for this company
   const { data: profiles } = await supabaseAdmin

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { getCaller, STAFF, checkCanManageClient } from '@/lib/auth-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -10,6 +11,12 @@ export async function POST(request: Request) {
 
   const { user_id } = await request.json()
   if (!user_id) return NextResponse.json({ error: 'user_id required' }, { status: 400 })
+
+  // Only staff of the client's own gym (or super admin)
+  const { caller, error: callerError } = await getCaller(STAFF)
+  if (callerError) return callerError
+  const notAllowed = await checkCanManageClient(caller, user_id)
+  if (notAllowed) return notAllowed
 
   const { data: sessions } = await supabaseAdmin
     .from('logged_sessions')

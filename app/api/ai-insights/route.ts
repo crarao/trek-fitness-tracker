@@ -1,7 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
+import { getCaller } from '@/lib/auth-server'
 
 export async function POST(request: Request) {
+  // Must be logged in (clients request their own insights; staff may too)
+  const { error: authError } = await getCaller(['client', 'company_admin', 'partner', 'super_admin'])
+  if (authError) return authError
+
   try {
     const { sessions, goal, clientName } = await request.json()
 
