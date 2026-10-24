@@ -111,6 +111,10 @@ export default function ClientDetailPage() {
   const [generatedPlan, setGeneratedPlan] = useState('')
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
+  const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
+  const manualFormRef = useRef<HTMLDivElement | null>(null)
+  const aiPanelRef = useRef<HTMLDivElement | null>(null)
+  const aiWorkingRef = useRef<HTMLDivElement | null>(null)
   const [planError, setPlanError] = useState('')
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -164,6 +168,25 @@ export default function ClientDetailPage() {
     setToast({ text, kind })
     toastTimer.current = setTimeout(() => setToast(null), 3000)
   }
+
+  // Default "Week starting": today if it's Monday, otherwise the coming Monday (local date, YYYY-MM-DD)
+  const nextMonday = () => {
+    const d = new Date()
+    const add = (8 - d.getDay()) % 7
+    d.setDate(d.getDate() + add)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // Bring whichever plan panel just opened into view (important on phones)
+  useEffect(() => {
+    if (showPlanForm) manualFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [showPlanForm])
+  useEffect(() => {
+    if (showGeneratedPlan) aiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [showGeneratedPlan])
+  useEffect(() => {
+    if (generatingPlan) aiWorkingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [generatingPlan])
 
   useEffect(() => {
     if (!editClientForm.start_date) return
@@ -227,17 +250,23 @@ export default function ClientDetailPage() {
     }
     setSaving(true)
     setPlanError('')
-    const { error } = await supabase.from('weekly_plans').insert({
+    const { data: inserted, error } = await supabase.from('weekly_plans').insert({
       client_id: clientId,
       week_start: plan.week_start,
       plan_details: plan.plan_details,
       workout_time: plan.workout_time || null
-    })
+    }).select('id').single()
     setSaving(false)
     if (error) {
       setPlanError('Could not save the plan: ' + error.message)
       return false
     }
+    // Briefly highlight the new card so the coach sees where it went
+    if (inserted?.id) {
+      setHighlightPlanId(inserted.id)
+      setTimeout(() => setHighlightPlanId(null), 2500)
+    }
+    showToast(`✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
     initialize()
     return true
   }
@@ -247,7 +276,6 @@ export default function ClientDetailPage() {
     if (ok) {
       setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
       setShowPlanForm(false)
-      showToast('Plan saved ✓')
     }
   }
 
@@ -257,7 +285,6 @@ export default function ClientDetailPage() {
       setGeneratedPlan('')
       setAiPlanMeta({ week_start: '', workout_time: '' })
       setShowGeneratedPlan(false)
-      showToast('Plan assigned ✓')
     }
   }
 
@@ -367,6 +394,7 @@ const handleGeneratePlan = async () => {
 
     if (response.ok && data.plan) {
       setGeneratedPlan(data.plan)
+      setAiPlanMeta(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
       setShowGeneratedPlan(true)
     } else if (response.status === 504) {
       setAiError('The AI took too long to respond. Please try again.')
@@ -868,31 +896,63 @@ const handleResetPassword = async () => {
     <p className="text-sm text-orange-200">{client.goal}</p>
   </div>
 )}
-            <div className="flex justify-between items-center mb-4">
-              <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
-              <div className="flex gap-2">
+{(() => {
+  const missing = [
+    !client?.goal && 'goal',
+    !client?.fitness_level && 'fitness level',
+    !client?.available_days && 'available days',
+  ].filter(Boolean) as string[]
+  if (!missing.length) return null
+  return (
+    <div className="bg-yellow-950/60 border border-yellow-800 rounded-2xl px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-2">
+      <p className="text-xs text-yellow-300">
+        Add {missing.join(', ').replace(/, ([^,]*)$/, ' and $1')} in Profile for a better AI plan.
+      </p>
+      <button onClick={() => setActiveTab('profile')}
+        className="text-xs text-yellow-200 border border-yellow-700 hover:border-yellow-500 px-3 py-1 rounded-lg transition">
+        Open Profile
+      </button>
+    </div>
+  )
+})()}
+            <div className="mb-4">
+              <div className="flex flex-wrap justify-between items-center gap-2">
+                <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
+                <div className="flex flex-wrap gap-2">
   <button
     onClick={handleGeneratePlan}
     disabled={generatingPlan}
     className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
-    {generatingPlan ? '⏳ Generating...' : '✨ Generate with AI'}
+    {generatingPlan ? '⏳ Creating…' : '✨ Create plan with AI'}
   </button>
   <button onClick={() => {
       setPlanError('')
       setAiError('')
-      if (!showPlanForm) setShowGeneratedPlan(false)
+      if (!showPlanForm) {
+        setShowGeneratedPlan(false)
+        setNewPlan(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
+      }
       setShowPlanForm(!showPlanForm)
     }}
-    className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
-    {showPlanForm ? 'Close' : '✍️ Write Plan'}
+    disabled={generatingPlan}
+    className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
+    {showPlanForm ? 'Close' : '✍️ Write plan manually'}
   </button>
-</div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">Create a weekly plan, review it, then pick the week to assign it to the client.</p>
             </div>
 {generatingPlan && (
-  <div className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4 flex items-center gap-4">
+  <div ref={aiWorkingRef} className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4">
+  <style>{`
+    @keyframes cb-indet { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+    .cb-indet { animation: cb-indet 1.4s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .cb-indet { animation: none; width: 100%; opacity: .5 } }
+  `}</style>
+  <div className="flex items-center gap-4">
     <div className="w-6 h-6 rounded-full border-2 border-purple-400 border-t-transparent animate-spin shrink-0" />
     <div className="flex-1">
-      <p className="text-sm text-white font-medium">Writing a plan for {client?.full_name || 'this client'}…</p>
+      <p className="text-sm text-white font-medium">Creating a plan for {client?.full_name?.split(' ')[0] || 'this client'}…</p>
       <p className="text-xs text-gray-500 mt-0.5">
         {aiElapsed < 20 ? 'Usually takes 10–20 seconds.' : 'Taking a bit longer than usual…'} {aiElapsed}s
       </p>
@@ -901,6 +961,10 @@ const handleResetPassword = async () => {
       className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg transition">
       Cancel
     </button>
+  </div>
+  <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-gray-800" aria-hidden="true">
+    <div className="cb-indet h-full w-1/3 rounded-full bg-purple-500" />
+  </div>
   </div>
 )}
 {aiError && !generatingPlan && (
@@ -917,7 +981,7 @@ const handleResetPassword = async () => {
   </div>
 )}
 {showGeneratedPlan && generatedPlan && (
-  <div className="bg-gray-900 rounded-2xl p-5 border border-purple-800 space-y-4 mb-4">
+  <div ref={aiPanelRef} className="scroll-mt-4 bg-gray-900 rounded-2xl p-5 border border-purple-800 space-y-4 mb-4">
     <div className="flex justify-between items-center">
       <p className="text-xs text-purple-400 uppercase tracking-wider font-medium">✨ AI Generated Plan</p>
       <button
@@ -946,13 +1010,13 @@ const handleResetPassword = async () => {
         onClick={handleAssignGeneratedPlan}
         disabled={saving || !aiPlanMeta.week_start || !generatedPlan.trim()}
         className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-        {saving ? 'Assigning...' : 'Assign This Plan to Client'}
+        {saving ? 'Assigning...' : 'Assign plan to client'}
       </button>
     </div>
   </div>
 )}
             {showPlanForm && (
-              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 mb-4">
+              <div ref={manualFormRef} className="scroll-mt-4 bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 mb-4">
                 <h3 className="font-semibold text-sm">New Weekly Plan</h3>
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
@@ -980,7 +1044,7 @@ const handleResetPassword = async () => {
                 <div className="flex gap-2">
                   <button onClick={handleAddPlan} disabled={saving || !newPlan.week_start || !newPlan.plan_details.trim()}
                     className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-                    {saving ? 'Saving...' : 'Save Plan'}
+                    {saving ? 'Assigning...' : 'Assign plan to client'}
                   </button>
                   <button onClick={() => { setShowPlanForm(false); setPlanError('') }}
                     className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
@@ -997,7 +1061,7 @@ const handleResetPassword = async () => {
             ) : (
               <div className="space-y-3">
                 {plans.map(plan => (
-  <div key={plan.id} className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+  <div key={plan.id} className={`bg-gray-900 rounded-2xl p-5 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
     {editingPlan?.id === plan.id ? (
       // Edit mode
       <div className="space-y-3">
