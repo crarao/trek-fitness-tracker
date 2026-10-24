@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -14,6 +15,13 @@ export async function POST(request: Request) {
   )
 
 const { email, password, full_name, company_id, role, phone, trainer_name, diet_plan, client_type } = await request.json()
+
+  // Super admin can create any login. Gym staff can only add clients to their own gym.
+  const { caller, error: callerError } = await getCaller(STAFF)
+  if (callerError) return callerError
+  if (caller.role !== 'super_admin' && (role !== 'client' || company_id !== caller.companyId)) {
+    return forbidden()
+  }
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,

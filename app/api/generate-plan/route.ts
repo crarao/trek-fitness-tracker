@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
+import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
 
 export const maxDuration = 60
 
@@ -15,8 +16,17 @@ const coachingStyles: Record<string, string> = {
 }
 
 export async function POST(request: Request) {
+  // Only gym staff (or super admin) can generate plans — protects Anthropic credits
+  const { caller, error: authError } = await getCaller(STAFF)
+  if (authError) return authError
+
   try {
     const { profile } = await request.json()
+
+    // Staff can only generate for clients in their own gym
+    if (caller.role !== 'super_admin' && profile?.company_id && profile.company_id !== caller.companyId) {
+      return forbidden()
+    }
 
     const businessType = profile.business_type || 'gym'
     const style = coachingStyles[businessType] || coachingStyles.general
