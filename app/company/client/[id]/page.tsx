@@ -109,6 +109,8 @@ export default function ClientDetailPage() {
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [generatedPlan, setGeneratedPlan] = useState('')
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
+  const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
+  const [planError, setPlanError] = useState('')
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [showResetPassword, setShowResetPassword] = useState(false)
@@ -196,24 +198,63 @@ export default function ClientDetailPage() {
     setLoading(false)
   }
 
-  const handleAddPlan = async () => {
+  // Shared insert for both the manual form and the AI panel.
+  // Only clears/closes the form when the database confirms the save.
+  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string }) => {
+    if (!plan.week_start || !plan.plan_details.trim()) {
+      setPlanError('Pick a week and add plan details before saving.')
+      return false
+    }
     setSaving(true)
-    await supabase.from('weekly_plans').insert({
+    setPlanError('')
+    const { error } = await supabase.from('weekly_plans').insert({
       client_id: clientId,
-      week_start: newPlan.week_start,
-      plan_details: newPlan.plan_details,
-      workout_time: newPlan.workout_time || null
+      week_start: plan.week_start,
+      plan_details: plan.plan_details,
+      workout_time: plan.workout_time || null
     })
-    setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
-    setShowPlanForm(false)
     setSaving(false)
+    if (error) {
+      setPlanError('Could not save the plan: ' + error.message)
+      return false
+    }
     initialize()
+    return true
+  }
+
+  const handleAddPlan = async () => {
+    const ok = await insertPlan(newPlan)
+    if (ok) {
+      setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
+      setShowPlanForm(false)
+    }
+  }
+
+  const handleAssignGeneratedPlan = async () => {
+    const ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan })
+    if (ok) {
+      setGeneratedPlan('')
+      setAiPlanMeta({ week_start: '', workout_time: '' })
+      setShowGeneratedPlan(false)
+    }
+  }
+
+  // Plan dates are stored as YYYY-MM-DD. Parse as a local date so the
+  // day doesn't shift backwards in timezones behind UTC (e.g. US).
+  const formatWeekStart = (d: string) => {
+    const [y, m, day] = d.slice(0, 10).split('-').map(Number)
+    return new Date(y, m - 1, day).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })
   }
 
 const handleUpdatePlan = async () => {
   if (!editingPlan) return
+  if (!editingPlan.week_start || !editingPlan.plan_details.trim()) {
+    setPlanError('Pick a week and add plan details before saving.')
+    return
+  }
   setSaving(true)
-  await supabase
+  setPlanError('')
+  const { error } = await supabase
     .from('weekly_plans')
     .update({
       week_start: editingPlan.week_start,
@@ -221,8 +262,12 @@ const handleUpdatePlan = async () => {
       workout_time: editingPlan.workout_time || null
     })
     .eq('id', editingPlan.id)
-  setEditingPlan(null)
   setSaving(false)
+  if (error) {
+    setPlanError('Could not save changes: ' + error.message)
+    return
+  }
+  setEditingPlan(null)
   initialize()
 }
 
@@ -269,6 +314,8 @@ const handleGeneratePlan = async () => {
   setGeneratingPlan(true)
   setShowGeneratedPlan(false)
   setGeneratedPlan('')
+  setShowPlanForm(false)
+  setPlanError('')
 
 const response = await fetch('/api/generate-plan', {
   method: 'POST',
@@ -285,7 +332,6 @@ const response = await fetch('/api/generate-plan', {
   if (data.plan) {
     setGeneratedPlan(data.plan)
     setShowGeneratedPlan(true)
-    setNewPlan(prev => ({ ...prev, plan_details: data.plan }))
   }
   setGeneratingPlan(false)
 }
@@ -757,9 +803,13 @@ const handleResetPassword = async () => {
     className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
     {generatingPlan ? '⏳ Generating...' : '✨ Generate with AI'}
   </button>
-  <button onClick={() => setShowPlanForm(!showPlanForm)}
+  <button onClick={() => {
+      setPlanError('')
+      if (!showPlanForm) setShowGeneratedPlan(false)
+      setShowPlanForm(!showPlanForm)
+    }}
     className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
-    + Assign Plan
+    {showPlanForm ? 'Close' : '✍️ Write Plan'}
   </button>
 </div>
             </div>
@@ -768,27 +818,29 @@ const handleResetPassword = async () => {
     <div className="flex justify-between items-center">
       <p className="text-xs text-purple-400 uppercase tracking-wider font-medium">✨ AI Generated Plan</p>
       <button
-        onClick={() => setShowGeneratedPlan(false)}
+        onClick={() => { setShowGeneratedPlan(false); setPlanError('') }}
         className="text-xs text-gray-500 hover:text-white">
         Dismiss
       </button>
     </div>
     <textarea
   value={generatedPlan}
-  onChange={e => {
-    setGeneratedPlan(e.target.value)
-    setNewPlan(prev => ({ ...prev, plan_details: e.target.value }))
-  }}
+  onChange={e => setGeneratedPlan(e.target.value)}
   rows={15}
   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm resize-none" />
     <div className="border-t border-gray-800 pt-4">
-      <p className="text-xs text-gray-500 mb-3">Select week to assign this plan:</p>
-      <input type="date" value={newPlan.week_start}
-        onChange={e => setNewPlan({ ...newPlan, week_start: e.target.value })}
+      <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
+      <input type="date" value={aiPlanMeta.week_start}
+        onChange={e => setAiPlanMeta({ ...aiPlanMeta, week_start: e.target.value })}
         className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-3" />
+      <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
+      <input type="time" value={aiPlanMeta.workout_time}
+        onChange={e => setAiPlanMeta({ ...aiPlanMeta, workout_time: e.target.value })}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-3" />
+      {planError && <p className="text-xs text-red-400 mb-3">{planError}</p>}
       <button
-        onClick={handleAddPlan}
-        disabled={saving || !newPlan.week_start}
+        onClick={handleAssignGeneratedPlan}
+        disabled={saving || !aiPlanMeta.week_start || !generatedPlan.trim()}
         className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
         {saving ? 'Assigning...' : 'Assign This Plan to Client'}
       </button>
@@ -819,10 +871,17 @@ const handleResetPassword = async () => {
                     rows={6}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
                 </div>
-                <button onClick={handleAddPlan} disabled={saving}
-                  className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-                  {saving ? 'Saving...' : 'Save Plan'}
-                </button>
+                {planError && <p className="text-xs text-red-400">{planError}</p>}
+                <div className="flex gap-2">
+                  <button onClick={handleAddPlan} disabled={saving || !newPlan.week_start || !newPlan.plan_details.trim()}
+                    className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                    {saving ? 'Saving...' : 'Save Plan'}
+                  </button>
+                  <button onClick={() => { setShowPlanForm(false); setPlanError('') }}
+                    className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
 
@@ -853,12 +912,13 @@ const handleResetPassword = async () => {
           onChange={e => setEditingPlan({ ...editingPlan, plan_details: e.target.value })}
           rows={10}
           className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+        {planError && <p className="text-xs text-red-400">{planError}</p>}
         <div className="flex gap-2">
-          <button onClick={handleUpdatePlan} disabled={saving}
+          <button onClick={handleUpdatePlan} disabled={saving || !editingPlan.week_start || !editingPlan.plan_details.trim()}
             className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm py-2.5 rounded-xl transition disabled:opacity-50 font-medium">
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
-          <button onClick={() => setEditingPlan(null)}
+          <button onClick={() => { setEditingPlan(null); setPlanError('') }}
             className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
             Cancel
           </button>
@@ -871,7 +931,7 @@ const handleResetPassword = async () => {
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
             <p className="font-semibold text-sm">
-              {new Date(plan.week_start).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatWeekStart(plan.week_start)}
             </p>
             {plan.workout_time && (
               <p className="text-xs text-orange-400 mt-1">⏰ {plan.workout_time}</p>
@@ -879,7 +939,7 @@ const handleResetPassword = async () => {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setEditingPlan(plan)}
+              onClick={() => { setPlanError(''); setEditingPlan(plan) }}
               className="text-xs text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
               Edit
             </button>
