@@ -120,7 +120,7 @@ export default async function Home() {
         <section className="mx-auto grid max-w-6xl items-center gap-8 px-5 pb-12 pt-4 sm:px-8 md:grid-cols-[1.1fr_1fr] md:gap-12 md:pb-24 md:pt-14">
           <div>
             <h1 className="text-[1.75rem] font-extrabold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.02]" style={wide}>
-              Your gym’s renewals, reminders and training plans. On one phone.
+              Renewals, reminders and training plans. On one phone.
             </h1>
             <p className="mt-4 max-w-[34rem] text-base leading-relaxed sm:mt-6 sm:text-lg" style={{ color: C.steel }}>
               CoachBoard shows who is due for renewal, sends the reminder on WhatsApp in one tap, and keeps every client’s plan and progress in one place.
