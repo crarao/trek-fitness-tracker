@@ -899,6 +899,13 @@ export default function CompanyAdminPage() {
                     }
                   </button>
                 </div>
+                <p className="col-span-2 -mt-1 text-xs text-gray-500">
+                  {newClient.email.trim()
+                    ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.email.trim()}</span></>
+                    : /^\d{10}$/.test(newClient.phone.trim())
+                      ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.phone.trim()}</span></>
+                      : 'Client logs in with phone (10 digits) or email'}
+                </p>
                 <select
                   value={newClient.plan_type}
                   onChange={e => setNewClient({ ...newClient, plan_type: e.target.value })}
