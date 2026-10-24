@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
+import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -178,7 +179,7 @@ export default function ClientDetailPage() {
   const initialize = async () => {
     const { data: clientData } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency)')
+      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency, country)')
       .eq('id', clientId)
       .single()
     setClient(clientData)
@@ -260,12 +261,9 @@ export default function ClientDetailPage() {
     }
   }
 
-  // Plan dates are stored as YYYY-MM-DD. Parse as a local date so the
-  // day doesn't shift backwards in timezones behind UTC (e.g. US).
-  const formatWeekStart = (d: string) => {
-    const [y, m, day] = d.slice(0, 10).split('-').map(Number)
-    return new Date(y, m - 1, day).toLocaleDateString('en', { month: 'long', day: 'numeric', year: 'numeric' })
-  }
+  // Plan dates are stored as YYYY-MM-DD; formatDate parses them as local
+  // dates (no day shift in the US) and uses the company's country format.
+  const formatWeekStart = (d: string) => formatDate(d.slice(0, 10), country, 'long')
 
 const handleUpdatePlan = async () => {
   if (!editingPlan) return
@@ -539,7 +537,7 @@ const handleResetPassword = async () => {
     const labels = sortedWeeks.map(w => {
       const parts = w.split('-')
       const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-      return date.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+      return formatDate(date, country, 'dayMonth')
     })
 
     return {
@@ -549,6 +547,8 @@ const handleResetPassword = async () => {
     }
   }
 
+  // null until the client/company row has loaded, so dates don't flash the wrong format
+  const country: Country | null = client ? normalizeCountry((client as { companies?: { country?: string | null } }).companies?.country) : null
   const chartData = getChartData()
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
@@ -679,7 +679,7 @@ const handleResetPassword = async () => {
                 <p className="text-xs text-gray-500 uppercase tracking-wider">Membership</p>
                 {memberships[0] && (
                   <span className="text-xs text-gray-600">
-                    Current: {memberships[0].plan_type} · ends {new Date(memberships[0].end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    Current: {memberships[0].plan_type} · ends {formatDate(memberships[0].end_date, country, 'medium')}
                   </span>
                 )}
               </div>
@@ -795,9 +795,9 @@ const handleResetPassword = async () => {
               )}
               {memberships[0] && (
                 <p className="text-xs text-gray-600 mt-1">
-                  {new Date(memberships[0].start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  {formatDate(memberships[0].start_date, country, 'dayMonth')}
                   {' → '}
-                  {new Date(memberships[0].end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {formatDate(memberships[0].end_date, country, 'medium')}
                 </p>
               )}
             </div>
@@ -1071,7 +1071,7 @@ const handleResetPassword = async () => {
                     <div className="flex justify-between items-start mb-3">
                       <div>
                         <p className="text-sm font-medium text-white">
-                          {new Date(session.session_date).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins</p>
@@ -1201,9 +1201,9 @@ const handleResetPassword = async () => {
                     <div>
                       <p className="text-sm font-semibold text-white">{m.plan_type}</p>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        {new Date(m.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {formatDate(m.start_date, country, 'medium')}
                         {' → '}
-                        {new Date(m.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {formatDate(m.end_date, country, 'medium')}
                       </p>
                     </div>
                     <div className="text-right">
@@ -1222,7 +1222,7 @@ const handleResetPassword = async () => {
                 <p className="text-xs text-gray-600 uppercase tracking-wider">History</p>
                 {memberships.slice(1).map(m => (
                   <div key={m.id} className="flex justify-between items-center text-xs text-gray-500">
-                    <span>{m.plan_type} · {new Date(m.start_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })} – {new Date(m.end_date).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span>
+                    <span>{m.plan_type} · {formatDate(m.start_date, country, 'monthYear')} – {formatDate(m.end_date, country, 'monthYear')}</span>
                     <span>{formatMoney(Number(m.amount_paid), currency)}</span>
                   </div>
                 ))}
