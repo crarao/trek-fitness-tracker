@@ -563,9 +563,11 @@ const handleResetPassword = async () => {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {toast && (
-        <div role="status"
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-          {toast.text}
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[240px] max-w-sm text-center px-8 py-5 rounded-2xl text-base font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
         </div>
       )}
       {/* Header */}
