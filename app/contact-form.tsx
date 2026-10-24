@@ -53,8 +53,8 @@ export default function ContactForm() {
       <label className="sr-only" htmlFor="cf-email">Email</label>
       <input id="cf-email" type="email" required autoComplete="email" placeholder="Email" value={form.email} onChange={set('email')} className={field} />
 
-      <label className="sr-only" htmlFor="cf-phone">Phone (optional)</label>
-      <input id="cf-phone" type="tel" autoComplete="tel" placeholder="Phone (optional)" value={form.phone} onChange={set('phone')} className={field} />
+      <label className="sr-only" htmlFor="cf-phone">Phone</label>
+      <input id="cf-phone" type="tel" required autoComplete="tel" placeholder="Phone" value={form.phone} onChange={set('phone')} className={field} />
 
       <label className="sr-only" htmlFor="cf-business">Gym or business name</label>
       <input id="cf-business" autoComplete="organization" placeholder="Gym or business name" value={form.business} onChange={set('business')} className={field} />

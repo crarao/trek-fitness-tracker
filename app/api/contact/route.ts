@@ -28,6 +28,11 @@ export async function POST(request: Request) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: 'Enter a valid email so we can reply' }, { status: 400 })
   }
+  // Phone is required for follow-up; accept any format with 7–15 digits (India, US, with +, spaces or dashes)
+  const phoneDigits = phone.replace(/\D/g, '')
+  if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+    return NextResponse.json({ error: 'Enter your phone number so we can follow up' }, { status: 400 })
+  }
 
   const supabaseAdmin = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +43,7 @@ export async function POST(request: Request) {
   const { error } = await supabaseAdmin.from('contact_requests').insert({
     name,
     email,
-    phone: phone || null,
+    phone,
     business: business || null,
     message: message || null,
   })
