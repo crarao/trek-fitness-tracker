@@ -274,7 +274,7 @@ export default async function Home() {
               Email us and we’ll set up a 20-minute walkthrough.
             </p>
             <a href={mailto} className="cb-focus mt-8 inline-block rounded-lg bg-white px-6 py-3.5 text-base font-semibold" style={{ color: C.iron }}>
-              {CONTACT_EMAIL}
+              Email us for a demo
             </a>
           </div>
         </section>
