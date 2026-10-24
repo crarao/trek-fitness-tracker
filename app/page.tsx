@@ -51,26 +51,15 @@ const desk = [
 ]
 
 const manage = [
-  ['Members and memberships', 'Plans, start and end dates, and every renewal kept as history.'],
   ['Renewals due this week', 'Who is about to expire, and who has already lapsed, without scrolling a register.'],
   ['One-tap reminders', 'A ready-written WhatsApp message to the member, sent from your phone.'],
   ['This month’s collections', 'What came in, and what is due for renewal next.'],
-  ['Logins for your staff', 'Front desk and managers get their own access.'],
 ]
 
 const train = [
   ['Weekly plans in minutes', 'AI drafts a plan from the client’s goal, level, available days and injuries. You edit it before it goes out.'],
-  ['Session logs', 'Clients log each workout from their phone.'],
-  ['Feedback on every session', 'You reply against the session itself, not in a chat thread.'],
+  ['Session logs and feedback', 'Clients log each workout from their phone, and you reply against that session.'],
   ['Progress you can see', 'Workouts per week, minutes trained and streaks.'],
-]
-
-const audience = ['Gyms and fitness studios', 'Personal trainers', 'Yoga and pilates studios', 'Trek and endurance coaches']
-
-const steps = [
-  ['Email us', 'Tell us a little about your gym or coaching business.'],
-  ['We set you up', 'A 20-minute call: we create your account and walk you through it.'],
-  ['Add your members', 'They log in from their phone browser. Nothing to download from an app store.'],
 ]
 
 const faqs = [
@@ -136,6 +125,9 @@ export default async function Home() {
             <p className="mt-4 max-w-[34rem] text-base leading-relaxed sm:mt-6 sm:text-lg" style={{ color: C.steel }}>
               CoachBoard shows who is due for renewal, sends the reminder on WhatsApp in one tap, and keeps every client’s plan and progress in one place.
             </p>
+            <p className="mt-3 max-w-[34rem] text-sm font-medium sm:text-base">
+              For gyms, studios, personal trainers and trek coaches, in India and the US.
+            </p>
             <div className="mt-6 flex flex-wrap items-center gap-3 sm:mt-8">
               <a href={contactHref} className="cb-focus rounded-lg px-6 py-3.5 text-base font-semibold text-white" style={{ background: C.orange }}>
                 Book a demo
@@ -150,11 +142,11 @@ export default async function Home() {
           <div className="rounded-2xl border p-5 shadow-[0_24px_60px_-30px_rgba(27,30,35,.35)] sm:p-6" style={{ background: C.paper, borderColor: C.line }} aria-label="Example: renewals due this week">
             <div className="flex items-baseline justify-between">
               <p className="text-base font-bold">Renewals due this week</p>
-              <p className="text-sm" style={{ color: C.steel }}>4 members</p>
+              <p className="text-sm" style={{ color: C.steel }}><span className="sm:hidden">3 members</span><span className="hidden sm:inline">4 members</span></p>
             </div>
             <ul className="mt-4 divide-y" style={{ borderColor: C.line }}>
               {desk.map((m, i) => (
-                <li key={m.name} className="flex items-center justify-between gap-3 py-3.5" style={{ borderColor: C.line }}>
+                <li key={m.name} className={`${i === 3 ? 'hidden sm:flex' : 'flex'} items-center justify-between gap-3 py-3.5`} style={{ borderColor: C.line }}>
                   <div className="min-w-0">
                     <p className="truncate font-semibold">{m.name}</p>
                     <p className="text-sm" style={{ color: i === 3 ? '#B42318' : C.steel }}>{m.plan}, {m.due.toLowerCase()}</p>
@@ -189,11 +181,11 @@ export default async function Home() {
               ].map(col => (
                 <div key={col.title} className="border-t-4 pt-6" style={{ borderColor: col.color }}>
                   <h3 className="text-xl font-bold" style={{ color: col.color }}>{col.title}</h3>
-                  <dl className="mt-5 space-y-5">
+                  <dl className="mt-4 space-y-3 sm:mt-5 sm:space-y-5">
                     {col.items.map(([t, d]) => (
                       <div key={t}>
                         <dt className="font-semibold">{t}</dt>
-                        <dd className="mt-1 max-w-md leading-relaxed" style={{ color: C.steel }}>{d}</dd>
+                        <dd className="mt-1 hidden max-w-md leading-relaxed sm:block" style={{ color: C.steel }}>{d}</dd>
                       </div>
                     ))}
                   </dl>
@@ -203,22 +195,9 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* Who it's for */}
-        <section className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
-          <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>Built for</h2>
-          <ul className="mt-6 flex flex-wrap gap-3">
-            {audience.map(a => (
-              <li key={a} className="rounded-full border px-4 py-2 text-base font-medium" style={{ borderColor: C.iron }}>{a}</li>
-            ))}
-          </ul>
-          <p className="mt-6 max-w-xl leading-relaxed" style={{ color: C.steel }}>
-            Works for gyms in India and the US. Dates, currency and phone numbers follow your country.
-          </p>
-        </section>
-
         {/* Testimonials: only shown once there is at least one */}
         {TESTIMONIALS.length > 0 && (
-          <section className="mx-auto max-w-6xl px-5 pb-12 sm:px-8 md:pb-20">
+          <section className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
             <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>What coaches say</h2>
             <div className="mt-8 grid gap-6 md:grid-cols-2">
               {TESTIMONIALS.map(t => (
@@ -232,25 +211,6 @@ export default async function Home() {
             </div>
           </section>
         )}
-
-        {/* Getting started: a real sequence, so numbered */}
-        <section style={{ background: C.iron, color: C.chalk }}>
-          <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
-            <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>Getting started</h2>
-            <ol className="mt-8 grid gap-6 md:mt-10 md:grid-cols-3 md:gap-8">
-              {steps.map(([t, d], i) => (
-                <li key={t} className="border-t pt-5" style={{ borderColor: 'rgba(246,246,243,.25)' }}>
-                  <p className="text-4xl font-extrabold" style={{ ...wide, color: C.orange }}>{i + 1}</p>
-                  <p className="mt-3 text-lg font-semibold">{t}</p>
-                  <p className="mt-1 leading-relaxed" style={{ color: '#B9BDC4' }}>{d}</p>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-8 max-w-2xl text-lg leading-relaxed md:mt-12" style={{ color: '#D6D8DC' }}>
-              You talk directly to the person who builds CoachBoard. Tell us what slows your front desk down, and it goes on the list.
-            </p>
-          </div>
-        </section>
 
         {/* FAQ */}
         <section className="mx-auto max-w-3xl px-5 py-12 sm:px-8 md:py-20">
@@ -275,7 +235,7 @@ export default async function Home() {
               See it with your own members.
             </h2>
             <p className="mt-4 max-w-xl text-lg leading-relaxed text-white/90">
-              Tell us about your gym and we’ll set up a 20-minute walkthrough.
+              Tell us about your gym and we’ll set up a 20-minute walkthrough. Members just open it in their phone browser, nothing to download. You talk directly to the person who builds CoachBoard.
             </p>
             <div className="mt-8 max-w-2xl">
               <ContactForm />
