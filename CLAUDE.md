@@ -102,6 +102,9 @@ session_feedback
 |---|---|
 | Supabase browser client | `lib/supabase.ts` |
 | Supabase admin client | Instantiated inline in each API route (no shared helper) |
+| Public landing page (getcoachboard.com) | `app/page.tsx` — logged-in users redirect to `/dashboard` |
+| Landing page content (email, testimonials) | `app/landing-content.ts` |
+| API auth check | `lib/auth-server.ts` (`getCaller`) — on the protect-api-routes branch until merged |
 | Auth + role routing | `app/login/page.tsx`, `app/dashboard/page.tsx` |
 | Middleware (SSR auth) | `middleware.ts` |
 | Super admin UI | `app/admin/page.tsx` |
