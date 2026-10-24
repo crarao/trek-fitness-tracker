@@ -18,6 +18,7 @@ _Last updated: 24 Oct 2026_
 - [x] **#10 US coach's company and sample clients** — done manually by Anand
 - [x] **#23 Landing page for getcoachboard.com** — public home page, no pricing, contact form saved to `contact_requests` and shown in /admin → Requests, share preview card (#8)
 - [x] **Super admin fixes** — in-app confirm box for delete, Create Company validates before saving (no orphan/duplicate companies), client/PT limit boxes fixed, reset password for company admin and partners, phone-friendly company list (#6, #9)
+- [x] **#3 `.claude/settings.local.json` no longer tracked** — approved by Anand; added to `.gitignore` (#13)
 - [x] **No-deletion rule for Claude** — CLAUDE.md Rule #1 + `.claude/settings.json` deny list (#2)
 
 ---
@@ -25,7 +26,6 @@ _Last updated: 24 Oct 2026_
 ## P0 — Security (before more real customers)
 
 - [ ] **#1 RLS gap** — one gym's owner can read another gym's data if they know its `company_id`. Biggest remaining risk; also blocks anything medical. Needs SQL policies run in Supabase (desktop job).
-- [ ] **#3 Remove `.claude/settings.local.json` from the repo** — still committed and not in `.gitignore`. 2-minute job. ⚠️ Counts as a deletion: needs Anand's explicit OK.
 - [ ] **#4 Middleware route-protection fix** — pending from before.
 
 ## P1 — Plans tab polish (leftovers from the 22 Oct phone-testing list, Tasks 1–3)

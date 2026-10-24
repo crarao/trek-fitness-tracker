@@ -42,3 +42,6 @@ next-env.d.ts
 
 # design reference assets
 Reference Files/
+
+# personal Claude Code settings (stay on each machine)
+.claude/settings.local.json
