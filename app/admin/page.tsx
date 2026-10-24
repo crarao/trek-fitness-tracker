@@ -25,6 +25,17 @@ type Company = {
   country: string | null
 }
 
+type ContactRequest = {
+  id: string
+  created_at: string
+  name: string
+  email: string
+  phone: string | null
+  business: string | null
+  message: string | null
+  status: 'new' | 'contacted'
+}
+
 type Client = {
   id: string
   full_name: string
@@ -44,7 +55,8 @@ export default function AdminPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'companies' | 'clients'>('companies')
+  const [activeTab, setActiveTab] = useState<'companies' | 'clients' | 'requests'>('companies')
+  const [requests, setRequests] = useState<ContactRequest[]>([])
   const [showForm, setShowForm] = useState(false)
   const [newCompany, setNewCompany] = useState({ 
   name: '', 
@@ -127,7 +139,21 @@ export default function AdminPage() {
       company_name: c.companies?.name || 'Unknown'
     }))
     setClients(mapped)
+
+    // Landing page contact form submissions (super admin only, via RLS)
+    const { data: requestsData } = await supabase
+      .from('contact_requests')
+      .select('*')
+      .order('created_at', { ascending: false })
+    setRequests((requestsData as ContactRequest[]) || [])
+
     setLoading(false)
+  }
+
+  const toggleRequestStatus = async (r: ContactRequest) => {
+    const status = r.status === 'new' ? 'contacted' : 'new'
+    const { error } = await supabase.from('contact_requests').update({ status }).eq('id', r.id)
+    if (!error) setRequests(prev => prev.map(x => (x.id === r.id ? { ...x, status } : x)))
   }
 
   const handleLogout = async () => {
@@ -475,13 +501,17 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6 w-fit">
-          {(['companies', 'clients'] as const).map(tab => (
+        <div className="flex flex-wrap gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6 w-fit max-w-full">
+          {(['companies', 'clients', 'requests'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`px-5 py-2 text-sm font-medium rounded-lg transition ${activeTab === tab
                 ? 'bg-orange-500 text-white'
                 : 'text-gray-400 hover:text-white'}`}>
-              {tab === 'companies' ? `Companies (${companies.length})` : `All Clients (${clients.length})`}
+              {tab === 'companies'
+                ? `Companies (${companies.length})`
+                : tab === 'clients'
+                  ? `All Clients (${clients.length})`
+                  : `Requests${requests.filter(r => r.status === 'new').length ? ` (${requests.filter(r => r.status === 'new').length} new)` : ''}`}
             </button>
           ))}
         </div>
@@ -879,6 +909,45 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         )}
 
         {/* ALL CLIENTS TAB */}
+        {activeTab === 'requests' && (
+          <div>
+            <h2 className="text-sm font-medium text-gray-400 mb-4">Contact form requests from getcoachboard.com</h2>
+            {loading ? (
+              <p className="text-gray-500 text-sm">Loading...</p>
+            ) : requests.length === 0 ? (
+              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
+                No requests yet. They appear here when someone fills the form on the home page.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {requests.map(r => (
+                  <div key={r.id} className={`bg-gray-900 rounded-2xl border px-4 sm:px-5 py-4 ${r.status === 'new' ? 'border-orange-800' : 'border-gray-800'}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-white text-sm">
+                          {r.name}{r.business ? <span className="text-gray-400 font-normal">, {r.business}</span> : null}
+                        </p>
+                        <a href={`mailto:${r.email}`} className="text-sm text-orange-400 hover:underline break-all">{r.email}</a>
+                        {r.phone && <p className="text-xs text-gray-500 mt-0.5">{r.phone}</p>}
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <p className="text-xs text-gray-600 whitespace-nowrap">{formatDate(r.created_at, 'IN', 'medium')}</p>
+                        <button onClick={() => toggleRequestStatus(r)}
+                          className={`text-xs px-3 py-1.5 rounded-lg border transition ${r.status === 'new'
+                            ? 'text-orange-400 border-orange-900 hover:border-orange-500'
+                            : 'text-gray-500 border-gray-700 hover:border-gray-500'}`}>
+                          {r.status === 'new' ? 'Mark contacted' : 'Contacted ✓'}
+                        </button>
+                      </div>
+                    </div>
+                    {r.message && <p className="mt-3 text-sm text-gray-300 whitespace-pre-wrap">{r.message}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'clients' && (
           <div>
             <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4">All Clients</h2>
