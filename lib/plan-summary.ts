@@ -1,0 +1,60 @@
+// Turns a weekly plan's free text into a short summary for compact plan cards.
+// Works best with the AI format ("Day 1 – Upper Body Push (Beginner)" or
+// "Monday – Legs", exercise lines starting with "-"). Hand-written plans
+// without day headings fall back to their first two lines.
+
+import { parseDate } from './locale'
+
+const DAYS: Record<string, string> = {
+  monday: 'Mon', mon: 'Mon',
+  tuesday: 'Tue', tue: 'Tue', tues: 'Tue',
+  wednesday: 'Wed', wed: 'Wed',
+  thursday: 'Thu', thu: 'Thu', thurs: 'Thu',
+  friday: 'Fri', fri: 'Fri',
+  saturday: 'Sat', sat: 'Sat',
+  sunday: 'Sun', sun: 'Sun',
+}
+
+const HEADING = /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu(?:rs)?|fri|sat|sun|day\s*\d+)\b\.?\s*(?:[–—:\-]\s*)?(.*)$/i
+
+export type PlanSummary = {
+  days: string[]        // e.g. ["Tue · Upper Body Push", "Wed · Rest"]
+  workoutDays: number   // headings that aren't rest days
+  exercises: number     // lines starting with -, • or *
+  fallback: string[]    // first two lines when no day headings were found
+}
+
+export function summarizePlan(text: string): PlanSummary {
+  const lines = (text || '').split('\n').map(l => l.trim()).filter(Boolean)
+  const days: string[] = []
+  let exercises = 0
+  let workoutDays = 0
+
+  for (const line of lines) {
+    if (/^[-•*]/.test(line)) { exercises++; continue }
+    if (/^(weekly training plan|note:)/i.test(line)) continue
+    const m = line.match(HEADING)
+    if (!m) continue
+    const raw = m[1].toLowerCase().replace(/\s+/g, ' ')
+    const label = DAYS[raw] ?? raw.replace(/^day\s*/, 'Day ')
+    const isRest = /\brest\b/i.test(line)
+    let focus = isRest ? 'Rest' : m[2].replace(/\(.*?\)/g, '').replace(/[:\s]+$/, '').trim()
+    if (focus.length > 28) focus = focus.slice(0, 27).trimEnd() + '…'
+    days.push(focus ? `${label} · ${focus}` : label)
+    if (!isRest) workoutDays++
+  }
+
+  return { days, workoutDays, exercises, fallback: days.length ? [] : lines.slice(0, 2) }
+}
+
+// Where a plan's week sits relative to today (week_start is a YYYY-MM-DD date)
+export function weekStatus(weekStart: string): 'current' | 'upcoming' | 'past' {
+  const start = parseDate(weekStart.slice(0, 10))
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  if (today < start) return 'upcoming'
+  if (today > end) return 'past'
+  return 'current'
+}

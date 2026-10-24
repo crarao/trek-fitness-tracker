@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
+import { summarizePlan, weekStatus } from '@/lib/plan-summary'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -58,6 +59,8 @@ export default function ClientPage() {
   const [feedback, setFeedback] = useState<Feedback[]>([])
   const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
+  // Full plan text open by default for this week's plan (the one the client trains from)
+  const [planOpen, setPlanOpen] = useState(true)
   const [newSession, setNewSession] = useState({
     session_date: new Date().toISOString().split('T')[0],
     duration_minutes: '',
@@ -128,7 +131,12 @@ if (prof) {
       .order('week_start', { ascending: false })
 
     setPlans(plansData || [])
-    if (plansData?.length) setActivePlanId(plansData[0].id)
+    if (plansData?.length) {
+      // Start on this week's plan if there is one, otherwise the newest
+      const current = plansData.find(p => weekStatus(p.week_start) === 'current')
+      setActivePlanId((current || plansData[0]).id)
+      setPlanOpen(true)
+    }
 
     const { data: sessionsData } = await supabase
       .from('logged_sessions')
@@ -476,7 +484,7 @@ const handleChangePassword = async () => {
               <>
                 <div className="flex gap-2 flex-wrap mb-4">
                   {plans.map(plan => (
-                    <button key={plan.id} onClick={() => setActivePlanId(plan.id)}
+                    <button key={plan.id} onClick={() => { setActivePlanId(plan.id); setPlanOpen(weekStatus(plan.week_start) === 'current') }}
                       className={`text-xs px-3 py-1.5 rounded-full border transition ${activePlanId === plan.id
                         ? 'bg-orange-500 border-orange-500 text-white'
                         : 'border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'}`}>
@@ -491,13 +499,41 @@ const handleChangePassword = async () => {
                     <p className="text-base font-semibold mb-1">
                       {formatDate(activePlan.week_start, country, 'long')}
                     </p>
-                    {activePlan.workout_time && (
-                      <p className="text-xs text-orange-400 mb-4">⏰ Workout time: {activePlan.workout_time}</p>
+                    {weekStatus(activePlan.week_start) === 'current' && (
+                      <span className="inline-block text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full mb-2">This week</span>
                     )}
-                    <div className="border-t border-gray-800 pt-4">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Plan Details</p>
-                      <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">{activePlan.plan_details}</p>
-                    </div>
+                    {activePlan.workout_time && (
+                      <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
+                    )}
+                    {(() => {
+                      const summary = summarizePlan(activePlan.plan_details)
+                      return (
+                        <div className="border-t border-gray-800 pt-4">
+                          {summary.days.length > 0 && (
+                            <>
+                              <p className="text-xs text-gray-400">
+                                {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
+                                {summary.exercises > 0 ? ` · ${summary.exercises} exercises` : ''}
+                              </p>
+                              {!planOpen && (
+                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                  {summary.days.map((d, i) => (
+                                    <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${d.endsWith('Rest') ? 'border-gray-800 text-gray-600' : 'border-gray-700 text-gray-300'}`}>{d}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          )}
+                          {planOpen && (
+                            <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm mt-3">{activePlan.plan_details}</p>
+                          )}
+                          <button onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen}
+                            className="mt-3 text-xs text-orange-400 hover:text-orange-300">
+                            {planOpen ? 'Hide full plan ▴' : 'Show full plan ▾'}
+                          </button>
+                        </div>
+                      )
+                    })()}
                     {profile?.diet_plan && (
                       <div className="border-t border-gray-800 pt-4 mt-4">
                         <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Diet Plan</p>
