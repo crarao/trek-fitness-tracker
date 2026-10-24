@@ -107,7 +107,7 @@ session_feedback
 | API auth check (every `/api` route calls this first) | `lib/auth-server.ts` (`getCaller`, `checkCanManageClient`) |
 | Landing page contact form | `app/contact-form.tsx` → `app/api/contact/route.ts` → `contact_requests` table (read in /admin → Requests) |
 | Auth + role routing | `app/login/page.tsx`, `app/dashboard/page.tsx` |
-| Middleware (SSR auth) | `middleware.ts` |
+| Proxy (formerly middleware): login + role check per section | `proxy.ts` |
 | Super admin UI | `app/admin/page.tsx` |
 | Company admin dashboard | `app/company/page.tsx` |
 | Client detail (coach view) | `app/company/client/[id]/page.tsx` |
@@ -249,7 +249,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 **No RLS.** Row-level security in Supabase is not configured. All access scoping is in application logic only. Risk: a user who knows another `company_id` could query cross-company data from the browser. Fix before scaling.
 
-**Auth is client-side only.** Middleware runs SSR auth checks but pages also do their own `useEffect → getUser() → redirect`. Not a security hole (middleware handles it) but the redundant client-side checks could be cleaned up.
+**Auth is client-side only.** The proxy (`proxy.ts`) runs SSR auth and role checks but pages also do their own `useEffect → getUser() → redirect`. Not a security hole (the proxy handles it) but the redundant client-side checks could be cleaned up.
 
 **No server components.** Every page is `'use client'`. All Supabase queries run in the browser. Fine for now; reconsider when SEO or initial load performance matters.
 
@@ -263,7 +263,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## Conventions
 
-**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`. Do not add role checks in middleware beyond what's already there.
+**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/company` company_admin + partner; `/client` client) and sends anyone else to their own home. Keep that table in `proxy.ts` up to date when adding sections. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
 
 **Styling:** Tailwind CSS 4 utility classes inline. No separate CSS files. No CSS modules.
 
