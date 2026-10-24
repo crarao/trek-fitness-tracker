@@ -1,5 +1,16 @@
 @AGENTS.md
 
+# ⛔ RULE #1 — NO DELETION (read before doing anything)
+
+Claude must never delete anything in this project — code or data.
+
+- **Code / files:** do not delete files or folders, do not `git rm`, do not delete branches, do not force-push, do not reset or discard commits. Do not remove existing features or blocks of code. Editing a line in place is fine; removing code that isn't being directly replaced is not.
+- **Database (Supabase):** never run `DELETE`, `DROP`, `TRUNCATE`, or `ALTER TABLE ... DROP COLUMN`, and never write migrations or scripts that do. Never reset the database. Never delete auth users.
+- **If a task seems to need a deletion:** stop, explain exactly what would be deleted and why, and wait. Only proceed if Anand explicitly approves that specific deletion in the conversation.
+- This rule is about what Claude does. It does not mean removing the app's own delete features (delete client, archive, delete company) — leave those as they are.
+
+`.claude/settings.json` also blocks common delete commands as a backstop. Do not edit or weaken it.
+
 # CoachBoard — Session Reference
 
 ## Project Overview
