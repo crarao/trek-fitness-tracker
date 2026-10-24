@@ -459,23 +459,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                 {companies.map((company) => (
                   <div key={company.id} className="bg-gray-900 rounded-2xl border border-gray-800 hover:border-gray-700 transition overflow-hidden">
                     {/* Company Row */}
-                    <div className="px-5 py-4 flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
+                    <div className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-9 h-9 shrink-0 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
                           <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="font-medium text-white text-sm">{company.name}</p>
-                          <p className="text-sm text-gray-400 mt-0.5">{company.email}</p>
+                          <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
                             <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
                           )}
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-xs ${company.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                            <span className={`text-xs whitespace-nowrap ${company.is_active ? 'text-green-400' : 'text-red-400'}`}>
                               {company.is_active ? '● Active' : '● Inactive'}
                             </span>
                             {company.trial_end && (
-                              <span className="text-xs" style={{
+                              <span className="text-xs whitespace-nowrap" style={{
                                 color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
                               }}>
                                 · {new Date(company.trial_end) < new Date()
@@ -488,8 +488,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <p className="text-xs text-gray-600">{formatDate(company.created_at, normalizeCountry(company.country), 'medium')}</p>
+                      <div className="flex items-center gap-3 shrink-0 pl-12 sm:pl-0">
+                        <p className="text-xs text-gray-600 whitespace-nowrap mr-auto sm:mr-0">Added {formatDate(company.created_at, normalizeCountry(company.country), 'medium')}</p>
                         <button
                           onClick={() => setEditingCompany(editingCompany?.id === company.id ? null : { ...company })}
                           className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
