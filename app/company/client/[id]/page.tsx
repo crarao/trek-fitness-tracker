@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
+import { summarizePlan, weekStatus } from '@/lib/plan-summary'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -113,6 +114,9 @@ export default function ClientDetailPage() {
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
+  // Compact plan cards: one expanded at a time; older plans behind "Show older"
+  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
+  const [showAllPlans, setShowAllPlans] = useState(false)
   const manualFormRef = useRef<HTMLDivElement | null>(null)
   const aiPanelRef = useRef<HTMLDivElement | null>(null)
   const aiWorkingRef = useRef<HTMLDivElement | null>(null)
@@ -1129,8 +1133,8 @@ const handleResetPassword = async () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {plans.map(plan => (
-  <div key={plan.id} className={`bg-gray-900 rounded-2xl p-5 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
+                {(showAllPlans ? plans : plans.slice(0, 6)).map(plan => (
+  <div key={plan.id} className={`bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
     {editingPlan?.id === plan.id ? (
       // Edit mode
       <div className="space-y-3">
@@ -1164,40 +1168,79 @@ const handleResetPassword = async () => {
         </div>
       </div>
     ) : (
-      // View mode
+      // View mode: compact card, tap to expand
+      (() => {
+        const summary = summarizePlan(plan.plan_details)
+        const status = weekStatus(plan.week_start)
+        const open = expandedPlanId === plan.id
+        return (
       <>
-        <div className="flex justify-between items-start mb-3">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
-            <p className="font-semibold text-sm">
-              {formatWeekStart(plan.week_start)}
-            </p>
-            {plan.workout_time && (
-              <p className="text-xs text-orange-400 mt-1">⏰ {plan.workout_time}</p>
-            )}
-          </div>
-          <div className="flex gap-2">
+        <div className="flex justify-between items-start gap-3">
+          <button
+            onClick={() => setExpandedPlanId(open ? null : plan.id)}
+            aria-expanded={open}
+            className="flex-1 min-w-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
+              <p className="font-semibold text-sm">Week of {formatDate(plan.week_start.slice(0, 10), country, 'medium')}</p>
+              {status === 'current' && <span className="text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full">This week</span>}
+              {status === 'upcoming' && <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>}
+              {status === 'past' && <span className="text-[11px] text-gray-500">Past</span>}
+              {plan.workout_time && <span className="text-xs text-orange-400">⏰ {plan.workout_time}</span>}
+            </div>
+            <div className="pl-5 mt-1.5">
+              {summary.days.length > 0 ? (
+                <>
+                  <p className="text-xs text-gray-400">
+                    {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
+                    {summary.exercises > 0 ? ` · ${summary.exercises} exercises` : ''}
+                  </p>
+                  {!open && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {summary.days.map((d, i) => (
+                        <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${d.endsWith('Rest') ? 'border-gray-800 text-gray-600' : 'border-gray-700 text-gray-300'}`}>{d}</span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                !open && <p className="text-xs text-gray-400 line-clamp-2">{summary.fallback.join(' ')}</p>
+              )}
+            </div>
+          </button>
+          <div className="flex gap-1.5 shrink-0">
             <button
-              onClick={() => { setPlanError(''); setEditingPlan(plan) }}
-              className="text-xs text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
-              Edit
+              onClick={e => { e.stopPropagation(); setPlanError(''); setEditingPlan(plan) }}
+              aria-label={`Edit plan for week of ${formatWeekStart(plan.week_start)}`}
+              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 rounded-lg transition">
+              ✏️
             </button>
             <button
-              onClick={() => handleDeletePlan(plan.id)}
+              onClick={e => { e.stopPropagation(); handleDeletePlan(plan.id) }}
               disabled={deletingPlanId === plan.id}
-              className="text-xs text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
-              {deletingPlanId === plan.id ? 'Deleting...' : 'Delete'}
+              aria-label={`Delete plan for week of ${formatWeekStart(plan.week_start)}`}
+              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 rounded-lg transition disabled:opacity-50">
+              {deletingPlanId === plan.id ? '…' : '🗑'}
             </button>
           </div>
         </div>
-        <div className="border-t border-gray-800 pt-3">
-          <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
-        </div>
+        {open && (
+          <div className="border-t border-gray-800 pt-3 mt-3">
+            <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+          </div>
+        )}
       </>
+        )
+      })()
     )}
   </div>
 ))}
-              
+                {plans.length > 6 && (
+                  <button onClick={() => setShowAllPlans(!showAllPlans)}
+                    className="w-full text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 py-2.5 rounded-xl transition">
+                    {showAllPlans ? 'Show fewer' : `Show older plans (${plans.length - 6})`}
+                  </button>
+                )}
               </div>
             )}
           </div>
