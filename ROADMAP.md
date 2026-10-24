@@ -58,7 +58,9 @@ _Last updated: 24 Oct 2026_
 ## P3 — Product upgrade (replaces 22 Oct Task 8, compact plan cards)
 
 - [ ] **#14 Structured weekly plan** — AI returns days and exercises as JSON (new `plan_json` column); coach sees 7 expandable day rows.
-- [ ] **#15 Client day-by-day logging** — tap a day, then Done or feedback (new `plan_day` column on `logged_sessions`).
+- [ ] **#15 Client day-by-day logging** — tap a day, then Done or feedback (new `plan_day` column on `logged_sessions`). Two stages, discussed 24 Oct (review before building):
+  - **Light version (can come before #14):** on the client screen the day chips from the compact plan view (e.g. "Tue · Upper Body Push") become tappable → small panel: Done ✓, duration, optional "how did it feel" notes → saves a session linked to the plan + day. Logged days show ✓ on the client chips and on the coach's plan cards; coach replies on the session as today. Needs one additive SQL line (`plan_day text` on `logged_sessions`) + code in `app/client/page.tsx` and the coach Plans tab. Relies on day headings read from plan text; plans without clear days fall back to the normal Log form.
+  - **Full version (after #14):** each day lists its own exercises from structured plans; tick off exercises; exact adherence for #17. Reuses the same `plan_day` column.
 - [ ] **#16 Calorie estimate on each Done** — weight × duration × the day's effort level.
 - [ ] **#17 Adherence stat for owners** — "3 of 4 days done".
 
