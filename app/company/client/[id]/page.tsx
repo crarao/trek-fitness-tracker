@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
@@ -111,6 +111,11 @@ export default function ClientDetailPage() {
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [planError, setPlanError] = useState('')
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [aiError, setAiError] = useState('')
+  const [aiElapsed, setAiElapsed] = useState(0)
+  const aiAbort = useRef<AbortController | null>(null)
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [showResetPassword, setShowResetPassword] = useState(false)
@@ -144,6 +149,20 @@ export default function ClientDetailPage() {
   const [clientProfileMessage, setClientProfileMessage] = useState('')
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Seconds counter for the AI "working" panel
+  useEffect(() => {
+    if (!generatingPlan) return
+    setAiElapsed(0)
+    const t = setInterval(() => setAiElapsed(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [generatingPlan])
+
+  const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ text, kind })
+    toastTimer.current = setTimeout(() => setToast(null), 3000)
+  }
 
   useEffect(() => {
     if (!editClientForm.start_date) return
@@ -227,6 +246,7 @@ export default function ClientDetailPage() {
     if (ok) {
       setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
       setShowPlanForm(false)
+      showToast('Plan saved ✓')
     }
   }
 
@@ -236,6 +256,7 @@ export default function ClientDetailPage() {
       setGeneratedPlan('')
       setAiPlanMeta({ week_start: '', workout_time: '' })
       setShowGeneratedPlan(false)
+      showToast('Plan assigned ✓')
     }
   }
 
@@ -269,17 +290,23 @@ const handleUpdatePlan = async () => {
   }
   setEditingPlan(null)
   initialize()
+  showToast('Plan updated ✓')
 }
 
 const handleDeletePlan = async (planId: string) => {
   if (!confirm('Delete this plan? This cannot be undone.')) return
   setDeletingPlanId(planId)
-  await supabase
+  const { error } = await supabase
     .from('weekly_plans')
     .delete()
     .eq('id', planId)
   setDeletingPlanId(null)
+  if (error) {
+    showToast('Could not delete the plan: ' + error.message, 'error')
+    return
+  }
   initialize()
+  showToast('Plan deleted')
 }
 
 
@@ -316,24 +343,52 @@ const handleGeneratePlan = async () => {
   setGeneratedPlan('')
   setShowPlanForm(false)
   setPlanError('')
+  setAiError('')
 
-const response = await fetch('/api/generate-plan', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ 
-    profile: {
-      ...client,
-      business_type: (client as any)?.companies?.business_type || 'gym'
+  const controller = new AbortController()
+  aiAbort.current = controller
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, 60000)
+
+  try {
+    const response = await fetch('/api/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        profile: {
+          ...client,
+          business_type: (client as any)?.companies?.business_type || 'gym'
+        }
+      })
+    })
+
+    let data: { plan?: string; error?: string } = {}
+    try { data = await response.json() } catch { /* non-JSON, e.g. server timeout page */ }
+
+    if (response.ok && data.plan) {
+      setGeneratedPlan(data.plan)
+      setShowGeneratedPlan(true)
+    } else if (response.status === 504) {
+      setAiError('The AI took too long to respond. Please try again.')
+    } else {
+      setAiError('Could not generate a plan' + (data.error ? ': ' + data.error : '. Please try again.'))
     }
-  })
-})
-
-  const data = await response.json()
-  if (data.plan) {
-    setGeneratedPlan(data.plan)
-    setShowGeneratedPlan(true)
+  } catch {
+    if (controller.signal.aborted) {
+      setAiError(timedOut ? 'The AI took too long (over 60 seconds). Please try again.' : '')
+    } else {
+      setAiError('Network problem — check your connection and try again.')
+    }
+  } finally {
+    clearTimeout(timer)
+    aiAbort.current = null
+    setGeneratingPlan(false)
   }
-  setGeneratingPlan(false)
+}
+
+const cancelGeneratePlan = () => {
+  aiAbort.current?.abort()
 }
 
 
@@ -507,6 +562,14 @@ const handleResetPassword = async () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {toast && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[240px] max-w-sm text-center px-8 py-5 rounded-2xl text-base font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
@@ -805,6 +868,7 @@ const handleResetPassword = async () => {
   </button>
   <button onClick={() => {
       setPlanError('')
+      setAiError('')
       if (!showPlanForm) setShowGeneratedPlan(false)
       setShowPlanForm(!showPlanForm)
     }}
@@ -813,6 +877,34 @@ const handleResetPassword = async () => {
   </button>
 </div>
             </div>
+{generatingPlan && (
+  <div className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4 flex items-center gap-4">
+    <div className="w-6 h-6 rounded-full border-2 border-purple-400 border-t-transparent animate-spin shrink-0" />
+    <div className="flex-1">
+      <p className="text-sm text-white font-medium">Writing a plan for {client?.full_name || 'this client'}…</p>
+      <p className="text-xs text-gray-500 mt-0.5">
+        {aiElapsed < 20 ? 'Usually takes 10–20 seconds.' : 'Taking a bit longer than usual…'} {aiElapsed}s
+      </p>
+    </div>
+    <button onClick={cancelGeneratePlan}
+      className="text-xs text-gray-400 hover:text-white border border-gray-700 px-3 py-1.5 rounded-lg transition">
+      Cancel
+    </button>
+  </div>
+)}
+{aiError && !generatingPlan && (
+  <div className="bg-red-950 border border-red-900 rounded-2xl px-5 py-4 mb-4 flex items-start gap-3">
+    <p className="flex-1 text-sm text-red-300">{aiError}</p>
+    <button onClick={handleGeneratePlan}
+      className="text-xs text-white bg-red-800 hover:bg-red-700 px-3 py-1.5 rounded-lg transition">
+      Try again
+    </button>
+    <button onClick={() => setAiError('')}
+      className="text-xs text-red-400 hover:text-white">
+      ✕
+    </button>
+  </div>
+)}
 {showGeneratedPlan && generatedPlan && (
   <div className="bg-gray-900 rounded-2xl p-5 border border-purple-800 space-y-4 mb-4">
     <div className="flex justify-between items-center">
