@@ -4,7 +4,8 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
-import { CONTACT_EMAIL, DEMO_SUBJECT, TESTIMONIALS } from './landing-content'
+import { TESTIMONIALS } from './landing-content'
+import ContactForm from './contact-form'
 
 // Public home page for getcoachboard.com.
 // Logged-in users skip it and go straight to their dashboard.
@@ -25,7 +26,8 @@ export const metadata: Metadata = {
   },
 }
 
-const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(DEMO_SUBJECT)}`
+// All contact buttons scroll to the form; the owner's email is never shown on the page
+const contactHref = '#contact'
 
 // Colours: chalk floor, iron text, brand orange for memberships, plate blue for training
 const C = {
@@ -104,6 +106,8 @@ export default async function Home() {
           .cb-remind { animation: none; opacity: 0; visibility: hidden; }
           .cb-sent { animation: none; opacity: 1; }
         }
+        html { scroll-behavior: smooth; }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
         .cb-focus:focus-visible { outline: 3px solid ${C.blue}; outline-offset: 3px; }
         details > summary { list-style: none; }
         details > summary::-webkit-details-marker { display: none; }
@@ -118,23 +122,23 @@ export default async function Home() {
         </Link>
         <nav className="flex items-center gap-2 sm:gap-4">
           <Link href="/login" className="cb-focus rounded-md px-3 py-2 text-sm font-semibold hover:underline">Log in</Link>
-          <a href={mailto} className="cb-focus rounded-md px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Email us</a>
+          <a href={contactHref} className="cb-focus rounded-md px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Contact us</a>
         </nav>
       </header>
 
       <main>
         {/* Hero */}
-        <section className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-16 pt-8 sm:px-8 md:grid-cols-[1.1fr_1fr] md:pb-24 md:pt-14">
+        <section className="mx-auto grid max-w-6xl items-center gap-8 px-5 pb-12 pt-4 sm:px-8 md:grid-cols-[1.1fr_1fr] md:gap-12 md:pb-24 md:pt-14">
           <div>
-            <h1 className="text-[2.5rem] font-extrabold leading-[1.02] tracking-tight sm:text-6xl" style={wide}>
+            <h1 className="text-[1.75rem] font-extrabold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.02]" style={wide}>
               Your gym’s renewals, reminders and training plans. On one phone.
             </h1>
-            <p className="mt-6 max-w-[34rem] text-lg leading-relaxed" style={{ color: C.steel }}>
+            <p className="mt-4 max-w-[34rem] text-base leading-relaxed sm:mt-6 sm:text-lg" style={{ color: C.steel }}>
               CoachBoard shows who is due for renewal, sends the reminder on WhatsApp in one tap, and keeps every client’s plan and progress in one place.
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <a href={mailto} className="cb-focus rounded-lg px-6 py-3.5 text-base font-semibold text-white" style={{ background: C.orange }}>
-                Email us for a demo
+            <div className="mt-6 flex flex-wrap items-center gap-3 sm:mt-8">
+              <a href={contactHref} className="cb-focus rounded-lg px-6 py-3.5 text-base font-semibold text-white" style={{ background: C.orange }}>
+                Book a demo
               </a>
               <Link href="/login" className="cb-focus rounded-lg border px-6 py-3.5 text-base font-semibold" style={{ borderColor: C.iron }}>
                 Log in
@@ -174,11 +178,11 @@ export default async function Home() {
 
         {/* What it does: two modules, colour-coded */}
         <section className="border-y" style={{ background: C.paper, borderColor: C.line }}>
-          <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8 md:py-20">
+          <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
             <h2 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
               Two jobs, one app.
             </h2>
-            <div className="mt-10 grid gap-10 md:grid-cols-2 md:gap-14">
+            <div className="mt-8 grid gap-8 md:mt-10 md:grid-cols-2 md:gap-14">
               {[
                 { title: 'Manage your members', color: C.orange, items: manage },
                 { title: 'Train your clients', color: C.blue, items: train },
@@ -200,7 +204,7 @@ export default async function Home() {
         </section>
 
         {/* Who it's for */}
-        <section className="mx-auto max-w-6xl px-5 py-16 sm:px-8 md:py-20">
+        <section className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
           <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>Built for</h2>
           <ul className="mt-6 flex flex-wrap gap-3">
             {audience.map(a => (
@@ -214,7 +218,7 @@ export default async function Home() {
 
         {/* Testimonials: only shown once there is at least one */}
         {TESTIMONIALS.length > 0 && (
-          <section className="mx-auto max-w-6xl px-5 pb-16 sm:px-8 md:pb-20">
+          <section className="mx-auto max-w-6xl px-5 pb-12 sm:px-8 md:pb-20">
             <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>What coaches say</h2>
             <div className="mt-8 grid gap-6 md:grid-cols-2">
               {TESTIMONIALS.map(t => (
@@ -231,9 +235,9 @@ export default async function Home() {
 
         {/* Getting started: a real sequence, so numbered */}
         <section style={{ background: C.iron, color: C.chalk }}>
-          <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8 md:py-20">
+          <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
             <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>Getting started</h2>
-            <ol className="mt-10 grid gap-8 md:grid-cols-3">
+            <ol className="mt-8 grid gap-6 md:mt-10 md:grid-cols-3 md:gap-8">
               {steps.map(([t, d], i) => (
                 <li key={t} className="border-t pt-5" style={{ borderColor: 'rgba(246,246,243,.25)' }}>
                   <p className="text-4xl font-extrabold" style={{ ...wide, color: C.orange }}>{i + 1}</p>
@@ -242,14 +246,14 @@ export default async function Home() {
                 </li>
               ))}
             </ol>
-            <p className="mt-12 max-w-2xl text-lg leading-relaxed" style={{ color: '#D6D8DC' }}>
+            <p className="mt-8 max-w-2xl text-lg leading-relaxed md:mt-12" style={{ color: '#D6D8DC' }}>
               You talk directly to the person who builds CoachBoard. Tell us what slows your front desk down, and it goes on the list.
             </p>
           </div>
         </section>
 
         {/* FAQ */}
-        <section className="mx-auto max-w-3xl px-5 py-16 sm:px-8 md:py-20">
+        <section className="mx-auto max-w-3xl px-5 py-12 sm:px-8 md:py-20">
           <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl" style={wide}>Questions</h2>
           <div className="mt-8 divide-y border-y" style={{ borderColor: C.line }}>
             {faqs.map(([q, a]) => (
@@ -265,17 +269,17 @@ export default async function Home() {
         </section>
 
         {/* Contact */}
-        <section className="mx-auto max-w-6xl px-5 pb-20 sm:px-8">
-          <div className="rounded-2xl px-6 py-12 text-white sm:px-12" style={{ background: C.orange }}>
+        <section id="contact" className="mx-auto max-w-6xl scroll-mt-4 px-5 pb-16 sm:px-8 md:pb-20">
+          <div className="rounded-2xl px-5 py-10 text-white sm:px-12 sm:py-12" style={{ background: C.orange }}>
             <h2 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
               See it with your own members.
             </h2>
             <p className="mt-4 max-w-xl text-lg leading-relaxed text-white/90">
-              Email us and we’ll set up a 20-minute walkthrough.
+              Tell us about your gym and we’ll set up a 20-minute walkthrough.
             </p>
-            <a href={mailto} className="cb-focus mt-8 inline-block rounded-lg bg-white px-6 py-3.5 text-base font-semibold" style={{ color: C.iron }}>
-              Email us for a demo
-            </a>
+            <div className="mt-8 max-w-2xl">
+              <ContactForm />
+            </div>
           </div>
         </section>
       </main>
@@ -285,7 +289,7 @@ export default async function Home() {
           <p>© {new Date().getFullYear()} CoachBoard</p>
           <div className="flex gap-5">
             <Link href="/login" className="cb-focus rounded hover:underline">Log in</Link>
-            <a href={mailto} className="cb-focus rounded hover:underline">Contact</a>
+            <a href={contactHref} className="cb-focus rounded hover:underline">Contact</a>
           </div>
         </div>
       </footer>

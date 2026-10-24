@@ -1,7 +1,8 @@
 // Editable content for the public home page (getcoachboard.com).
 // Change these values without touching the page layout in app/page.tsx.
 
-// Where "Email us" buttons go. Swap to admin@getcoachboard.com once that inbox exists.
+// Not shown on the page any more: visitors use the contact form (saved to contact_requests,
+// read in /admin → Requests). Kept here for a future email notification.
 export const CONTACT_EMAIL = 'crarao@gmail.com'
 
 export const DEMO_SUBJECT = 'CoachBoard demo'
