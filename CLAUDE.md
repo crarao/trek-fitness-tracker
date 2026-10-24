@@ -241,13 +241,13 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 ### Infrastructure (future)
 - **Razorpay integration** — subscription webhooks, plan upgrade/downgrade, billing page; required to scale past 3-4 paying customers
 - **Supabase Storage** — buckets for progress photos and workout plan PDFs with RLS (clients see only their own files)
-- **Supabase RLS** — row-level security not yet configured; all scoping is application-logic only; fix before scaling
+- **Supabase RLS** — mostly in place (see Known Issues → RLS status); remaining gaps tracked in ROADMAP.md #1
 
 ---
 
 ## Known Issues / Tech Debt
 
-**No RLS.** Row-level security in Supabase is not configured. All access scoping is in application logic only. Risk: a user who knows another `company_id` could query cross-company data from the browser. Fix before scaling.
+**RLS status (audited 24 Oct 2026).** RLS is ON for all tables, using helper functions `get_my_role()` and `get_my_company_id()`. `memberships`: staff of own gym, clients own rows, super admin all. Trigger `protect_profile_columns` blocks changing `profiles.role` / `company_id` unless super admin or server key. Remaining gaps (company row editable by any member, clients can read all gym profiles, companies readable when logged out, partners missing from plan/session rules) are tracked in ROADMAP.md #1. API routes and `proxy.ts` use the server key, so they are not affected by RLS. When adding a table: enable RLS, add policies, and GRANT access explicitly.
 
 **Auth is client-side only.** The proxy (`proxy.ts`) runs SSR auth and role checks but pages also do their own `useEffect → getUser() → redirect`. Not a security hole (the proxy handles it) but the redundant client-side checks could be cleaned up.
 
