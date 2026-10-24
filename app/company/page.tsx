@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder } from '@/lib/locale'
 
 type Membership = {
   id: string
@@ -239,14 +239,23 @@ export default function CompanyAdminPage() {
       return
     }
 
-    const resolvedEmail = newClient.email
-      ? newClient.email
-      : /^\d{10}$/.test(newClient.phone.trim())
-        ? `${newClient.phone.trim()}@getcoachboard.in`
-        : ''
+    // Login rule comes from the company's country (lib/locale.ts):
+    // India → email if given, else 10-digit phone ({phone}@getcoachboard.in)
+    // US → email only; phone is saved for contact, never used as a login
+    const method = loginMethod(country ?? 'IN')
+    const enteredEmail = newClient.email.trim()
+    const resolvedEmail = method === 'email'
+      ? (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enteredEmail) ? enteredEmail : '')
+      : enteredEmail
+        ? enteredEmail
+        : /^\d{10}$/.test(newClient.phone.trim())
+          ? `${newClient.phone.trim()}@getcoachboard.in`
+          : ''
 
     if (!resolvedEmail) {
-      setMessage('Error: Enter a valid email or 10-digit phone number')
+      setMessage(method === 'email'
+        ? 'Error: Enter the client\'s email — US clients log in with email'
+        : 'Error: Enter a valid email or 10-digit phone number')
       setSaving(false)
       return
     }
@@ -881,11 +890,11 @@ export default function CompanyAdminPage() {
                   value={newClient.full_name}
                   onChange={e => setNewClient({ ...newClient, full_name: e.target.value })}
                   className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="tel" placeholder="Phone number (10 digits)"
+                <input type="tel" placeholder={phonePlaceholder(country ?? 'IN')}
                   value={newClient.phone}
                   onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
                   className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="email" placeholder="Email (optional)"
+                <input type="email" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Email (required — used to log in)' : 'Email (optional)'}
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                   className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
@@ -905,7 +914,9 @@ export default function CompanyAdminPage() {
                 <p className="col-span-2 -mt-1 text-xs text-gray-500">
                   {newClient.email.trim()
                     ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.email.trim()}</span></>
-                    : /^\d{10}$/.test(newClient.phone.trim())
+                    : loginMethod(country ?? 'IN') === 'email'
+                      ? 'Client logs in with email — required for US clients. Phone is for contact only.'
+                      : /^\d{10}$/.test(newClient.phone.trim())
                       ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.phone.trim()}</span></>
                       : 'Client logs in with phone (10 digits) or email'}
                 </p>
