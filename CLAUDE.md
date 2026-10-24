@@ -181,6 +181,8 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## To-Do List
 
+> **Current priorities live in [`ROADMAP.md`](ROADMAP.md)** — numbered items Anand refers to in chat ("do #11"). Tick items off there (with the PR number) when they ship. The notes below are older background detail.
+
 ### Current Sprint — Next Up
 1. **Automated SMS reminders + reports** — daily cron (Vercel Cron or Supabase Edge Function) finds members expiring in 7 days or lapsed, triggers SMS via MSG91 or Twilio
 2. **Member photos** *(pushed ~2 months, paying customer only)*
