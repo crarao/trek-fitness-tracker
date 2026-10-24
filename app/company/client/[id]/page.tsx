@@ -547,9 +547,12 @@ const handleResetPassword = async () => {
     if (client?.archived_at) {
       await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
     }
-    setMembershipMessage('Membership renewed! ✓')
+    setMembershipMessage('')
     showToast(`Membership renewed ✓ ${formatDate(editClientForm.start_date, country, 'dayMonth')} → ${formatDate(editClientForm.end_date, country, 'medium')}`)
     setSavingMembership(false)
+    // Close the edit panel so the updated membership card is what the coach sees
+    setShowEditClient(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
   }
@@ -569,9 +572,11 @@ const handleResetPassword = async () => {
       showToast('Could not save the correction: ' + correctError.message, 'error')
       return
     }
-    setMembershipMessage('Membership corrected! ✓')
+    setMembershipMessage('')
     showToast('Membership corrected ✓')
     setSavingMembership(false)
+    setShowEditClient(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
     initialize()
   }
