@@ -106,6 +106,11 @@ export default function CompanyAdminPage() {
   const [logoSaved, setLogoSaved] = useState(false)
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'expiring' | 'expired' | 'archived'>('all')
   const [archivedClients, setArchivedClients] = useState<Client[]>([])
+  // Archived members load only when that tab is opened; the tab count comes from a cheap count query
+  const [archivedCount, setArchivedCount] = useState(0)
+  const archivedLoaded = useRef(false)
+  // Row the coach just tapped: highlighted with "Opening…" while the client page loads
+  const [openingClientId, setOpeningClientId] = useState<string | null>(null)
   const [showSettingsPasswords, setShowSettingsPasswords] = useState(false)
   const [showNewClientPassword, setShowNewClientPassword] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -126,24 +131,30 @@ export default function CompanyAdminPage() {
   }, [newClient.plan_type, newClient.start_date])
 
   const initialize = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    // getSession reads the saved login locally (the proxy already verified it with Supabase)
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
     if (!user) { router.push('/login'); return }
 
+    // Profile + company in one request
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id')
+      .select('company_id, companies:company_id(name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country)')
       .eq('id', user.id)
       .single()
 
     if (!profile?.company_id) { router.push('/login'); return }
 
     setCompanyId(profile.company_id)
+    // Start loading members straight away, in parallel with setting up the header
+    fetchClients(profile.company_id)
 
-    const { data: company } = await supabase
-      .from('companies')
-      .select('name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country')
-      .eq('id', profile.company_id)
-      .single()
+    type CompanyRow = {
+      name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
+      client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
+      currency: string | null; country: string | null
+    }
+    const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
     setCurrency(company?.currency || 'INR')
@@ -152,18 +163,17 @@ export default function CompanyAdminPage() {
     setPtLimit(company?.pt_limit ?? null)
     setLogoUrl(company?.logo_url || '')
     setTrialInfo({
-      trial_end: company?.trial_end,
-      is_active: company?.is_active,
+      // same values as before; the old untyped query passed these through as-is
+      trial_end: company?.trial_end as string,
+      is_active: company?.is_active as boolean,
       is_trial: company?.is_trial ?? true
     })
-
-    fetchClients(profile.company_id)
   }
 
   const fetchClients = async (cId: string) => {
     const [
       { data: profiles },
-      { data: archivedProfiles },
+      { count: archivedTotal },
       { data: memberships, error: membershipsError }
     ] = await Promise.all([
       supabase
@@ -175,14 +185,13 @@ export default function CompanyAdminPage() {
         .order('created_at', { ascending: false }),
       supabase
         .from('profiles')
-        .select('*')
+        .select('id', { count: 'exact', head: true })
         .eq('company_id', cId)
         .eq('role', 'client')
-        .not('archived_at', 'is', null)
-        .order('archived_at', { ascending: false }),
+        .not('archived_at', 'is', null),
       supabase
         .from('memberships')
-        .select('*')
+        .select('id, profile_id, plan_type, amount_paid, start_date, end_date, created_at')
         .eq('company_id', cId)
     ])
 
@@ -194,9 +203,48 @@ export default function CompanyAdminPage() {
     }))
 
     setClients(withMemberships(profiles || []))
-    setArchivedClients(withMemberships(archivedProfiles || []))
+    setArchivedCount(archivedTotal || 0)
     setLoading(false)
+    // Keep the archived list fresh if it has been opened before (e.g. after restore)
+    if (archivedLoaded.current) fetchArchived(cId, memberships || [])
   }
+
+  const fetchArchived = async (cId: string, knownMemberships?: unknown[]) => {
+    const [{ data: archivedProfiles }, membershipsResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('company_id', cId)
+        .eq('role', 'client')
+        .not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false }),
+      knownMemberships
+        ? Promise.resolve({ data: knownMemberships })
+        : supabase
+            .from('memberships')
+            .select('id, profile_id, plan_type, amount_paid, start_date, end_date, created_at')
+            .eq('company_id', cId),
+    ])
+    const ms = (membershipsResult.data || []) as Membership[] & { profile_id?: string }[]
+    setArchivedClients((archivedProfiles || []).map((p: Client) => ({
+      ...p,
+      memberships: (ms as (Membership & { profile_id: string })[]).filter(m => m.profile_id === p.id),
+    })))
+    archivedLoaded.current = true
+  }
+
+  // Open a client: highlight the tapped row immediately, then navigate
+  const openClient = (id: string) => {
+    if (openingClientId) return
+    setOpeningClientId(id)
+    router.push(`/company/client/${id}`)
+    setTimeout(() => setOpeningClientId(prev => (prev === id ? null : prev)), 10000) // safety reset
+  }
+
+  // Load archived members the first time that tab is opened
+  useEffect(() => {
+    if (activeFilter === 'archived' && companyId && !archivedLoaded.current) fetchArchived(companyId)
+  }, [activeFilter, companyId])
 
   const handleRestoreClient = async (clientId: string) => {
     await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
@@ -739,8 +787,8 @@ export default function CompanyAdminPage() {
                     activeFilter === 'archived' ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
                   }`}>
                   Archived
-                  {archivedClients.length > 0 && (
-                    <span className="ml-1 text-xs opacity-60">({archivedClients.length})</span>
+                  {archivedCount > 0 && (
+                    <span className="ml-1 text-xs opacity-60">({archivedCount})</span>
                   )}
                 </button>
               </div>
@@ -769,7 +817,19 @@ export default function CompanyAdminPage() {
           </div>
 
           {loading ? (
-            <div className="px-6 py-12 text-center text-gray-500 text-sm">Loading...</div>
+            <div className="divide-y divide-gray-800" aria-busy="true">
+              <span className="sr-only" role="status">Loading members…</span>
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} className="px-4 sm:px-6 py-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-gray-800 animate-pulse shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3.5 w-1/3 rounded bg-gray-800 animate-pulse" />
+                    <div className="h-3 w-1/4 rounded bg-gray-800/70 animate-pulse" />
+                  </div>
+                  <div className="h-6 w-16 rounded-full bg-gray-800 animate-pulse" />
+                </div>
+              ))}
+            </div>
           ) : filteredClients.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
               {activeFilter === 'archived'
@@ -822,14 +882,19 @@ export default function CompanyAdminPage() {
                       const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
                       window.open(`https://wa.me/${dialCode(country ?? 'IN')}${phone}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else {
-                      router.push(`/company/client/${client.id}`)
+                      openClient(client.id)
                     }
                   }
 
                   return (
                     <tr key={client.id}
-                      className="hover:bg-gray-800/50 transition cursor-pointer"
-                      onClick={() => router.push(`/company/client/${client.id}`)}>
+                      className={`transition cursor-pointer ${openingClientId === client.id
+                        ? 'bg-orange-500/10 outline outline-1 -outline-offset-1 outline-orange-500/60'
+                        : openingClientId ? 'opacity-50' : 'hover:bg-gray-800/50 active:bg-gray-800'}`}
+                      aria-busy={openingClientId === client.id}
+                      onMouseEnter={() => router.prefetch(`/company/client/${client.id}`)}
+                      onTouchStart={() => router.prefetch(`/company/client/${client.id}`)}
+                      onClick={() => openClient(client.id)}>
                       <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 sm:w-9 sm:h-9 ${avatarColor(index)} rounded-full flex items-center justify-center flex-shrink-0`}>
@@ -842,7 +907,14 @@ export default function CompanyAdminPage() {
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
                             </div>
-                            <p className="text-xs text-gray-500">{client.phone || client.email}</p>
+                            {openingClientId === client.id ? (
+                              <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
+                                <span className="inline-block w-3 h-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" aria-hidden="true" />
+                                Opening…
+                              </p>
+                            ) : (
+                              <p className="text-xs text-gray-500">{client.phone || client.email}</p>
+                            )}
                           </div>
                         </div>
                       </td>

@@ -21,6 +21,9 @@ _Last updated: 24 Oct 2026_
 - [x] **#1 RLS remaining rules** — run in Supabase 25 Oct from `db/2026-10-25-rls-remaining.md`, steps 1–5 all tested: partners can manage plans/sessions/feedback; only the coach can update the gym row and only the logo/banner (trigger `protect_company_columns`); clients read only their own profile, staff their gym, super admin all; clients can't change their PT flag / archive status; logged-out visitors read only company name/slug/logo/banner/business type; only staff can delete plans and feedback. Undo for each step is in the script. (#20)
 - [x] **#1 (part) RLS critical fixes** — run in Supabase 24 Oct: `memberships` RLS on with 3 rules (staff own gym, clients own, super admin all); trigger `protect_profile_columns` stops anyone but super admin / server changing `role` or `company_id`. Undo: `alter table public.memberships disable row level security; alter table public.profiles disable trigger protect_profile_columns;`
 - [x] **#24 Plans tab polish** — clearer buttons, week defaults to Monday, panels scroll into view, new card highlighted, missing-profile note (#15)
+- [x] **#11 Client page speed-up** — data loads in parallel (sessions + feedback in one request), saves refresh only what changed, charts load only on Progress (`app/progress-charts.tsx` via `next/dynamic`, also on the client screen), skeleton while loading (#22)
+- [x] **#12 Owner dashboard speed-up** — local session instead of a network check, profile + company in one request, members start loading immediately, archived members load only when that tab opens (count shown from a light query), skeleton rows (#22)
+- [x] **#30 Tap feedback on member rows** — tapped row highlights with "Opening…" and a spinner, other rows dim, page prefetches on touch (#22)
 - [x] **#29 Compact plan cards** — coach Plans tab: week + This week / Upcoming / Past badge, "3 workout days · 18 exercises", day chips, tap to expand, ✏️ 🗑 icons, 6 shown + Show older; client screen opens on this week's plan with Show / Hide full plan (#17). Summary read from plan text (`lib/plan-summary.ts`) until #14 adds structured plans.
 - [x] **#28 Membership renew fix** — Edit opens in Renew mode with dates starting after the current membership (or today); separate Correct mode; saves checked with red errors; same-day tie goes to the newest entry (#16)
 - [x] **#4 Role check at the door** — `middleware.ts` renamed to `proxy.ts` (Next 16); each section only opens for the right role, others go to their own home (#14)
@@ -33,17 +36,6 @@ _Last updated: 24 Oct 2026_
 
 ## P2 — Speed (phone app feels slow)
 
-- [ ] **#11 Client View page speed-up** (22 Oct Task 5) — `app/company/client/[id]/page.tsx`
-  - Run profile, memberships, weekly_plans, logged_sessions queries in parallel (`Promise.all`); fetch feedback via a join in the sessions query.
-  - Select only needed columns instead of `*`.
-  - After a save, refetch only what changed instead of the full `initialize()`.
-  - Move Progress charts into `ProgressCharts.tsx` loaded with `next/dynamic` (also for `app/client/page.tsx`).
-  - Skeleton loading instead of "Loading…".
-- [ ] **#12 Owner home page speed-up** (22 Oct Task 6) — `app/company/page.tsx`
-  - `getSession()` instead of `getUser()` at the top (the proxy already verifies).
-  - Merge profile + company lookup into one query; start `fetchClients` straight after.
-  - Load archived clients only when that tab is opened.
-  - Select only needed columns; skeleton rows.
 - [ ] **#13 Service worker rewrite + region** (22 Oct Task 7)
   - `public/sw.js`: cache name `coachboard-v2`; `/_next/static`, icons, fonts cache-first; pages network-only with offline fallback to `/login`; never cache logged-in pages; keep skipping Supabase and `/api/`.
   - Manual step for Anand: Vercel → Project Settings → Functions → region Tokyo (`hnd1`), next to Supabase.

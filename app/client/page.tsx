@@ -5,29 +5,13 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { summarizePlan, weekStatus } from '@/lib/plan-summary'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js'
-import { Bar, Line } from 'react-chartjs-2'
+import dynamic from 'next/dynamic'
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-)
+// Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
+const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
+  ssr: false,
+  loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
+})
 
 type WeeklyPlan = {
   id: string
@@ -682,59 +666,7 @@ const handleChangePassword = async () => {
 
 
             {chartData && chartData.labels.length >= 1 && (
-              <>
-                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Activities per Week</p>
-                  <Bar
-                    data={{
-                      labels: chartData.labels,
-                      datasets: [{
-                        label: 'Activities',
-                        data: chartData.sessionCounts,
-                        backgroundColor: 'rgba(249, 115, 22, 0.7)',
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        borderWidth: 1,
-                        borderRadius: 4,
-                      }]
-                    }}
-                    options={{
-                      responsive: true,
-                      plugins: { legend: { display: false } },
-                      scales: {
-                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Minutes per Week</p>
-                  <Line
-                    data={{
-                      labels: chartData.labels,
-                      datasets: [{
-                        label: 'Minutes',
-                        data: chartData.minuteCounts,
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                        borderWidth: 2,
-                        pointBackgroundColor: 'rgba(249, 115, 22, 1)',
-                        tension: 0.3,
-                        fill: true,
-                      }]
-                    }}
-                    options={{
-                      responsive: true,
-                      plugins: { legend: { display: false } },
-                      scales: {
-                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                      }
-                    }}
-                  />
-                </div>
-              </>
+<ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
 
             <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
