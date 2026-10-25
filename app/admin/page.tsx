@@ -377,8 +377,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       body: 'They will no longer be able to log in to this company.',
       action: 'Remove partner',
       onConfirm: async () => {
-        const { error } = await supabase.from('profiles').delete().eq('id', partnerId)
-        if (error) { showToast('Could not remove: ' + error.message, 'error'); return }
+        // .select() so a delete blocked by database rules (0 rows) isn't reported as done
+        const { data, error } = await supabase.from('profiles').delete().eq('id', partnerId).select('id')
+        if (error || !data?.length) { showToast(error ? 'Could not remove: ' + error.message : 'Could not remove: not allowed by database rules', 'error'); return }
         setCompanyPartners(prev => prev.filter(p => p.id !== partnerId))
         showToast(`${partnerName} removed`)
       }

@@ -36,7 +36,7 @@ _Last updated: 24 Oct 2026_
   - Logged-out visitors can read all companies (incl. internal notes, emails) via "Anyone can read company branding". Limit to what the login page needs.
   - Partners are missing from weekly_plans / logged_sessions / session_feedback rules (staff can't assign plans).
   - `client_goals` has RLS on but no rules (probably unused).
-  - Do with an undo script per change, at the computer, then test as super admin, coach, partner and client.
+  - **Ready to run:** `db/2026-10-25-rls-remaining.md` (5 steps, each with test + undo; steps 2–5 remove 7 loose policies + 1 grant and need Anand's OK). Also fixes super admin "Remove partner" silently failing.
 
 ## P2 — Speed (phone app feels slow)
 

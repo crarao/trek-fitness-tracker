@@ -229,7 +229,12 @@ export default function CompanyAdminPage() {
   }
 
   const handleSaveLogo = async () => {
-    await supabase.from('companies').update({ logo_url: logoUrl }).eq('id', companyId!)
+    // .select() so a save blocked by database rules (0 rows changed) isn't reported as saved
+    const { data, error } = await supabase.from('companies').update({ logo_url: logoUrl }).eq('id', companyId!).select('id')
+    if (error || !data?.length) {
+      showToast(error ? 'Could not save logo: ' + error.message : 'Only the gym owner login can change the logo', 'error')
+      return
+    }
     setLogoSaved(true)
     showToast('Logo saved ✓')
     setTimeout(() => setLogoSaved(false), 2000)
