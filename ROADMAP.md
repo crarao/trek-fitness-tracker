@@ -68,6 +68,9 @@ _Last updated: 25 Oct 2026 (evening)_
 
 ## Manual to-dos for Anand (not code)
 
+- [ ] **Run 2 SQL lines in Supabase (at a computer)** — both only add empty columns:
+  `alter table public.logged_sessions add column if not exists exercises_done jsonb;` (saves exercise ticks so coaches see them, #15)
+  `alter table public.logged_sessions add column if not exists activity text;` (needed before #32 activity type is built)
 - [ ] Set up admin@getcoachboard.com (forwarding is free; a real mailbox is ~$1/user/month).
 - [x] Delete the duplicate "New US company" (Usc@gmail.com) that has no admin login. (done 25 Oct)
 - [ ] Add testimonials to `app/landing-content.ts` (or send them to Claude) when you get them.
