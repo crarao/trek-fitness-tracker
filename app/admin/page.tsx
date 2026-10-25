@@ -18,6 +18,7 @@ type Company = {
   created_at: string
   feedback_enabled: boolean
   ai_insights_enabled: boolean
+  ai_diet_enabled?: boolean | null   // AI diet chart on/off (column added 25 Oct; absent before the SQL)
   session_notes_enabled: boolean
   client_limit: number
   is_trial: boolean
@@ -396,6 +397,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         is_active: editingCompany.is_active,
         feedback_enabled: editingCompany.feedback_enabled,
         ai_insights_enabled: editingCompany.ai_insights_enabled,
+        // Only once the ai_diet_enabled column exists (its value then comes back with the company)
+        ...('ai_diet_enabled' in editingCompany ? { ai_diet_enabled: editingCompany.ai_diet_enabled !== false } : {}),
         session_notes_enabled: editingCompany.session_notes_enabled,
         client_module_enabled: editingCompany.client_module_enabled,
         pt_limit: ptLimit,
@@ -1035,6 +1038,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 ? 'bg-green-950 border-green-700 text-green-400'
                                 : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
                               {editingCompany.ai_insights_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm text-white">AI Diet Chart</p>
+                              <p className="text-xs text-gray-500">
+                                {'ai_diet_enabled' in editingCompany
+                                  ? 'Coaches can create diet charts with AI (typed diet plans always work)'
+                                  : 'Needs one SQL line first (db/2026-10-25-ai-diet-toggle.md)'}
+                              </p>
+                            </div>
+                            <button type="button" disabled={!('ai_diet_enabled' in editingCompany)}
+                              onClick={() => setEditingCompany({ ...editingCompany, ai_diet_enabled: editingCompany.ai_diet_enabled === false })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.ai_diet_enabled !== false
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.ai_diet_enabled !== false ? 'ON' : 'OFF'}
                             </button>
                           <div className="flex justify-between items-center">
                             <div>

@@ -29,12 +29,16 @@ export async function POST(request: Request) {
     )
     const { data: p, error: pError } = await admin
       .from('profiles')
-      .select('company_id, full_name, goal, age, gender, height_cm, weight_kg, fitness_level, food_preference, meals_per_day, medical_conditions, available_days, companies:company_id(country, business_type)')
+      .select('company_id, full_name, goal, age, gender, height_cm, weight_kg, fitness_level, food_preference, meals_per_day, medical_conditions, available_days, companies:company_id(*)')
       .eq('id', clientId)
       .single()
     if (pError || !p) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
 
-    const company = (p as { companies?: { country?: string | null; business_type?: string | null } }).companies
+    const company = (p as { companies?: { country?: string | null; business_type?: string | null; ai_diet_enabled?: boolean | null } }).companies
+    // Turned off for this gym by the super admin (absent before the column exists = allowed)
+    if (company?.ai_diet_enabled === false) {
+      return NextResponse.json({ error: 'AI diet charts are turned off for this gym' }, { status: 403 })
+    }
     const isUS = company?.country === 'US'
     const meals = p.meals_per_day || 4
 
