@@ -31,6 +31,23 @@ export function parseDate(value: string | Date): Date {
   return new Date(value)
 }
 
+// Today on this device as YYYY-MM-DD (local, not UTC: UTC is a day behind before 5:30 am in India)
+export function localDateIso(offsetDays = 0): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Whole days from today until a date-only value: 0 = today is the last day, -1 = ended yesterday.
+// null when there is no date.
+export function daysUntil(value: string | null | undefined): number | null {
+  if (!value) return null
+  const end = parseDate(value.slice(0, 10))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((end.getTime() - today.getTime()) / 86400000)
+}
+
 export type DateStyle =
   | 'dayMonth'   // IN: 24 Oct          US: Oct 24
   | 'medium'     // IN: 24 Oct 2026     US: Oct 24, 2026
