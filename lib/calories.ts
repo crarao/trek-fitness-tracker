@@ -1,3 +1,5 @@
+import { activityMet } from './activities'
+
 // Calorie ESTIMATE for a logged session: effort level (MET) × body weight (kg) × hours.
 // Shown to clients and coaches as "~260 kcal (estimate)": real burn varies by 20–30%.
 // Computed when displayed (nothing stored), from the client's current weight in their profile.
@@ -27,11 +29,13 @@ export function estimateKcal(opts: {
   minutes: number | null | undefined
   weightKg: number | null | undefined
   label?: string | null      // logged_sessions.plan_day
+  activity?: string | null   // logged_sessions.activity (Log tab): its own effort level wins
   businessType?: string | null
 }): number | null {
   const { minutes, weightKg } = opts
   if (!minutes || minutes <= 0 || !weightKg || weightKg <= 0) return null
-  const kcal = effortMet(opts.label, opts.businessType) * weightKg * (Math.min(minutes, 600) / 60)
+  const met = activityMet(opts.activity) ?? effortMet(opts.label, opts.businessType)
+  const kcal = met * weightKg * (Math.min(minutes, 600) / 60)
   return Math.round(kcal / 5) * 5
 }
 

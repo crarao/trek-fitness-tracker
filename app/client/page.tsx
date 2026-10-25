@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
+import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
+import { ACTIVITIES, activityValue, activityText } from '@/lib/activities'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import dynamic from 'next/dynamic'
 
@@ -32,6 +34,7 @@ type Session = {
   weekly_plan_id: string | null
   plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
   exercises_done?: unknown   // { done: [names], total } when exercises were ticked (needs the column)
+  activity?: string | null   // what was done, from the Log tab ("run", "sport:Badminton")
 }
 
 type Feedback = {
@@ -51,21 +54,16 @@ export default function ClientPage() {
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
   // Full plan text open by default for this week's plan (the one the client trains from)
   const [planOpen, setPlanOpen] = useState(true)
-  const [newSession, setNewSession] = useState({
-    session_date: new Date().toISOString().split('T')[0],
-    duration_minutes: '',
-    notes: '',
-    star_rating: 0,
-    weekly_plan_id: ''
-  })
+  // Log tab form (same fields and look as Done ✓ on a plan day — app/session-form.tsx)
+  const [newSession, setNewSession] = useState<SessionDraft>(() => emptyDraft())
+  const [logError, setLogError] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState('')
   const [aiInsight, setAiInsight] = useState<string | null>(null)
   const [loadingInsight, setLoadingInsight] = useState(false)
   // Day-by-day logging from this week's plan: the day chip that's open, and its form
   const [openDay, setOpenDay] = useState<string | null>(null)
-  const [dayForm, setDayForm] = useState({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
+  const [dayForm, setDayForm] = useState<SessionDraft>(() => emptyDraft())
   const [savingDay, setSavingDay] = useState(false)
   // Exercises ticked during a workout, per "planId:Day" — kept on this phone until the day is marked Done
   // (Read once on first render; the page shows "Loading..." until data arrives, so server and phone match)
@@ -287,40 +285,45 @@ const handleChangePassword = async () => {
 }
 
 
+  // Log tab: any activity, optionally linked to a plan week
   const handleLogSession = async () => {
+    setLogError('')
+    const chosen = ACTIVITIES.find(a => a.key === newSession.activity)
+    const minutes = parseInt(newSession.duration_minutes)
+    if (!chosen) { setLogError('Pick what you did'); return }
+    if (chosen.askName && !newSession.activity_name.trim()) { setLogError(chosen.askName.split(' e.g.')[0]); return }
+    if (!minutes || minutes <= 0) { setLogError('Enter how many minutes'); return }
+    if (!newSession.session_date) { setLogError('Pick the date'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
-
-    const { data: session, error } = await supabase
-      .from('logged_sessions')
-      .insert({
-        client_id: user!.id,
-        weekly_plan_id: newSession.weekly_plan_id || null,
-        session_date: newSession.session_date,
-        duration_minutes: parseInt(newSession.duration_minutes as string) || null,
-        notes: newSession.notes
-      })
-      .select()
-      .single()
-
-    if (!error && session && newSession.star_rating > 0) {
-      await supabase.from('session_feedback').insert({
-        session_id: session.id,
-        star_rating: newSession.star_rating,
-        admin_feedback: null
-      })
+    if (!user) { setSaving(false); router.push('/login'); return }
+    const activity = activityValue(chosen.key, newSession.activity_name)
+    const row: Record<string, unknown> = {
+      client_id: user.id,
+      weekly_plan_id: newSession.weekly_plan_id || null,
+      session_date: newSession.session_date,
+      duration_minutes: minutes,
+      notes: newSession.notes,
+      activity,
     }
-
-    setNewSession({
-      session_date: new Date().toISOString().split('T')[0],
-      duration_minutes: '',
-      notes: '',
-      star_rating: 0,
-      weekly_plan_id: ''
-    })
+    let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
+    // If the activity column is missing in Supabase, save without it
+    if (error && /activity/i.test(error.message)) {
+      delete row.activity
+      ;({ data: session, error } = await supabase.from('logged_sessions').insert(row).select().single())
+    }
+    if (error || !session) {
+      setSaving(false)
+      setLogError('Could not save: ' + (error?.message || 'please try again'))
+      return
+    }
+    if (newSession.star_rating > 0) {
+      await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: newSession.star_rating, admin_feedback: null })
+    }
     setSaving(false)
-    setMessage('Activity saved successfully! ✓')
-    setTimeout(() => setMessage(''), 3000)
+    setNewSession(emptyDraft())
+    const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, activity, businessType: profile?.companies?.business_type })
+    showToast(`✓ ${activityText(activity)} saved${kcal ? ` — ${kcalText(kcal)} (estimate)` : ''}`)
     initialize()
     setActiveTab('progress')
   }
@@ -366,7 +369,7 @@ const handleChangePassword = async () => {
     }
     setSavingDay(false)
     setOpenDay(null)
-    setDayForm({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
+    setDayForm(emptyDraft())
     if (ticks[tickKey]) { const rest = { ...ticks }; delete rest[tickKey]; saveTicks(rest) } // saved with the session now
     const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, label, businessType: profile?.companies?.business_type })
     showToast(`✓ ${dayKey(label)} done — nice work!${kcal ? ` ${kcalText(kcal)} (estimate)` : ''}`)
@@ -423,7 +426,7 @@ const handleChangePassword = async () => {
   const activePlan = plans.find(p => p.id === activePlanId)
   // Calorie estimate per session (null without weight or minutes) and this week's total (from Monday)
   const sessionKcal = (s: Session) =>
-    estimateKcal({ minutes: s.duration_minutes, weightKg: profile?.weight_kg, label: s.plan_day, businessType: profile?.companies?.business_type })
+    estimateKcal({ minutes: s.duration_minutes, weightKg: profile?.weight_kg, label: s.plan_day, activity: s.activity, businessType: profile?.companies?.business_type })
   const weekStartIso = thisWeekMonday()
   const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
@@ -636,73 +639,20 @@ const handleChangePassword = async () => {
                               </div>
                             )
                             return (
-                              <div className={`${inRow ? 'border-t border-gray-800 pt-3' : 'mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4'} space-y-3`}>
-                                {inRow ? (
-                                  <p className="text-xs font-semibold text-green-400">
-                                    Done this workout?
-                                    {(() => {
-                                      const n = (ticks[`${activePlan.id}:${dayKey(label)}`] || []).length
-                                      return n ? <span className="font-normal text-gray-400"> · {n} exercise{n === 1 ? '' : 's'} ticked</span> : <span className="font-normal text-gray-500"> · tick exercises above as you go</span>
-                                    })()}
-                                  </p>
-                                ) : <p className="text-sm font-semibold text-white">{label}</p>}
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label htmlFor="day-minutes" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Minutes</label>
-                                    <input id="day-minutes" type="number" inputMode="numeric" min={1} placeholder="e.g. 45"
-                                      value={dayForm.duration_minutes}
-                                      onChange={e => setDayForm(f => ({ ...f, duration_minutes: e.target.value }))}
-                                      className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-                                  </div>
-                                  <div>
-                                    <label htmlFor="day-date" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Date</label>
-                                    <input id="day-date" type="date" max={localToday()}
-                                      value={dayForm.session_date}
-                                      onChange={e => setDayForm(f => ({ ...f, session_date: e.target.value }))}
-                                      className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-                                  </div>
-                                </div>
-                                {dayForm.session_date && (
-                                  <p className="text-[11px] text-gray-500 -mt-1">{formatDate(dayForm.session_date, country, 'weekday')}</p>
-                                )}
-                                <div>
-                                  <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">How did it feel?</p>
-                                  <div className="flex gap-1.5">
-                                    {[
-                                      { rating: 1, emoji: '😓', label: 'Tough' },
-                                      { rating: 2, emoji: '😐', label: 'Okay' },
-                                      { rating: 3, emoji: '🙂', label: 'Good' },
-                                      { rating: 4, emoji: '😄', label: 'Great' },
-                                      { rating: 5, emoji: '🔥', label: 'Best' },
-                                    ].map(({ rating, emoji, label }) => (
-                                      <button key={rating} type="button" aria-pressed={dayForm.star_rating === rating}
-                                        onClick={() => setDayForm(f => ({ ...f, star_rating: f.star_rating === rating ? 0 : rating }))}
-                                        className={`flex-1 py-2 rounded-xl border text-center ${dayForm.star_rating === rating
-                                          ? 'border-orange-500 bg-orange-950'
-                                          : 'border-gray-700 bg-gray-800'}`}>
-                                        <div className="text-base">{emoji}</div>
-                                        <div className="text-[10px] text-gray-400">{label}</div>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                                {profile?.companies?.session_notes_enabled !== false && (
-                                  <textarea placeholder="Notes for your coach (optional)" rows={2}
-                                    value={dayForm.notes}
-                                    onChange={e => setDayForm(f => ({ ...f, notes: e.target.value }))}
-                                    className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
-                                )}
-                                {dayError && <p className="text-sm text-red-400">{dayError}</p>}
-                                <div className="flex gap-2">
-                                  <button type="button" onClick={() => handleLogDay(activePlan.id, label)} disabled={savingDay}
-                                    className="flex-1 bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50">
-                                    {savingDay ? 'Saving…' : 'Done ✓'}
-                                  </button>
-                                  <button type="button" onClick={() => setOpenDay(null)} disabled={savingDay}
-                                    className="px-4 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl">
-                                    Cancel
-                                  </button>
-                                </div>
+                              <div className={inRow ? 'border-t border-gray-800 pt-3' : 'mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4'}>
+                                <SessionForm mode="day" idPrefix="day" value={dayForm} onChange={setDayForm}
+                                  country={country} notesEnabled={profile?.companies?.session_notes_enabled !== false}
+                                  error={dayError} saving={savingDay} submitLabel="Done ✓"
+                                  onSubmit={() => handleLogDay(activePlan.id, label)} onCancel={() => setOpenDay(null)}
+                                  heading={inRow ? (
+                                    <p className="text-xs font-semibold text-green-400">
+                                      Done this workout?
+                                      {(() => {
+                                        const n = (ticks[`${activePlan.id}:${dayKey(label)}`] || []).length
+                                        return n ? <span className="font-normal text-gray-400"> · {n} exercise{n === 1 ? '' : 's'} ticked</span> : <span className="font-normal text-gray-500"> · tick exercises above as you go</span>
+                                      })()}
+                                    </p>
+                                  ) : <p className="text-sm font-semibold text-white">{label}</p>} />
                               </div>
                             )
                       }
@@ -819,83 +769,18 @@ const handleChangePassword = async () => {
           </div>
         )}
 
-        {/* LOG ACTIVITY TAB */}
+        {/* LOG ACTIVITY TAB — same form as Done ✓ on a plan day, plus "What did you do?" */}
         {activeTab === 'log' && (
-          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
-            <h2 className="font-semibold text-white">Log an Activity</h2>
-
-            <div>
-              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Date</label>
-              <input type="date" value={newSession.session_date}
-                onChange={e => setNewSession({ ...newSession, session_date: e.target.value })}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Duration (minutes)</label>
-              <input type="number" placeholder="e.g. 45"
-                value={newSession.duration_minutes}
-                onChange={e => setNewSession({ ...newSession, duration_minutes: e.target.value })}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Link to plan (optional)</label>
-              <select value={newSession.weekly_plan_id}
-                onChange={e => setNewSession({ ...newSession, weekly_plan_id: e.target.value })}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
-                <option value="">— None —</option>
-                {plans.map(p => (
-                  <option key={p.id} value={p.id}>
-                    Week of {formatDate(p.week_start, country, 'dayMonth')}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {profile?.companies?.session_notes_enabled !== false && (
-            <div>
-              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Notes</label>
-              <textarea placeholder="How did it go? Any observations..."
-                value={newSession.notes}
-                onChange={e => setNewSession({ ...newSession, notes: e.target.value })}
-                rows={3}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
-            </div>
-            )}
-
-            <div>
-              <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">How did you feel?</label>
-              <div className="flex gap-2">
-                {[
-                  { rating: 1, emoji: '😓', label: 'Tough' },
-                  { rating: 2, emoji: '😐', label: 'Okay' },
-                  { rating: 3, emoji: '🙂', label: 'Good' },
-                  { rating: 4, emoji: '😄', label: 'Great' },
-                  { rating: 5, emoji: '🔥', label: 'Best' },
-                ].map(({ rating, emoji, label }) => (
-                  <button key={rating}
-                    onClick={() => setNewSession({ ...newSession, star_rating: rating })}
-                    className={`flex-1 py-2.5 rounded-xl border text-center transition ${newSession.star_rating === rating
-                      ? 'border-orange-500 bg-orange-950'
-                      : 'border-gray-700 bg-gray-800 hover:border-gray-500'}`}>
-                    <div className="text-lg">{emoji}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">{label}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {message && (
-              <div className="bg-green-950 border border-green-800 rounded-xl px-4 py-3">
-                <p className="text-green-400 text-sm">{message}</p>
-              </div>
-            )}
-
-            <button onClick={handleLogSession} disabled={saving}
-              className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition disabled:opacity-50 text-sm">
-              {saving ? 'Saving...' : 'Save Activity'}
-            </button>
+          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+            <SessionForm mode="log" idPrefix="log" value={newSession} onChange={setNewSession}
+              country={country} notesEnabled={profile?.companies?.session_notes_enabled !== false}
+              plans={plans} error={logError} saving={saving} submitLabel="Save activity ✓" onSubmit={handleLogSession}
+              heading={
+                <div>
+                  <h2 className="font-semibold text-white">Log an activity</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">For workouts outside your plan. Plan days are ticked off on My Plan.</p>
+                </div>
+              } />
           </div>
         )}
 
@@ -975,7 +860,7 @@ const handleChangePassword = async () => {
                           {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} minutes{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>

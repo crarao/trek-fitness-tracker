@@ -9,6 +9,7 @@ import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-
 import { type PlanJson, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
+import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
@@ -67,6 +68,7 @@ type Session = {
   weekly_plan_id?: string | null
   plan_day?: string | null   // set when the client logged it from a day of the plan
   exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
+  activity?: string | null   // what was done, from the client's Log tab ("run", "sport:Badminton")
 }
 
 type Feedback = {
@@ -179,7 +181,7 @@ export default function ClientDetailPage() {
 
   // Calorie estimate per session (null without weight or minutes); weekly totals from Monday
   const sessionKcal = (s: Session) => estimateKcal({
-    minutes: s.duration_minutes, weightKg: client?.weight_kg, label: s.plan_day,
+    minutes: s.duration_minutes, weightKg: client?.weight_kg, label: s.plan_day, activity: s.activity,
     businessType: (client as { companies?: { business_type?: string } } | null)?.companies?.business_type,
   })
   const weekStartIso = thisWeekMonday()
@@ -1514,7 +1516,7 @@ const handleResetPassword = async () => {
                           {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">
