@@ -18,6 +18,7 @@ _Last updated: 24 Oct 2026_
 - [x] **#10 US coach's company and sample clients** — done manually by Anand
 - [x] **#23 Landing page for getcoachboard.com** — public home page, no pricing, contact form saved to `contact_requests` and shown in /admin → Requests, share preview card (#8)
 - [x] **Super admin fixes** — in-app confirm box for delete, Create Company validates before saving (no orphan/duplicate companies), client/PT limit boxes fixed, reset password for company admin and partners, phone-friendly company list (#6, #9)
+- [x] **#1 RLS remaining rules** — run in Supabase 25 Oct from `db/2026-10-25-rls-remaining.md`, steps 1–5 all tested: partners can manage plans/sessions/feedback; only the coach can update the gym row and only the logo/banner (trigger `protect_company_columns`); clients read only their own profile, staff their gym, super admin all; clients can't change their PT flag / archive status; logged-out visitors read only company name/slug/logo/banner/business type; only staff can delete plans and feedback. Undo for each step is in the script. (#20)
 - [x] **#1 (part) RLS critical fixes** — run in Supabase 24 Oct: `memberships` RLS on with 3 rules (staff own gym, clients own, super admin all); trigger `protect_profile_columns` stops anyone but super admin / server changing `role` or `company_id`. Undo: `alter table public.memberships disable row level security; alter table public.profiles disable trigger protect_profile_columns;`
 - [x] **#24 Plans tab polish** — clearer buttons, week defaults to Monday, panels scroll into view, new card highlighted, missing-profile note (#15)
 - [x] **#29 Compact plan cards** — coach Plans tab: week + This week / Upcoming / Past badge, "3 workout days · 18 exercises", day chips, tap to expand, ✏️ 🗑 icons, 6 shown + Show older; client screen opens on this week's plan with Show / Hide full plan (#17). Summary read from plan text (`lib/plan-summary.ts`) until #14 adds structured plans.
@@ -29,14 +30,6 @@ _Last updated: 24 Oct 2026_
 ---
 
 ## P0 — Security (before more real customers)
-
-- [ ] **#1 RLS: remaining rules** — RLS was already on for most tables (audit 24 Oct). Done so far: `memberships` closed and role/company lock on profiles (see Done). Still to fix:
-  - Any member of a gym (incl. clients) can update their company row: trial end, client limit, active status. Restrict to company admin + protect billing columns.
-  - Clients can read every profile in their gym (phones, medical conditions). Clients should see only themselves; staff their gym.
-  - Logged-out visitors can read all companies (incl. internal notes, emails) via "Anyone can read company branding". Limit to what the login page needs.
-  - Partners are missing from weekly_plans / logged_sessions / session_feedback rules (staff can't assign plans).
-  - `client_goals` has RLS on but no rules (probably unused).
-  - **Ready to run:** `db/2026-10-25-rls-remaining.md` (5 steps, each with test + undo; steps 2–5 remove 7 loose policies + 1 grant and need Anand's OK). Also fixes super admin "Remove partner" silently failing.
 
 ## P2 — Speed (phone app feels slow)
 

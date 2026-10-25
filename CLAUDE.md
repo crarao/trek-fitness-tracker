@@ -243,13 +243,18 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 ### Infrastructure (future)
 - **Razorpay integration** — subscription webhooks, plan upgrade/downgrade, billing page; required to scale past 3-4 paying customers
 - **Supabase Storage** — buckets for progress photos and workout plan PDFs with RLS (clients see only their own files)
-- **Supabase RLS** — mostly in place (see Known Issues → RLS status); remaining gaps tracked in ROADMAP.md #1
+- **Supabase RLS** — in place (see Known Issues → RLS status)
 
 ---
 
 ## Known Issues / Tech Debt
 
-**RLS status (audited 24 Oct 2026).** RLS is ON for all tables, using helper functions `get_my_role()` and `get_my_company_id()`. `memberships`: staff of own gym, clients own rows, super admin all. Trigger `protect_profile_columns` blocks changing `profiles.role` / `company_id` unless super admin or server key. Remaining gaps (company row editable by any member, clients can read all gym profiles, companies readable when logged out, partners missing from plan/session rules) are tracked in ROADMAP.md #1. API routes and `proxy.ts` use the server key, so they are not affected by RLS. When adding a table: enable RLS, add policies, and GRANT access explicitly.
+**RLS status (completed 25 Oct 2026).** RLS is ON for all tables, using `get_my_role()` / `get_my_company_id()` (security definer). Summary of who can do what from the browser:
+- `profiles`: everyone reads/updates their own row; coach + partners read their gym and update clients in it; super admin all. Trigger `protect_profile_columns`: only super admin / server may change `role` or `company_id`; clients can't change `client_type` or `archived_at`.
+- `companies`: members read their own company; super admin all; logged-out (`anon`) may read only `name, slug, logo_url, banner_url, business_type` (column grant). Only the company admin may update their row, and trigger `protect_company_columns` limits that to `logo_url` / `banner_url`.
+- `memberships`, `weekly_plans`, `logged_sessions`, `session_feedback`: staff (company_admin + partner) of the client's gym; clients their own; deletes staff-only.
+- API routes and `proxy.ts` use the server key, so RLS doesn't affect them. Blocked updates/deletes return 0 rows without an error: use `.select()` after update/delete and check rows when it matters.
+- Full history and undo scripts: `db/2026-10-25-rls-remaining.md`. When adding a table: enable RLS, add policies, GRANT explicitly.
 
 **Auth is client-side only.** The proxy (`proxy.ts`) runs SSR auth and role checks but pages also do their own `useEffect → getUser() → redirect`. Not a security hole (the proxy handles it) but the redundant client-side checks could be cleaned up.
 
