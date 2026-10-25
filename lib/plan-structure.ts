@@ -215,3 +215,23 @@ export function summarizeAny(row: { plan_details: string; plan_json?: unknown },
     fallback: [],
   }
 }
+
+// What a client ticked off on a day, saved with the session (logged_sessions.exercises_done)
+export type ExercisesDone = { done: string[]; total: number }
+
+// Ticked positions -> names to save
+export function exercisesDoneFor(day: PlanDay, ticked: number[]): ExercisesDone {
+  return { done: day.exercises.filter((_, i) => ticked.includes(i)).map(e => e.name), total: day.exercises.length }
+}
+
+// Saved names -> positions to show as ticked (matched by name, so a later plan edit can't misplace them)
+export function tickedFromSaved(day: PlanDay, saved: unknown): number[] {
+  const names = saved && typeof saved === 'object' && Array.isArray((saved as ExercisesDone).done) ? (saved as ExercisesDone).done : []
+  const left = [...names]
+  const out: number[] = []
+  day.exercises.forEach((e, i) => {
+    const k = left.indexOf(e.name)
+    if (k >= 0) { out.push(i); left.splice(k, 1) }
+  })
+  return out
+}

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
-import { planJsonOf, summarizeAny, dayLabel, todayWeekday } from '@/lib/plan-structure'
+import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import dynamic from 'next/dynamic'
@@ -31,6 +31,7 @@ type Session = {
   notes: string
   weekly_plan_id: string | null
   plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
+  exercises_done?: unknown   // { done: [names], total } when exercises were ticked (needs the column)
 }
 
 type Feedback = {
@@ -66,6 +67,24 @@ export default function ClientPage() {
   const [openDay, setOpenDay] = useState<string | null>(null)
   const [dayForm, setDayForm] = useState({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
   const [savingDay, setSavingDay] = useState(false)
+  // Exercises ticked during a workout, per "planId:Day" — kept on this phone until the day is marked Done
+  // (Read once on first render; the page shows "Loading..." until data arrives, so server and phone match)
+  const [ticks, setTicks] = useState<Record<string, number[]>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = JSON.parse(localStorage.getItem('cb-ticks') || '{}')
+      return saved && typeof saved === 'object' ? saved : {}
+    } catch { return {} } // storage unavailable: ticks just won't survive a reload
+  })
+  const saveTicks = (next: Record<string, number[]>) => {
+    setTicks(next)
+    try { localStorage.setItem('cb-ticks', JSON.stringify(next)) } catch { /* ignore */ }
+  }
+  const toggleTick = (planId: string, day: string, i: number) => {
+    const key = `${planId}:${day}`
+    const cur = ticks[key] || []
+    saveTicks({ ...ticks, [key]: cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i] })
+  }
   const [dayError, setDayError] = useState('')
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -315,20 +334,27 @@ const handleChangePassword = async () => {
     setSavingDay(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setSavingDay(false); router.push('/login'); return }
-    const row = {
+    // Ticked exercises for this day (structured plans only)
+    const plan = plans.find(p => p.id === planId)
+    const planDay = plan ? planJsonOf(plan)?.days.find(d => d.day === dayKey(label)) : undefined
+    const tickKey = `${planId}:${dayKey(label)}`
+    const ticked = ticks[tickKey] || []
+    const row: Record<string, unknown> = {
       client_id: user.id,
       weekly_plan_id: planId,
       session_date: dayForm.session_date,
       duration_minutes: minutes,
       notes: dayForm.notes,
       plan_day: label,
+      ...(planDay && ticked.length ? { exercises_done: exercisesDoneFor(planDay, ticked) } : {}),
     }
     let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
-    // If the plan_day column hasn't been added in Supabase yet, save the session without it
-    if (error && /plan_day/i.test(error.message)) {
-      const { plan_day: _skip, ...withoutDay } = row
-      void _skip
-      ;({ data: session, error } = await supabase.from('logged_sessions').insert(withoutDay).select().single())
+    // Columns added later in Supabase (exercises_done, plan_day): if one is missing, save without it
+    for (const col of ['exercises_done', 'plan_day']) {
+      if (error && col in row && new RegExp(col, 'i').test(error.message)) {
+        delete row[col]
+        ;({ data: session, error } = await supabase.from('logged_sessions').insert(row).select().single())
+      }
     }
     if (error || !session) {
       setSavingDay(false)
@@ -341,6 +367,7 @@ const handleChangePassword = async () => {
     setSavingDay(false)
     setOpenDay(null)
     setDayForm({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
+    if (ticks[tickKey]) { const rest = { ...ticks }; delete rest[tickKey]; saveTicks(rest) } // saved with the session now
     const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, label, businessType: profile?.companies?.business_type })
     showToast(`✓ ${dayKey(label)} done — nice work!${kcal ? ` ${kcalText(kcal)} (estimate)` : ''}`)
     initialize()
@@ -610,7 +637,15 @@ const handleChangePassword = async () => {
                             )
                             return (
                               <div className={`${inRow ? 'border-t border-gray-800 pt-3' : 'mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4'} space-y-3`}>
-                                {inRow ? <p className="text-xs font-semibold text-green-400">Done this workout?</p> : <p className="text-sm font-semibold text-white">{label}</p>}
+                                {inRow ? (
+                                  <p className="text-xs font-semibold text-green-400">
+                                    Done this workout?
+                                    {(() => {
+                                      const n = (ticks[`${activePlan.id}:${dayKey(label)}`] || []).length
+                                      return n ? <span className="font-normal text-gray-400"> · {n} exercise{n === 1 ? '' : 's'} ticked</span> : <span className="font-normal text-gray-500"> · tick exercises above as you go</span>
+                                    })()}
+                                  </p>
+                                ) : <p className="text-sm font-semibold text-white">{label}</p>}
                                 <div className="grid grid-cols-2 gap-3">
                                   <div>
                                     <label htmlFor="day-minutes" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Minutes</label>
@@ -704,6 +739,15 @@ const handleChangePassword = async () => {
                           {openDay && summary.days.includes(openDay) && renderDayPanel(openDay, false)}
                         </div>
                       )
+                      // Ticks to show per day: saved with the session for done days, else this phone's ticks
+                      const dayTicks: Record<string, number[]> = {}
+                      if (planJson) for (const d of planJson.days) {
+                        const saved = sessions.filter(x => x.weekly_plan_id === activePlan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                        const fromSaved = saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done) : []
+                        const local = done.has(d.day) ? [] : ticks[`${activePlan.id}:${d.day}`] || []
+                        const list = fromSaved.length ? fromSaved : local
+                        if (list.length) dayTicks[d.day] = list
+                      }
                       if (planJson) return (
                         <div className="border-t border-gray-800 pt-4">
                           <div className="flex items-baseline justify-between gap-2 mb-2">
@@ -716,6 +760,8 @@ const handleChangePassword = async () => {
                           </div>
                           <PlanDays plan={planJson} weekStart={activePlan.week_start} done={done}
                             doneNote={doneDayNotes(activePlan.id, sessions, sessionKcal)}
+                            ticks={dayTicks}
+                            onTick={isCurrent ? (d, i) => { if (!done.has(d)) toggleTick(activePlan.id, d, i) } : undefined}
                             openDay={openDay ? dayKey(openDay) : null}
                             onToggle={d => {
                               setDayError('')
