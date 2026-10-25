@@ -84,6 +84,7 @@ const [profileForm, setProfileForm] = useState({
   fitness_level: '',
   available_days: [] as string[],
   food_preference: '',
+  meals_per_day: '',
   medical_conditions: '',
   emergency_contact_name: '',
   emergency_contact_phone: ''
@@ -118,6 +119,7 @@ if (prof) {
     fitness_level: prof.fitness_level || '',
     available_days: prof.available_days ? prof.available_days.split(',') : [],
     food_preference: prof.food_preference || '',
+    meals_per_day: prof.meals_per_day?.toString() || '',
     medical_conditions: prof.medical_conditions || '',
     emergency_contact_name: prof.emergency_contact_name || '',
     emergency_contact_phone: prof.emergency_contact_phone || ''
@@ -183,6 +185,7 @@ if (prof) {
       fitness_level: profileForm.fitness_level || null,
       available_days: profileForm.available_days.join(','),
       food_preference: profileForm.food_preference || null,
+      meals_per_day: profileForm.meals_per_day ? parseInt(profileForm.meals_per_day) : null,
       medical_conditions: profileForm.medical_conditions || null,
       emergency_contact_name: profileForm.emergency_contact_name || null,
       emergency_contact_phone: profileForm.emergency_contact_phone || null,
@@ -846,6 +849,22 @@ const handleChangePassword = async () => {
           <option value="Vegetarian">Vegetarian</option>
           <option value="Non-Vegetarian">Non-Vegetarian</option>
           <option value="Eggetarian">Eggetarian</option>
+          <option value="Vegan">Vegan</option>
+          <option value="Jain">Jain</option>
+        </select>
+      </div>
+
+      {/* Meals per day */}
+      <div>
+        <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Meals per day</label>
+        <select value={profileForm.meals_per_day}
+          onChange={e => setProfileForm({ ...profileForm, meals_per_day: e.target.value })}
+          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+          <option value="">Select</option>
+          <option value="3">3 meals</option>
+          <option value="4">4 (3 meals + snack)</option>
+          <option value="5">5 (3 meals + 2 snacks)</option>
+          <option value="6">6 small meals</option>
         </select>
       </div>
 

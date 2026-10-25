@@ -61,7 +61,8 @@ profiles (one per user, linked to a company)
   ├── archived_at (timestamptz null)  ← null = active, set = archived
   ├── full_name, email, phone
   └── fitness fields: goal, age, gender, height_cm, weight_kg,
-      fitness_level, food_preference, available_days,
+      fitness_level, food_preference (Vegetarian | Non-Vegetarian | Eggetarian | Vegan | Jain),
+      meals_per_day (smallint 2–6), available_days,
       medical_conditions, emergency_contact_name/phone,
       trainer_name, diet_plan
 
@@ -118,6 +119,7 @@ session_feedback
 | API: update client | `app/api/update-client/route.ts` |
 | API: AI plan generation | `app/api/generate-plan/route.ts` |
 | API: AI coaching insights | `app/api/ai-insights/route.ts` |
+| API: AI diet chart (staff, reads profile server-side) | `app/api/generate-diet/route.ts` |
 | API: password reset | `app/api/reset-password/route.ts` |
 
 All active code is in `/app`. `/src` was deleted — it was a legacy directory.
