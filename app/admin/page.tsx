@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate } from '@/lib/locale'
+import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod } from '@/lib/locale'
 
 type Company = {
   id: string
@@ -48,6 +48,7 @@ type Partner = {
   id: string
   full_name: string
   phone: string
+  email?: string | null
 }
 
 export default function AdminPage() {
@@ -78,7 +79,8 @@ export default function AdminPage() {
   const [savingCompany, setSavingCompany] = useState(false)
   const [editMessage, setEditMessage] = useState('')
   const [companyPartners, setCompanyPartners] = useState<Partner[]>([])
-  const [newPartner, setNewPartner] = useState({ full_name: '', phone: '' })
+  // India: name + phone (phone is the login and default password). US: name + email login + password, phone optional
+  const [newPartner, setNewPartner] = useState({ full_name: '', phone: '', email: '', password: '' })
   const [savingPartner, setSavingPartner] = useState(false)
   const [partnerMessage, setPartnerMessage] = useState('')
 
@@ -109,7 +111,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!editingCompany) { setCompanyPartners([]); setCompanyAdmins([]); setResetTarget(null); return }
-    supabase.from('profiles').select('id, full_name, phone')
+    supabase.from('profiles').select('id, full_name, phone, email')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
       .then(({ data }) => setCompanyPartners(data || []))
     supabase.from('profiles').select('id, full_name, phone')
@@ -344,27 +346,44 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   }
 
   const handleAddPartner = async () => {
-    if (!editingCompany || !newPartner.full_name || !newPartner.phone) return
+    if (!editingCompany) return
+    const name = newPartner.full_name.trim()
     const phone = newPartner.phone.trim()
-    if (!/^\d{10}$/.test(phone)) { setPartnerMessage('Enter a valid 10-digit phone number'); return }
+    // Login rule follows the company's country (lib/locale.ts), same as clients
+    const method = loginMethod(normalizeCountry(editingCompany.country))
+    let email = '', password = ''
+    if (!name) { setPartnerMessage('Enter the partner\'s name'); return }
+    if (method === 'email') {
+      email = newPartner.email.trim().toLowerCase()
+      password = newPartner.password
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setPartnerMessage('Enter a valid email: US partners log in with email'); return }
+      if (password.length < 6) { setPartnerMessage('Password must be at least 6 characters'); return }
+    } else {
+      if (!/^\d{10}$/.test(phone)) { setPartnerMessage('Enter a valid 10-digit phone number'); return }
+      email = `${phone}@getcoachboard.in`
+      password = phone
+    }
     setSavingPartner(true)
     const response = await fetch('/api/create-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: `${phone}@getcoachboard.in`,
-        password: phone,
-        full_name: newPartner.full_name,
+        email,
+        password,
+        full_name: name,
         company_id: editingCompany.id,
         role: 'partner',
-        phone
+        phone: phone || null
       })
     })
     const result = await response.json()
     if (result.error) { setPartnerMessage('Error: ' + result.error); setSavingPartner(false); return }
-    setNewPartner({ full_name: '', phone: '' })
-    setPartnerMessage('Partner added! Default password = phone number.')
-    const { data } = await supabase.from('profiles').select('id, full_name, phone')
+    setNewPartner({ full_name: '', phone: '', email: '', password: '' })
+    setPartnerMessage(method === 'email'
+      ? `Partner added! They log in with ${email} and the password you set.`
+      : 'Partner added! Default password = phone number.')
+    showToast('Partner added ✓')
+    const { data } = await supabase.from('profiles').select('id, full_name, phone, email')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
     setCompanyPartners(data || [])
     setSavingPartner(false)
@@ -852,7 +871,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 <div key={p.id} className="flex justify-between items-center bg-gray-800 rounded-xl px-3 py-2.5">
                                   <div>
                                     <p className="text-sm text-white">{p.full_name}</p>
-                                    <p className="text-xs text-gray-500">{p.phone}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {/* Shows what they log in with: email for US-style logins, else phone */}
+                                      {p.email && !p.email.endsWith('@getcoachboard.in') ? p.email : p.phone}
+                                      {p.email && !p.email.endsWith('@getcoachboard.in') && p.phone ? ` · ${p.phone}` : ''}
+                                    </p>
                                   </div>
                                   <div className="flex items-center gap-3 shrink-0">
                                     <button onClick={() => { setResetTarget({ id: p.id, name: p.full_name }); setResetPasswordValue('') }}
@@ -869,16 +892,37 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               ))}
                             </div>
                           )}
+                          {loginMethod(normalizeCountry(editingCompany.country)) === 'email' ? (
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                              <input type="text" placeholder="Partner name"
+                                value={newPartner.full_name}
+                                onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
+                                className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              <input type="email" placeholder="Email (used to log in)" autoComplete="off"
+                                value={newPartner.email}
+                                onChange={e => setNewPartner({ ...newPartner, email: e.target.value })}
+                                className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                                value={newPartner.password}
+                                onChange={e => setNewPartner({ ...newPartner, password: e.target.value })}
+                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              <input type="tel" placeholder="Phone (optional)"
+                                value={newPartner.phone}
+                                onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
+                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                            </div>
+                          ) : (
                           <div className="grid grid-cols-2 gap-2 mb-2">
-                            <input type="text" placeholder="Partner name"
-                              value={newPartner.full_name}
-                              onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
-                              className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                            <input type="tel" placeholder="Phone (10 digits)"
-                              value={newPartner.phone}
-                              onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
-                              className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                          </div>
+                              <input type="text" placeholder="Partner name"
+                                value={newPartner.full_name}
+                                onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
+                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              <input type="tel" placeholder="Phone (10 digits)"
+                                value={newPartner.phone}
+                                onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
+                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                            </div>
+                          )}
                           {partnerMessage && (
                             <p className={`text-xs mb-2 ${partnerMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
                               {partnerMessage}
@@ -888,7 +932,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
                             {savingPartner ? 'Adding...' : '+ Add Partner Login'}
                           </button>
-                          <p className="text-xs text-gray-600 mt-1.5">Default password is their phone number. They can change it after first login via Settings.</p>
+                          <p className="text-xs text-gray-600 mt-1.5">
+                            {loginMethod(normalizeCountry(editingCompany.country)) === 'email'
+                              ? 'US company: partners log in with their email and the password you set. They can change it in Settings.'
+                              : 'Default password is their phone number. They can change it after first login via Settings.'}
+                          </p>
                         </div>
 
                         {editMessage && (

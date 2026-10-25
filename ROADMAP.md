@@ -62,12 +62,12 @@ _Last updated: 25 Oct 2026 (evening)_
 
 ## Small follow-ups noted along the way
 
-- [ ] **#25 US partner logins use email** — partners added in super admin still log in by phone (`{phone}@getcoachboard.in`); fine for India, US partners should use email like US clients.
+- [x] **#25 US partner logins use email** — super admin → company → Partner Logins follows the company's country: US partners get name + email (login) + password + optional phone; India unchanged (phone login, password = phone); partner list shows the login (#30)
 - [ ] **#26 Email alert for contact form requests** — needs a sending address (admin@getcoachboard.com via Zoho Mail / Namecheap Private Email) and an email provider (e.g. Resend).
 - [ ] **#27 Fresh demo video** — the YouTube demo is from April; a new 60-second recording would show today's app (could go on the landing page).
 
 ## Manual to-dos for Anand (not code)
 
 - [ ] Set up admin@getcoachboard.com (forwarding is free; a real mailbox is ~$1/user/month).
-- [ ] Delete the duplicate "New US company" (Usc@gmail.com) that has no admin login.
+- [x] Delete the duplicate "New US company" (Usc@gmail.com) that has no admin login. (done 25 Oct)
 - [ ] Add testimonials to `app/landing-content.ts` (or send them to Claude) when you get them.
