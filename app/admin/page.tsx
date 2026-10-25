@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
+import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
   id: string
@@ -23,6 +24,7 @@ type Company = {
   client_module_enabled: boolean
   pt_limit: number | null
   country: string | null
+  is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
 }
 
 type ContactRequest = {
@@ -40,8 +42,29 @@ type Client = {
   id: string
   full_name: string
   email: string
+  phone?: string | null
   company_id: string
   company_name?: string
+  created_at: string
+  archived_at: string | null
+  client_type: string | null
+}
+
+type AdminMembership = UsageMembership & { start_date: string; end_date: string; plan_type?: string | null }
+
+const HEALTH_STYLE: Record<Health, { dot: string; label: string; text: string }> = {
+  active: { dot: 'bg-green-500', label: 'Active', text: 'text-green-400' },
+  quiet: { dot: 'bg-amber-400', label: 'Quiet', text: 'text-amber-400' },
+  dormant: { dot: 'bg-red-500', label: 'Dormant', text: 'text-red-400' },
+}
+
+// Latest membership's state for a client (same rule as the coach dashboard: expiring = 7 days or less)
+function membershipState(ms: AdminMembership[]): 'active' | 'expiring' | 'expired' | 'none' {
+  if (!ms.length) return 'none'
+  const latest = [...ms].sort((a, b) => b.start_date.localeCompare(a.start_date) || (b.created_at || '').localeCompare(a.created_at || ''))[0]
+  const left = daysUntil(latest.end_date)
+  if (left == null) return 'none'
+  return left < 0 ? 'expired' : left <= 7 ? 'expiring' : 'active'
 }
 
 type Partner = {
@@ -56,7 +79,16 @@ export default function AdminPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'companies' | 'clients' | 'requests'>('companies')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'clients' | 'requests'>('dashboard')
+  // Dashboard + Clients tab data: all memberships (super admin can read them) and plans assigned per company
+  const [memberships, setMemberships] = useState<AdminMembership[]>([])
+  const [planRows, setPlanRows] = useState<UsagePlan[] | null>(null)
+  const [planLoadError, setPlanLoadError] = useState('')
+  // Clients tab: grouped by company
+  const [clientSearch, setClientSearch] = useState('')
+  const [clientFilter, setClientFilter] = useState<'all' | 'pt' | 'expired'>('all')
+  const [showTestClients, setShowTestClients] = useState(false)
+  const [collapsedCompanies, setCollapsedCompanies] = useState<Set<string>>(new Set())
   const [requests, setRequests] = useState<ContactRequest[]>([])
   const [showForm, setShowForm] = useState(false)
   const [newCompany, setNewCompany] = useState({ 
@@ -123,6 +155,15 @@ export default function AdminPage() {
     setResetPasswordValue('')
   }, [editingCompany?.id])
 
+  // From the Dashboard: open that company's edit panel on the Companies tab
+  const openCompany = (id: string) => {
+    const c = companies.find(x => x.id === id)
+    if (!c) return
+    setActiveTab('companies')
+    setEditingCompany(c)
+    setTimeout(() => document.getElementById(`company-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80)
+  }
+
   const fetchAll = async () => {
     const { data: companiesData } = await supabase
       .from('companies')
@@ -141,6 +182,20 @@ export default function AdminPage() {
       company_name: c.companies?.name || 'Unknown'
     }))
     setClients(mapped)
+
+    // Memberships across all gyms (for usage + client status) and plans assigned (server route)
+    const { data: membershipsData } = await supabase
+      .from('memberships')
+      .select('profile_id, company_id, created_at, start_date, end_date, plan_type')
+    setMemberships((membershipsData as AdminMembership[]) || [])
+    fetch('/api/admin/plan-activity')
+      .then(async r => {
+        const body = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`)
+        setPlanRows(body.plans || [])
+        setPlanLoadError('')
+      })
+      .catch(e => { setPlanRows([]); setPlanLoadError('Plans assigned could not be loaded (' + e.message + ')') })
 
     // Landing page contact form submissions (super admin only, via RLS)
     const { data: requestsData } = await supabase
@@ -332,7 +387,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         is_trial: editingCompany.is_trial,
         notes: editingCompany.notes || null,
         country: normalizeCountry(editingCompany.country),
-        currency: currencyForCountry(normalizeCountry(editingCompany.country))
+        currency: currencyForCountry(normalizeCountry(editingCompany.country)),
+        // Only once the is_test column exists (its value then comes back with the company)
+        ...('is_test' in editingCompany ? { is_test: !!editingCompany.is_test } : {}),
       })
       .eq('id', editingCompany.id)
     setSavingCompany(false)
@@ -531,19 +588,119 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6 w-fit max-w-full">
-          {(['companies', 'clients', 'requests'] as const).map(tab => (
+          {(['dashboard', 'companies', 'clients', 'requests'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`px-5 py-2 text-sm font-medium rounded-lg transition ${activeTab === tab
                 ? 'bg-orange-500 text-white'
                 : 'text-gray-400 hover:text-white'}`}>
-              {tab === 'companies'
+              {tab === 'dashboard'
+                ? 'Dashboard'
+                : tab === 'companies'
                 ? `Companies (${companies.length})`
                 : tab === 'clients'
-                  ? `All Clients (${clients.length})`
+                  ? `Clients (${clients.length})`
                   : `Requests${requests.filter(r => r.status === 'new').length ? ` (${requests.filter(r => r.status === 'new').length} new)` : ''}`}
             </button>
           ))}
         </div>
+
+        {/* DASHBOARD TAB — real (non-test) companies: are they using it, and what to do next */}
+        {activeTab === 'dashboard' && (() => {
+          if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
+          const real = companies.filter(c => !c.is_test)
+          const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || []))
+          const actions = sortActions(usage.flatMap(actionsFor))
+          const live = usage.filter(u => u.company.is_active)
+          const paying = live.filter(u => u.status === 'paid' && (u.daysLeft == null || u.daysLeft > 0)).length
+          const trials = live.filter(u => u.status === 'trial' && (u.daysLeft == null || u.daysLeft > 0)).length
+          const members = usage.reduce((n, u) => n + u.members, 0)
+          const testCount = companies.length - real.length
+          const toneCls = { good: 'border-green-800 bg-green-950/30', warn: 'border-amber-800 bg-amber-950/20', bad: 'border-red-900 bg-red-950/30' }
+          const actionCls = { good: 'bg-green-600 text-white', warn: 'bg-amber-500 text-gray-950', bad: 'bg-red-600 text-white' }
+          return (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: 'Paying gyms', value: paying, cls: 'text-green-400' },
+                  { label: 'On trial', value: trials, cls: 'text-blue-400' },
+                  { label: 'Members', value: members, cls: 'text-white' },
+                  { label: 'Actions waiting', value: actions.length, cls: actions.length ? 'text-orange-400' : 'text-gray-500' },
+                ].map(k => (
+                  <div key={k.label} className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{k.label}</p>
+                    <p className={`text-3xl font-bold ${k.cls}`}>{k.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Actions</h2>
+                {actions.length === 0 ? (
+                  <div className="bg-gray-900 rounded-2xl p-6 text-center text-sm text-gray-500 border border-gray-800">Nothing needs you right now.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {actions.map((a, i) => (
+                      <button key={i} type="button" onClick={() => openCompany(a.usage.company.id)}
+                        className={`w-full text-left rounded-2xl border px-4 py-3 flex items-center gap-3 ${toneCls[a.tone]}`}>
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${HEALTH_STYLE[a.usage.health].dot}`} title={HEALTH_STYLE[a.usage.health].label} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-medium text-white truncate">{a.usage.company.name}</span>
+                          <span className="block text-xs text-gray-400">{a.reason}</span>
+                        </span>
+                        <span className={`shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg ${actionCls[a.tone]}`}>{a.action}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="flex items-baseline justify-between gap-3 mb-3">
+                  <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Companies</h2>
+                  <p className="text-[11px] text-gray-500">
+                    <span className="text-green-400">●</span> work in 7 days · <span className="text-amber-400">●</span> 8–15 days · <span className="text-red-400">●</span> over 15 days
+                  </p>
+                </div>
+                {usage.length === 0 ? (
+                  <div className="bg-gray-900 rounded-2xl p-6 text-center text-sm text-gray-500 border border-gray-800">No real companies yet.</div>
+                ) : (
+                  <div className="bg-gray-900 rounded-2xl border border-gray-800 divide-y divide-gray-800">
+                    {sortUsage(usage).map(u => {
+                      const h = HEALTH_STYLE[u.health]
+                      const plan = !u.company.is_active ? 'Inactive'
+                        : u.daysLeft == null ? (u.status === 'trial' ? 'Trial' : 'Paid')
+                        : u.daysLeft <= 0 ? `${u.status === 'trial' ? 'Trial' : 'Paid'} · ended`
+                        : `${u.status === 'trial' ? 'Trial' : 'Paid'} · ${u.daysLeft}d left`
+                      return (
+                        <button key={u.company.id} type="button" onClick={() => openCompany(u.company.id)}
+                          className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-800/50">
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${h.dot}`} />
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-baseline justify-between gap-2">
+                              <span className="text-sm font-medium text-white truncate">{u.company.name}</span>
+                              <span className={`text-[11px] shrink-0 ${u.daysLeft != null && u.daysLeft <= 0 ? 'text-red-400' : u.status === 'trial' ? 'text-blue-300' : 'text-gray-400'}`}>{plan}</span>
+                            </span>
+                            <span className="block text-xs text-gray-500 mt-0.5">
+                              {u.members}{u.company.client_limit ? ` / ${u.company.client_limit}` : ''} members{u.pt ? ` · ${u.pt} PT` : ''}
+                              <span className="text-gray-600"> · 30d: </span>
+                              {u.membersAdded30} added · {u.renewals30} renewed · {planRows ? `${u.plans30} plans` : '… plans'}
+                              <span className={h.text}> · {u.lastWorkDays == null ? 'no activity yet' : u.lastWorkDays === 0 ? 'active today' : `last ${u.lastWorkDays}d ago`}</span>
+                            </span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-500 mt-2">
+                  Activity = members added, memberships recorded and plans assigned by the gym&apos;s staff.
+                  {testCount > 0 ? ` ${testCount} test ${testCount === 1 ? 'company is' : 'companies are'} left out.` : ' Mark test companies in their edit panel to leave them out.'}
+                  {planLoadError ? ` ${planLoadError}.` : ''}
+                </p>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* COMPANIES TAB */}
         {activeTab === 'companies' && (
@@ -627,7 +784,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
             ) : (
               <div className="space-y-2">
                 {companies.map((company) => (
-                  <div key={company.id} className="bg-gray-900 rounded-2xl border border-gray-800 hover:border-gray-700 transition overflow-hidden">
+                  <div key={company.id} id={`company-${company.id}`} className="scroll-mt-4 bg-gray-900 rounded-2xl border border-gray-800 hover:border-gray-700 transition overflow-hidden">
                     {/* Company Row */}
                     <div className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                       <div className="flex items-start gap-3 min-w-0">
@@ -635,7 +792,10 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <span className="text-orange-500 font-bold text-sm">{company.name[0]}</span>
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium text-white text-sm">{company.name}</p>
+                          <p className="font-medium text-white text-sm">
+                            {company.name}
+                            {company.is_test && <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">TEST</span>}
+                          </p>
                           <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
                             <p className="text-xs text-gray-500 mt-0.5">{company.phone}</p>
@@ -747,6 +907,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         {/* Toggles */}
                         <div className="border-t border-gray-800 pt-4 space-y-3">
                           <p className="text-xs text-gray-500 uppercase tracking-wider">Feature Toggles</p>
+                          <div className="flex justify-between items-center bg-gray-800/50 rounded-xl px-3 py-2.5">
+                            <div>
+                              <p className="text-sm text-white">Test account</p>
+                              <p className="text-xs text-gray-500">
+                                {'is_test' in editingCompany
+                                  ? 'Leave out of the Dashboard and the Clients tab'
+                                  : 'Needs one SQL line first (db/2026-10-25-company-is-test.md)'}
+                              </p>
+                            </div>
+                            <button type="button" disabled={!('is_test' in editingCompany)}
+                              onClick={() => setEditingCompany({ ...editingCompany, is_test: !editingCompany.is_test })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.is_test
+                                ? 'bg-amber-950 border-amber-700 text-amber-300'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.is_test ? 'TEST' : 'REAL'}
+                            </button>
+                          </div>
                           <div className="flex justify-between items-center bg-gray-800/50 rounded-xl px-3 py-2.5">
                             <div>
                               <p className="text-sm text-white">Client Training Module</p>
@@ -1006,37 +1183,100 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           </div>
         )}
 
-        {activeTab === 'clients' && (
-          <div>
-            <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4">All Clients</h2>
-            {loading ? (
-              <p className="text-gray-500 text-sm">Loading...</p>
-            ) : clients.length === 0 ? (
-              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
-                No clients yet across any company.
-              </div>
-            ) : (
+        {/* CLIENTS TAB — grouped by company */}
+        {activeTab === 'clients' && (() => {
+          if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
+          const q = clientSearch.trim().toLowerCase()
+          const testIds = new Set(companies.filter(c => c.is_test).map(c => c.id))
+          const msBy = new Map<string, AdminMembership[]>()
+          for (const m of memberships) msBy.set(m.profile_id, [...(msBy.get(m.profile_id) || []), m])
+          const rows = clients
+            .filter(c => !c.archived_at)
+            .filter(c => showTestClients || !testIds.has(c.company_id))
+            .map(c => ({ c, state: membershipState(msBy.get(c.id) || []) }))
+          const shown = rows
+            .filter(r => clientFilter === 'all' || (clientFilter === 'pt' ? r.c.client_type === 'pt' : r.state === 'expired'))
+            .filter(r => !q || r.c.full_name.toLowerCase().includes(q) || (r.c.phone || '').includes(q) || (r.c.email || '').toLowerCase().includes(q) || (r.c.company_name || '').toLowerCase().includes(q))
+          const groups = companies
+            .filter(co => showTestClients || !co.is_test)
+            .map(co => ({ co, all: rows.filter(r => r.c.company_id === co.id), list: shown.filter(r => r.c.company_id === co.id) }))
+            .filter(g => g.list.length > 0)
+            .sort((a, b) => b.all.length - a.all.length)
+          const stateCls = { active: 'text-green-400', expiring: 'text-amber-400', expired: 'text-red-400', none: 'text-gray-500' }
+          const stateLabel = { active: 'Active', expiring: 'Expiring', expired: 'Expired', none: 'No membership' }
+          const testClientCount = clients.filter(c => !c.archived_at && testIds.has(c.company_id)).length
+          return (
+            <div className="space-y-4">
               <div className="space-y-2">
-                {clients.map((client) => (
-                  <div key={client.id} className="bg-gray-900 rounded-2xl px-5 py-4 flex justify-between items-center border border-gray-800 hover:border-gray-700 transition">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700">
-                        <span className="text-orange-500 font-bold text-sm">{client.full_name[0]}</span>
-                      </div>
-                      <div>
-                        <p className="font-medium text-white text-sm">{client.full_name}</p>
-                        <p className="text-xs text-gray-500">{client.email}</p>
-                      </div>
-                    </div>
-                    <div className="bg-gray-800 border border-gray-700 px-3 py-1 rounded-lg">
-                      <p className="text-xs text-orange-400 font-medium">{client.company_name}</p>
-                    </div>
-                  </div>
-                ))}
+                <input value={clientSearch} onChange={e => setClientSearch(e.target.value)} placeholder="Search name, phone, email or gym…"
+                  className="w-full bg-gray-900 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-800 text-sm" />
+                <div className="flex flex-wrap items-center gap-2">
+                  {([['all', 'All'], ['pt', 'PT'], ['expired', 'Expired']] as const).map(([k, label]) => (
+                    <button key={k} type="button" onClick={() => setClientFilter(k)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border ${clientFilter === k ? 'bg-orange-500 border-orange-500 text-white' : 'border-gray-700 text-gray-400'}`}>
+                      {label}
+                    </button>
+                  ))}
+                  {testClientCount > 0 && (
+                    <label className="ml-auto flex items-center gap-2 text-xs text-gray-400">
+                      <input type="checkbox" checked={showTestClients} onChange={e => setShowTestClients(e.target.checked)} className="accent-orange-500" />
+                      Show test accounts ({testClientCount})
+                    </label>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {groups.length === 0 ? (
+                <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
+                  {clients.length === 0 ? 'No clients yet across any company.' : 'No clients match.'}
+                </div>
+              ) : groups.map(({ co, all, list }) => {
+                const open = !collapsedCompanies.has(co.id) || !!q
+                const pt = all.filter(r => r.c.client_type === 'pt').length
+                const expired = all.filter(r => r.state === 'expired').length
+                return (
+                  <div key={co.id} className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
+                    <button type="button" aria-expanded={open}
+                      onClick={() => setCollapsedCompanies(prev => { const n = new Set(prev); if (n.has(co.id)) n.delete(co.id); else n.add(co.id); return n })}
+                      className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-800/50">
+                      <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-white truncate">
+                          {co.name}
+                          {co.is_test && <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">TEST</span>}
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          {all.length} member{all.length === 1 ? '' : 's'}{pt ? ` · ${pt} PT` : ''}{expired ? <span className="text-red-400"> · {expired} expired</span> : null}
+                          {list.length !== all.length ? ` · showing ${list.length}` : ''}
+                        </span>
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="divide-y divide-gray-800 border-t border-gray-800">
+                        {list.map(({ c, state }) => (
+                          <div key={c.id} className="px-4 py-2.5 flex items-center gap-3">
+                            <div className="w-8 h-8 shrink-0 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
+                              <span className="text-orange-500 font-bold text-xs">{c.full_name[0]}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-white truncate">
+                                {c.full_name}
+                                {c.client_type === 'pt' && <span className="ml-1.5 text-[10px] bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full align-middle">PT</span>}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate">{c.email && !c.email.endsWith('@getcoachboard.in') ? c.email : c.phone || c.email}</p>
+                            </div>
+                            <span className={`text-xs shrink-0 ${stateCls[state]}`}>● {stateLabel[state]}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              <p className="text-[11px] text-gray-500">Archived clients aren&apos;t listed. Expiring = membership ends within 7 days.</p>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )
