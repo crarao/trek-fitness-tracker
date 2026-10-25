@@ -953,6 +953,7 @@ export default function CompanyAdminPage() {
                 : `No ${activeFilter} members.`}
             </div>
           ) : (
+            <div className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
@@ -960,9 +961,9 @@ export default function CompanyAdminPage() {
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
                   <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
-                  <th className="px-4 py-3 text-left font-medium">Status</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Status</th>
                   <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Days Left</th>
-                  <th className="px-4 py-3 text-left font-medium">Action</th>
+                  <th className="px-3 sm:px-4 py-3 text-right sm:text-left font-medium">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -1014,21 +1015,19 @@ export default function CompanyAdminPage() {
                             <span className="text-white text-xs sm:text-sm font-bold">{initials(client.full_name)}</span>
                           </div>
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <p className="font-medium text-white text-sm">{client.full_name}</p>
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
-                              {trainModule && client.client_type === 'pt' && (() => {
-                                const a = weekAdherence[client.id]
-                                if (!a) return null
-                                if (a === 'no-plan') return <span className="text-[10px] text-amber-400/80 leading-none" title="No plan this week">no plan</span>
-                                return (
-                                  <span className={`text-[10px] font-semibold leading-none ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
-                                    {a.done}/{a.planned} wk
-                                  </span>
-                                )
-                              })()}
+                              {/* Phones: status sits here (the Status column shows from tablet width up) */}
+                              {activeFilter !== 'archived' && m && (
+                                <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                                </span>
+                              )}
+
                             </div>
                             {openingClientId === client.id ? (
                               <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
@@ -1036,7 +1035,20 @@ export default function CompanyAdminPage() {
                                 Opening…
                               </p>
                             ) : (
-                              <p className="text-xs text-gray-500">{client.phone || client.email}</p>
+                              <p className="text-xs text-gray-500">
+                                {client.phone || client.email}
+                                {/* PT plan progress this week, on the second line so the row stays phone-width */}
+                                {trainModule && client.client_type === 'pt' && (() => {
+                                  const a = weekAdherence[client.id]
+                                  if (!a) return null
+                                  if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  return (
+                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                      {' '}· {a.done}/{a.planned} this wk
+                                    </span>
+                                  )
+                                })()}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -1048,7 +1060,7 @@ export default function CompanyAdminPage() {
                       <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
                         {m ? `${fmtDate(m.start_date, country)} → ${fmtDate(m.end_date, country)}` : '—'}
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="hidden sm:table-cell px-4 py-4">
                         {activeFilter === 'archived' ? (
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-gray-800 text-gray-400">
                             <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
@@ -1074,7 +1086,7 @@ export default function CompanyAdminPage() {
                           </div>
                         ) : <span className="text-gray-600 text-sm">—</span>}
                       </td>
-                      <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+                      <td className="px-3 sm:px-4 py-4 text-right sm:text-left whitespace-nowrap" onClick={e => e.stopPropagation()}>
                         {activeFilter === 'archived' ? (
                           <button
                             onClick={() => handleRestoreClient(client.id)}
@@ -1094,6 +1106,7 @@ export default function CompanyAdminPage() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>
