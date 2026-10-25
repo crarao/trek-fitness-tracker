@@ -62,3 +62,35 @@ export function weekStatus(weekStart: string): 'current' | 'upcoming' | 'past' {
   if (today > end) return 'past'
   return 'current'
 }
+
+// The part of a day label that identifies the day ("Tue · Upper Body Push" -> "Tue").
+// Used to match logged sessions (logged_sessions.plan_day) to a plan's days, so a later
+// edit of the day's focus text doesn't lose the ✓.
+export function dayKey(label: string | null | undefined): string {
+  return (label || '').split(' · ')[0].trim()
+}
+
+export const isRestDay = (label: string) => label.endsWith('· Rest') || label === 'Rest'
+
+// Day keys of a plan that have a session logged against them
+export function doneDayKeys(
+  planId: string,
+  sessions: { weekly_plan_id?: string | null; plan_day?: string | null }[]
+): Set<string> {
+  return new Set(
+    sessions.filter(s => s.weekly_plan_id === planId && s.plan_day).map(s => dayKey(s.plan_day))
+  )
+}
+
+// Today's date on this device as YYYY-MM-DD (not UTC, which is a day behind before 5:30 am in India)
+export function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Last day of a plan's week: a plan covers 7 days from its start date (start + 6)
+export function weekEnd(weekStart: string): Date {
+  const end = parseDate(weekStart.slice(0, 10))
+  end.setDate(end.getDate() + 6)
+  return end
+}

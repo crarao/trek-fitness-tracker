@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus } from '@/lib/plan-summary'
+import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -26,6 +26,7 @@ type Session = {
   duration_minutes: number
   notes: string
   weekly_plan_id: string | null
+  plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
 }
 
 type Feedback = {
@@ -57,6 +58,18 @@ export default function ClientPage() {
   const [message, setMessage] = useState('')
   const [aiInsight, setAiInsight] = useState<string | null>(null)
   const [loadingInsight, setLoadingInsight] = useState(false)
+  // Day-by-day logging from this week's plan: the day chip that's open, and its form
+  const [openDay, setOpenDay] = useState<string | null>(null)
+  const [dayForm, setDayForm] = useState({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
+  const [savingDay, setSavingDay] = useState(false)
+  const [dayError, setDayError] = useState('')
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ text, kind })
+    toastTimer.current = setTimeout(() => setToast(null), 3000)
+  }
   const [showGoalForm, setShowGoalForm] = useState(false)
   const [goalText, setGoalText] = useState('')
 
@@ -281,6 +294,45 @@ const handleChangePassword = async () => {
     setActiveTab('progress')
   }
 
+  // "Done ✓" on a day of this week's plan: saves a normal session linked to the plan and the day
+  const handleLogDay = async (planId: string, label: string) => {
+    setDayError('')
+    const minutes = parseInt(dayForm.duration_minutes)
+    if (!minutes || minutes <= 0) { setDayError('Enter how many minutes you trained'); return }
+    if (!dayForm.session_date) { setDayError('Pick the date'); return }
+    setSavingDay(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSavingDay(false); router.push('/login'); return }
+    const row = {
+      client_id: user.id,
+      weekly_plan_id: planId,
+      session_date: dayForm.session_date,
+      duration_minutes: minutes,
+      notes: dayForm.notes,
+      plan_day: label,
+    }
+    let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
+    // If the plan_day column hasn't been added in Supabase yet, save the session without it
+    if (error && /plan_day/i.test(error.message)) {
+      const { plan_day: _skip, ...withoutDay } = row
+      void _skip
+      ;({ data: session, error } = await supabase.from('logged_sessions').insert(withoutDay).select().single())
+    }
+    if (error || !session) {
+      setSavingDay(false)
+      setDayError('Could not save: ' + (error?.message || 'please try again'))
+      return
+    }
+    if (dayForm.star_rating > 0) {
+      await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: dayForm.star_rating, admin_feedback: null })
+    }
+    setSavingDay(false)
+    setOpenDay(null)
+    setDayForm({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
+    showToast(`✓ ${dayKey(label)} done — nice work!`)
+    initialize()
+  }
+
   const getChartData = () => {
     if (sessions.length === 0) return null
     const weekMap: Record<string, { sessions: number, minutes: number }> = {}
@@ -339,6 +391,14 @@ const handleChangePassword = async () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {toast && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
@@ -471,7 +531,7 @@ const handleChangePassword = async () => {
               <>
                 <div className="flex gap-2 flex-wrap mb-4">
                   {plans.map(plan => (
-                    <button key={plan.id} onClick={() => { setActivePlanId(plan.id); setPlanOpen(weekStatus(plan.week_start) === 'current') }}
+                    <button key={plan.id} onClick={() => { setActivePlanId(plan.id); setOpenDay(null); setPlanOpen(weekStatus(plan.week_start) === 'current') }}
                       className={`text-xs px-3 py-1.5 rounded-full border transition ${activePlanId === plan.id
                         ? 'bg-orange-500 border-orange-500 text-white'
                         : 'border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'}`}>
@@ -483,23 +543,152 @@ const handleChangePassword = async () => {
                 {activePlan && (
                   <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
-                    <p className="text-base font-semibold mb-1">
+                    <p className="text-base font-semibold">
                       {formatDate(activePlan.week_start, country, 'long')}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-2">
+                      {formatDate(activePlan.week_start, country, 'weekday')} – {formatDate(weekEnd(activePlan.week_start), country, 'weekday')}
+                      <span className="text-gray-500"> · today is {formatDate(new Date(), country, 'weekday')}</span>
                     </p>
                     {weekStatus(activePlan.week_start) === 'current' && (
                       <span className="inline-block text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full mb-2">This week</span>
                     )}
                     {weekStatus(activePlan.week_start) === 'upcoming' && (
-                      <span className="inline-block text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full mb-2">Upcoming</span>
+                      <p className="mb-2">
+                        <span className="inline-block text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>
+                        <span className="text-xs text-gray-500"> · you can tick off days from {formatDate(activePlan.week_start, country, 'weekday')}</span>
+                      </p>
                     )}
                     {activePlan.workout_time && (
                       <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
                     )}
                     {(() => {
                       const summary = summarizePlan(activePlan.plan_details)
+                      const isCurrent = weekStatus(activePlan.week_start) === 'current'
+                      const done = doneDayKeys(activePlan.id, sessions)
+                      const workoutLabels = summary.days.filter(d => !isRestDay(d))
+                      const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
+                      // This week's days as tappable chips: tap → Done ✓ panel, or what was logged
+                      const dayPicker = (
+                        <div className="mb-1">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="text-xs text-gray-400">Tap a day when you&apos;ve done it</p>
+                            <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>
+                              {doneCount} of {workoutLabels.length} done
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {summary.days.map((d, i) => {
+                              const rest = isRestDay(d)
+                              const isDone = done.has(dayKey(d))
+                              const selected = openDay === d
+                              if (rest) return (
+                                <span key={i} className="text-xs px-3 py-2 rounded-lg border border-gray-800 text-gray-600">{d}</span>
+                              )
+                              return (
+                                <button key={i} type="button" aria-expanded={selected}
+                                  onClick={() => { setDayError(''); setOpenDay(selected ? null : d) }}
+                                  className={`text-xs px-3 py-2 rounded-lg border font-medium ${selected
+                                    ? 'border-orange-500 bg-orange-950 text-orange-200'
+                                    : isDone
+                                      ? 'border-green-700 bg-green-950 text-green-300'
+                                      : 'border-gray-600 bg-gray-800 text-gray-200 hover:border-gray-400'}`}>
+                                  {isDone ? '✓ ' : ''}{d}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          {openDay && summary.days.includes(openDay) && (() => {
+                            const logged = sessions.filter(s => s.weekly_plan_id === activePlan.id && dayKey(s.plan_day) === dayKey(openDay))
+                            if (logged.length) return (
+                              <div className="mt-3 rounded-xl border border-green-800 bg-green-950/40 p-4 space-y-2">
+                                <p className="text-sm font-semibold text-green-300">✓ {openDay}</p>
+                                {logged.map(s => {
+                                  const fb = getFeedback(s.id)
+                                  return (
+                                    <div key={s.id} className="text-xs text-gray-300 space-y-1">
+                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}</p>
+                                      {s.notes && <p className="text-gray-400 bg-gray-900 rounded-lg px-3 py-2">{s.notes}</p>}
+                                      {fb?.admin_feedback && (
+                                        <p className="text-orange-200 bg-orange-950/60 border border-orange-900 rounded-lg px-3 py-2">💬 Coach: {fb.admin_feedback}</p>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                                <button type="button" onClick={() => setOpenDay(null)} className="text-xs text-gray-400 hover:text-white">Close</button>
+                              </div>
+                            )
+                            return (
+                              <div className="mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4 space-y-3">
+                                <p className="text-sm font-semibold text-white">{openDay}</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label htmlFor="day-minutes" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Minutes</label>
+                                    <input id="day-minutes" type="number" inputMode="numeric" min={1} placeholder="e.g. 45"
+                                      value={dayForm.duration_minutes}
+                                      onChange={e => setDayForm(f => ({ ...f, duration_minutes: e.target.value }))}
+                                      className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                                  </div>
+                                  <div>
+                                    <label htmlFor="day-date" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Date</label>
+                                    <input id="day-date" type="date" max={localToday()}
+                                      value={dayForm.session_date}
+                                      onChange={e => setDayForm(f => ({ ...f, session_date: e.target.value }))}
+                                      className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                                  </div>
+                                </div>
+                                {dayForm.session_date && (
+                                  <p className="text-[11px] text-gray-500 -mt-1">{formatDate(dayForm.session_date, country, 'weekday')}</p>
+                                )}
+                                <div>
+                                  <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">How did it feel?</p>
+                                  <div className="flex gap-1.5">
+                                    {[
+                                      { rating: 1, emoji: '😓', label: 'Tough' },
+                                      { rating: 2, emoji: '😐', label: 'Okay' },
+                                      { rating: 3, emoji: '🙂', label: 'Good' },
+                                      { rating: 4, emoji: '😄', label: 'Great' },
+                                      { rating: 5, emoji: '🔥', label: 'Best' },
+                                    ].map(({ rating, emoji, label }) => (
+                                      <button key={rating} type="button" aria-pressed={dayForm.star_rating === rating}
+                                        onClick={() => setDayForm(f => ({ ...f, star_rating: f.star_rating === rating ? 0 : rating }))}
+                                        className={`flex-1 py-2 rounded-xl border text-center ${dayForm.star_rating === rating
+                                          ? 'border-orange-500 bg-orange-950'
+                                          : 'border-gray-700 bg-gray-800'}`}>
+                                        <div className="text-base">{emoji}</div>
+                                        <div className="text-[10px] text-gray-400">{label}</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                {profile?.companies?.session_notes_enabled !== false && (
+                                  <textarea placeholder="Notes for your coach (optional)" rows={2}
+                                    value={dayForm.notes}
+                                    onChange={e => setDayForm(f => ({ ...f, notes: e.target.value }))}
+                                    className="w-full bg-gray-800 text-white rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+                                )}
+                                {dayError && <p className="text-sm text-red-400">{dayError}</p>}
+                                <div className="flex gap-2">
+                                  <button type="button" onClick={() => handleLogDay(activePlan.id, openDay)} disabled={savingDay}
+                                    className="flex-1 bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50">
+                                    {savingDay ? 'Saving…' : 'Done ✓'}
+                                  </button>
+                                  <button type="button" onClick={() => setOpenDay(null)} disabled={savingDay}
+                                    className="px-4 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl">
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
                       return (
                         <div className="border-t border-gray-800 pt-4">
-                          {summary.days.length > 0 && (
+                          {summary.days.length > 0 && isCurrent && (
+                            dayPicker
+                          )}
+                          {summary.days.length > 0 && !isCurrent && (
                             <>
                               <p className="text-xs text-gray-400">
                                 {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
@@ -686,6 +875,9 @@ const handleChangePassword = async () => {
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes</p>
+                        )}
+                        {session.plan_day && (
+                          <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
                         )}
                       </div>
                       {fb?.star_rating && (
