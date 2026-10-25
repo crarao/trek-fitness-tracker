@@ -41,6 +41,7 @@ type ClientProfile = {
   fitness_level: string | null
   available_days: string | null
   food_preference: string | null
+  meals_per_day: number | null
   medical_conditions: string | null
   emergency_contact_name: string | null
   emergency_contact_phone: string | null
@@ -114,6 +115,12 @@ export default function ClientDetailPage() {
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
+  // AI diet chart: draft is reviewed/edited by the coach before saving to profiles.diet_plan
+  const [dietGenerating, setDietGenerating] = useState(false)
+  const [dietDraft, setDietDraft] = useState('')
+  const [dietError, setDietError] = useState('')
+  const [savingDiet, setSavingDiet] = useState(false)
+  const dietPanelRef = useRef<HTMLDivElement | null>(null)
   // Compact plan cards: one expanded at a time; older plans behind "Show older"
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
   const [showAllPlans, setShowAllPlans] = useState(false)
@@ -154,7 +161,7 @@ export default function ClientDetailPage() {
   const [clientProfileForm, setClientProfileForm] = useState({
     trainer_name: '', diet_plan: '',
     goal: '', age: '', gender: '', height_cm: '', weight_kg: '',
-    fitness_level: '', food_preference: '', available_days: '',
+    fitness_level: '', food_preference: '', meals_per_day: '', available_days: '',
     medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: ''
   })
   const [savingClientProfile, setSavingClientProfile] = useState(false)
@@ -343,9 +350,52 @@ const handleDeletePlan = async (planId: string) => {
 }
 
 
+const handleGenerateDiet = async () => {
+  setDietGenerating(true)
+  setDietError('')
+  setDietDraft('')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 60000)
+  try {
+    const response = await fetch('/api/generate-diet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ clientId }),
+    })
+    let data: { diet?: string; error?: string } = {}
+    try { data = await response.json() } catch { /* non-JSON, e.g. server timeout page */ }
+    if (response.ok && data.diet) {
+      setDietDraft(data.diet)
+      setTimeout(() => dietPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    } else {
+      setDietError('Could not create a diet chart' + (data.error ? ': ' + data.error : '. Please try again.'))
+    }
+  } catch {
+    setDietError(controller.signal.aborted ? 'The AI took too long (over 60 seconds). Please try again.' : 'Network problem. Check your connection and try again.')
+  } finally {
+    clearTimeout(timer)
+    setDietGenerating(false)
+  }
+}
+
+const handleSaveDiet = async () => {
+  if (!dietDraft.trim()) return
+  setSavingDiet(true)
+  const { error } = await supabase.from('profiles').update({ diet_plan: dietDraft.trim() }).eq('id', clientId)
+  setSavingDiet(false)
+  if (error) {
+    showToast('Could not save the diet chart: ' + error.message, 'error')
+    return
+  }
+  setDietDraft('')
+  showToast('Diet chart saved ✓')
+  initialize()
+}
+
 const handleSaveClientProfile = async () => {
   setSavingClientProfile(true)
-  await supabase
+  const { error: profileError } = await supabase
     .from('profiles')
     .update({
       trainer_name: clientProfileForm.trainer_name || null,
@@ -357,12 +407,18 @@ const handleSaveClientProfile = async () => {
       weight_kg: clientProfileForm.weight_kg ? parseFloat(clientProfileForm.weight_kg) : null,
       fitness_level: clientProfileForm.fitness_level || null,
       food_preference: clientProfileForm.food_preference || null,
+      meals_per_day: clientProfileForm.meals_per_day ? parseInt(clientProfileForm.meals_per_day) : null,
       available_days: clientProfileForm.available_days || null,
       medical_conditions: clientProfileForm.medical_conditions || null,
       emergency_contact_name: clientProfileForm.emergency_contact_name || null,
       emergency_contact_phone: clientProfileForm.emergency_contact_phone || null,
     })
     .eq('id', clientId)
+  if (profileError) {
+    setSavingClientProfile(false)
+    showToast('Could not save profile: ' + profileError.message, 'error')
+    return
+  }
   setClientProfileMessage('Saved! ✓')
   showToast('Profile saved ✓')
   setSavingClientProfile(false)
@@ -1443,6 +1499,7 @@ const handleResetPassword = async () => {
                 weight_kg: client?.weight_kg?.toString() || '',
                 fitness_level: client?.fitness_level || '',
                 food_preference: client?.food_preference || '',
+                meals_per_day: client?.meals_per_day?.toString() || '',
                 available_days: client?.available_days || '',
                 medical_conditions: client?.medical_conditions || '',
                 emergency_contact_name: client?.emergency_contact_name || '',
@@ -1535,6 +1592,24 @@ const handleResetPassword = async () => {
                 <option>Non-Vegetarian</option>
                 <option>Vegan</option>
                 <option>Eggetarian</option>
+                <option>Jain</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Meals per day (used by the AI diet chart) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Meals per day</label>
+              <select
+                value={clientProfileForm.meals_per_day}
+                onChange={e => setClientProfileForm({ ...clientProfileForm, meals_per_day: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                <option value="">—</option>
+                <option value="3">3 meals</option>
+                <option value="4">4 (3 meals + snack)</option>
+                <option value="5">5 (3 meals + 2 snacks)</option>
+                <option value="6">6 small meals</option>
               </select>
             </div>
           </div>
@@ -1661,6 +1736,10 @@ const handleResetPassword = async () => {
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Food Preference</p>
               <p className="text-sm text-white">{client?.food_preference || '—'}</p>
             </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Meals per day</p>
+              <p className="text-sm text-white">{client?.meals_per_day || '—'}</p>
+            </div>
           </div>
 
           {/* Available Days */}
@@ -1701,6 +1780,51 @@ const handleResetPassword = async () => {
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
               <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
             </div>
+
+            {/* AI diet chart */}
+            {!dietDraft && !dietGenerating && (
+              <div className="space-y-2">
+                {(!client?.food_preference || !client?.weight_kg) && (
+                  <p className="text-xs text-yellow-300">
+                    Add {[!client?.food_preference && 'food preference', !client?.weight_kg && 'weight'].filter(Boolean).join(' and ')} (Edit above) for a better diet chart.
+                  </p>
+                )}
+                <button onClick={handleGenerateDiet}
+                  className="bg-green-700 hover:bg-green-600 text-white text-xs px-4 py-2 rounded-xl transition font-medium">
+                  {client?.diet_plan ? '✨ Create a new diet chart with AI' : '✨ Create diet chart with AI'}
+                </button>
+              </div>
+            )}
+            {dietGenerating && (
+              <div className="flex items-center gap-3 bg-gray-800/60 border border-green-900 rounded-xl px-4 py-3">
+                <div className="w-5 h-5 rounded-full border-2 border-green-400 border-t-transparent animate-spin shrink-0" />
+                <p className="text-sm text-gray-200">Creating a diet chart for {client?.full_name?.split(' ')[0] || 'this client'}… usually 10–20 seconds</p>
+              </div>
+            )}
+            {dietError && !dietGenerating && (
+              <div className="flex items-start gap-3 bg-red-950 border border-red-900 rounded-xl px-4 py-3">
+                <p className="flex-1 text-sm text-red-300">{dietError}</p>
+                <button onClick={handleGenerateDiet} className="text-xs text-white bg-red-800 hover:bg-red-700 px-3 py-1.5 rounded-lg">Try again</button>
+              </div>
+            )}
+            {dietDraft && (
+              <div ref={dietPanelRef} className="scroll-mt-4 bg-gray-800/60 border border-green-800 rounded-xl p-4 space-y-3">
+                <p className="text-xs text-green-400 font-medium">✨ AI diet chart: review and edit before saving</p>
+                <textarea value={dietDraft} onChange={e => setDietDraft(e.target.value)} rows={14}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-green-500 border border-gray-700 text-sm resize-none" />
+                {client?.diet_plan && <p className="text-xs text-gray-500">Saving replaces the current diet plan.</p>}
+                <div className="flex gap-2">
+                  <button onClick={handleSaveDiet} disabled={savingDiet || !dietDraft.trim()}
+                    className="flex-1 bg-green-600 hover:bg-green-500 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+                    {savingDiet ? 'Saving...' : 'Save as diet plan'}
+                  </button>
+                  <button onClick={() => setDietDraft('')}
+                    className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Contact */}

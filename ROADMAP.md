@@ -66,7 +66,7 @@ _Last updated: 24 Oct 2026_
 
 ## P4 — Next features
 
-- [ ] **#18 Indian diet chart** from structured fields (veg / non-veg, region, goal, allergies).
+- [ ] **#18 Diet chart** — generic version shipped (#19): AI diet chart from food preference (incl. Jain / Vegan), meals per day, goal, weight/height; India vs US foods by company country; coach reviews and saves to the diet plan. **Still to add:** region / cuisine and allergies / foods to avoid fields (allergies after the remaining RLS rules in #1).
 - [ ] **#19 SMS reminders** — MSG91 + DLT registration (takes 5–7 days, start the paperwork early). US: Twilio.
 - [ ] **#20 Multi-branch** — `branch_id`, owner dashboard across branches, coach assignment.
 
