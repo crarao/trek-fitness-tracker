@@ -113,6 +113,8 @@ export default function ClientDetailPage() {
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
+  // After a plan is assigned or edited, bring its card into view once the list has reloaded
+  const [scrollToPlanId, setScrollToPlanId] = useState<string | null>(null)
   // AI diet chart: draft is reviewed/edited by the coach before saving to profiles.diet_plan
   const [dietGenerating, setDietGenerating] = useState(false)
   const [dietDraft, setDietDraft] = useState('')
@@ -212,6 +214,14 @@ export default function ClientDetailPage() {
   useEffect(() => {
     if (generatingPlan) aiWorkingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [generatingPlan])
+  // The saved plan's card, once it is on screen (older plans may be behind "Show older")
+  useEffect(() => {
+    if (!scrollToPlanId) return
+    const el = document.getElementById(`plan-${scrollToPlanId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setScrollToPlanId(null)
+  }, [scrollToPlanId, plans])
 
   useEffect(() => {
     if (!editClientForm.start_date) return
@@ -320,7 +330,8 @@ export default function ClientDetailPage() {
     // Briefly highlight the new card so the coach sees where it went
     if (inserted?.id) {
       setHighlightPlanId(inserted.id)
-      setTimeout(() => setHighlightPlanId(null), 2500)
+      setScrollToPlanId(inserted.id)
+      setTimeout(() => setHighlightPlanId(null), 4000)
     }
     showToast(`✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
     loadData(['plans'])
@@ -419,8 +430,12 @@ const handleUpdatePlan = async () => {
     setPlanError('Could not save changes: ' + error.message)
     return
   }
+  const editedId = editingPlan.id
   setEditingPlan(null)
   setEditingJson(null)
+  setScrollToPlanId(editedId)
+  setHighlightPlanId(editedId)
+  setTimeout(() => setHighlightPlanId(prev => (prev === editedId ? null : prev)), 4000)
   loadData(['plans'])
   showToast('Plan updated ✓')
 }
@@ -1331,7 +1346,7 @@ const handleResetPassword = async () => {
             ) : (
               <div className="space-y-3">
                 {(showAllPlans ? plans : plans.slice(0, 6)).map(plan => (
-  <div key={plan.id} className={`bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
+  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-4 bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
     {editingPlan?.id === plan.id ? (
       // Edit mode
       <div className="space-y-3">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   type PlanJson, type PlanDay, type PlanExercise, type Weekday,
   daysInWeekOrder, emptyExercise, exerciseDetail,
@@ -19,6 +19,24 @@ export default function PlanEditor({
 }) {
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
   const [open, setOpen] = useState<Weekday | null>(() => ordered.find(d => !d.rest)?.day ?? null)
+
+  // Changing the week start re-orders the days; moving those rows makes phones lose their place and
+  // jump up the page. Remember where the page was and put it back right after the re-order.
+  const lastScrollY = useRef(0)
+  useEffect(() => {
+    lastScrollY.current = window.scrollY
+    const onScroll = () => { lastScrollY.current = window.scrollY }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+  const firstWeekStart = useRef(weekStart)
+  useLayoutEffect(() => {
+    if (weekStart === firstWeekStart.current) return
+    firstWeekStart.current = weekStart
+    const y = lastScrollY.current
+    window.scrollTo({ top: y })
+    requestAnimationFrame(() => window.scrollTo({ top: y })) // again after the phone settles
+  }, [weekStart])
 
   const updateDay = (day: Weekday, change: (d: PlanDay) => PlanDay) =>
     onChange({ ...value, days: value.days.map(d => (d.day === day ? change(d) : d)) })
