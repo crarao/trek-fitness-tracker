@@ -6,29 +6,13 @@ import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { summarizePlan, weekStatus } from '@/lib/plan-summary'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-} from 'chart.js'
-import { Bar, Line } from 'react-chartjs-2'
+import dynamic from 'next/dynamic'
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend
-)
+// Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
+const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
+  ssr: false,
+  loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
+})
 
 type ClientProfile = {
   full_name: string
@@ -213,48 +197,72 @@ export default function ClientDetailPage() {
     setEditClientForm(prev => ({ ...prev, end_date: end.toISOString().split('T')[0] }))
   }, [editClientForm.plan_type, editClientForm.start_date])
 
-  const initialize = async () => {
-    const { data: clientData } = await supabase
-      .from('profiles')
-      .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency, country)')
-      .eq('id', clientId)
-      .single()
-    setClient(clientData)
-    if (clientData?.company_id) setCompanyId(clientData.company_id)
-
-    const { data: membershipsData } = await supabase
-      .from('memberships')
-      .select('*')
-      .eq('profile_id', clientId)
-      .order('start_date', { ascending: false })
-      .order('created_at', { ascending: false })
-    setMemberships(membershipsData || [])
-
-    const { data: plansData } = await supabase
-      .from('weekly_plans')
-      .select('*')
-      .eq('client_id', clientId)
-      .order('week_start', { ascending: false })
-    setPlans(plansData || [])
-
-    const { data: sessionsData } = await supabase
-      .from('logged_sessions')
-      .select('*')
-      .eq('client_id', clientId)
-      .order('session_date', { ascending: true })
-    setSessions(sessionsData || [])
-
-    const sessionIds = sessionsData?.map(s => s.id) || []
-    if (sessionIds.length) {
-      const { data: feedbackData } = await supabase
-        .from('session_feedback')
-        .select('*')
-        .in('session_id', sessionIds)
-      setFeedback(feedbackData || [])
-    }
-
+  // Loads the page's data in parallel (one round trip instead of five).
+  // Pass only the parts that changed after a save to avoid reloading everything.
+  type Part = 'client' | 'memberships' | 'plans' | 'sessions'
+  const loadData = async (parts: Part[] = ['client', 'memberships', 'plans', 'sessions']) => {
+    const want = (p: Part) => parts.includes(p)
+    await Promise.all([
+      want('client') && (async () => {
+        const { data: clientData } = await supabase
+          .from('profiles')
+          .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency, country)')
+          .eq('id', clientId)
+          .single()
+        setClient(clientData)
+        if (clientData?.company_id) setCompanyId(clientData.company_id)
+      })(),
+      want('memberships') && (async () => {
+        const { data: membershipsData } = await supabase
+          .from('memberships')
+          .select('id, plan_type, amount_paid, start_date, end_date, created_at')
+          .eq('profile_id', clientId)
+          .order('start_date', { ascending: false })
+          .order('created_at', { ascending: false })
+        setMemberships(membershipsData || [])
+      })(),
+      want('plans') && (async () => {
+        const { data: plansData } = await supabase
+          .from('weekly_plans')
+          .select('*')
+          .eq('client_id', clientId)
+          .order('week_start', { ascending: false })
+        setPlans(plansData || [])
+      })(),
+      want('sessions') && (async () => {
+        // Sessions with their feedback in one request; falls back to two if the join isn't available
+        const joined = await supabase
+          .from('logged_sessions')
+          .select('*, session_feedback(*)')
+          .eq('client_id', clientId)
+          .order('session_date', { ascending: true })
+        if (!joined.error) {
+          const rows = (joined.data || []) as (Session & { session_feedback?: Feedback[] | null })[]
+          setSessions(rows.map(r => { const copy = { ...r }; delete copy.session_feedback; return copy as Session }))
+          setFeedback(rows.flatMap(r => r.session_feedback || []))
+          return
+        }
+        const { data: sessionsData } = await supabase
+          .from('logged_sessions')
+          .select('*')
+          .eq('client_id', clientId)
+          .order('session_date', { ascending: true })
+        setSessions(sessionsData || [])
+        const sessionIds = sessionsData?.map(s => s.id) || []
+        if (sessionIds.length) {
+          const { data: feedbackData } = await supabase
+            .from('session_feedback')
+            .select('*')
+            .in('session_id', sessionIds)
+          setFeedback(feedbackData || [])
+        } else {
+          setFeedback([])
+        }
+      })(),
+    ])
     setLoading(false)
   }
+  const initialize = () => loadData()
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
@@ -282,7 +290,7 @@ export default function ClientDetailPage() {
       setTimeout(() => setHighlightPlanId(null), 2500)
     }
     showToast(`✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
-    initialize()
+    loadData(['plans'])
     return true
   }
 
@@ -329,7 +337,7 @@ const handleUpdatePlan = async () => {
     return
   }
   setEditingPlan(null)
-  initialize()
+  loadData(['plans'])
   showToast('Plan updated ✓')
 }
 
@@ -345,7 +353,7 @@ const handleDeletePlan = async (planId: string) => {
     showToast('Could not delete the plan: ' + error.message, 'error')
     return
   }
-  initialize()
+  loadData(['plans'])
   showToast('Plan deleted')
 }
 
@@ -390,7 +398,7 @@ const handleSaveDiet = async () => {
   }
   setDietDraft('')
   showToast('Diet chart saved ✓')
-  initialize()
+  loadData(['client'])
 }
 
 const handleSaveClientProfile = async () => {
@@ -424,7 +432,7 @@ const handleSaveClientProfile = async () => {
   setSavingClientProfile(false)
   setEditingClientProfile(false)
   setTimeout(() => setClientProfileMessage(''), 3000)
-  initialize()
+  loadData(['client'])
 }
 
 const handleGeneratePlan = async () => {
@@ -498,7 +506,7 @@ const cancelGeneratePlan = () => {
     }
     setSavedFeedback(prev => ({ ...prev, [sessionId]: true }))
     setTimeout(() => setSavedFeedback(prev => ({ ...prev, [sessionId]: false })), 2000)
-    initialize()
+    loadData(['sessions'])
   }
 
 const handleResetPassword = async () => {
@@ -551,7 +559,7 @@ const handleResetPassword = async () => {
     setSavingEdit(false)
     setEditMessage('Saved! ✓')
     showToast('Member updated ✓')
-    initialize()
+    loadData(['client'])
     setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }
 
@@ -614,7 +622,7 @@ const handleResetPassword = async () => {
     setShowEditClient(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
-    initialize()
+    loadData(['memberships', 'client'])
   }
 
   const handleCorrectMembership = async () => {
@@ -638,7 +646,7 @@ const handleResetPassword = async () => {
     setShowEditClient(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => setMembershipMessage(''), 3000)
-    initialize()
+    loadData(['memberships'])
   }
 
   const handleDeleteClient = async () => {
@@ -660,7 +668,7 @@ const handleResetPassword = async () => {
 
   const handleUnarchiveClient = async () => {
     await supabase.from('profiles').update({ archived_at: null }).eq('id', clientId)
-    initialize()
+    loadData(['client'])
   }
 
   const getChartData = () => {
@@ -699,9 +707,26 @@ const handleResetPassword = async () => {
   // null until the client/company row has loaded; INR only if the company's currency is empty
   const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
 
+  // Skeleton while loading, so the page appears instantly instead of a blank "Loading..."
   if (loading) return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <p className="text-gray-400">Loading...</p>
+    <div className="min-h-screen bg-gray-950 text-white" aria-busy="true">
+      <span className="sr-only" role="status">Loading client…</span>
+      <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center gap-3">
+        <div className="h-8 w-16 rounded-lg bg-gray-800 animate-pulse" />
+        <div className="h-9 w-9 rounded-lg bg-gray-800 animate-pulse" />
+        <div className="space-y-2">
+          <div className="h-4 w-32 rounded bg-gray-800 animate-pulse" />
+          <div className="h-3 w-24 rounded bg-gray-800/70 animate-pulse" />
+        </div>
+      </div>
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="h-28 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" />
+          <div className="h-28 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" />
+        </div>
+        <div className="h-10 rounded-xl bg-gray-900 border border-gray-800 animate-pulse" />
+        <div className="h-64 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" />
+      </div>
     </div>
   )
 
@@ -1365,59 +1390,7 @@ const handleResetPassword = async () => {
                 No activities logged yet by this client.
               </div>
             ) : chartData && (
-              <>
-                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Activities per Week</p>
-                  <Bar
-                    data={{
-                      labels: chartData.labels,
-                      datasets: [{
-                        label: 'Activities',
-                        data: chartData.sessionCounts,
-                        backgroundColor: 'rgba(249, 115, 22, 0.7)',
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        borderWidth: 1,
-                        borderRadius: 4,
-                      }]
-                    }}
-                    options={{
-                      responsive: true,
-                      plugins: { legend: { display: false } },
-                      scales: {
-                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Minutes per Week</p>
-                  <Line
-                    data={{
-                      labels: chartData.labels,
-                      datasets: [{
-                        label: 'Minutes',
-                        data: chartData.minuteCounts,
-                        borderColor: 'rgba(249, 115, 22, 1)',
-                        backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                        borderWidth: 2,
-                        pointBackgroundColor: 'rgba(249, 115, 22, 1)',
-                        tension: 0.3,
-                        fill: true,
-                      }]
-                    }}
-                    options={{
-                      responsive: true,
-                      plugins: { legend: { display: false } },
-                      scales: {
-                        x: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' } },
-                        y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { color: '#1f2937' }, beginAtZero: true }
-                      }
-                    }}
-                  />
-                </div>
-              </>
+<ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
           </div>
         )}
