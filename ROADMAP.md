@@ -23,6 +23,7 @@ _Last updated: 24 Oct 2026_
 - [x] **#24 Plans tab polish** — clearer buttons, week defaults to Monday, panels scroll into view, new card highlighted, missing-profile note (#15)
 - [x] **#11 Client page speed-up** — data loads in parallel (sessions + feedback in one request), saves refresh only what changed, charts load only on Progress (`app/progress-charts.tsx` via `next/dynamic`, also on the client screen), skeleton while loading (#22)
 - [x] **#12 Owner dashboard speed-up** — local session instead of a network check, profile + company in one request, members start loading immediately, archived members load only when that tab opens (count shown from a light query), skeleton rows (#22)
+- [x] **#13 Service worker rewrite + region** — `public/sw.js` v2: content-hashed files/icons cache-first, pages network-only with offline login fallback, logged-in pages never cached, old v1 cache cleared; `vercel.json` sets server functions (API routes, proxy) to Tokyo `hnd1`, next to Supabase (#23)
 - [x] **#30 Tap feedback on member rows** — tapped row highlights with "Opening…" and a spinner, other rows dim, page prefetches on touch (#22)
 - [x] **#29 Compact plan cards** — coach Plans tab: week + This week / Upcoming / Past badge, "3 workout days · 18 exercises", day chips, tap to expand, ✏️ 🗑 icons, 6 shown + Show older; client screen opens on this week's plan with Show / Hide full plan (#17). Summary read from plan text (`lib/plan-summary.ts`) until #14 adds structured plans.
 - [x] **#28 Membership renew fix** — Edit opens in Renew mode with dates starting after the current membership (or today); separate Correct mode; saves checked with red errors; same-day tie goes to the newest entry (#16)
@@ -36,9 +37,6 @@ _Last updated: 24 Oct 2026_
 
 ## P2 — Speed (phone app feels slow)
 
-- [ ] **#13 Service worker rewrite + region** (22 Oct Task 7)
-  - `public/sw.js`: cache name `coachboard-v2`; `/_next/static`, icons, fonts cache-first; pages network-only with offline fallback to `/login`; never cache logged-in pages; keep skipping Supabase and `/api/`.
-  - Manual step for Anand: Vercel → Project Settings → Functions → region Tokyo (`hnd1`), next to Supabase.
 
 ## P3 — Product upgrade (replaces 22 Oct Task 8, compact plan cards)
 
