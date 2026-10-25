@@ -9,6 +9,7 @@ import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-
 import { type PlanJson, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
+import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
@@ -1535,6 +1536,32 @@ const handleResetPassword = async () => {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
+            {(() => {
+              // Plan adherence: this week's plan and the last 4 weeks
+              const cur = currentPlan(plans)
+              const week = cur ? planAdherence(cur, sessions) : null
+              const four = recentAdherence(plans, sessions, 4)
+              return (
+                <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Plan this week</p>
+                    {week ? (
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(week))}`}>{week.done} of {week.planned}</span> <span className="text-xs text-gray-500">days done</span></p>
+                    ) : (
+                      <p className="text-sm text-amber-400 mt-1">{cur ? 'Plan has no clear days' : 'No plan this week'}</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Last 4 weeks</p>
+                    {four ? (
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(four))}`}>{pct(four)}%</span> <span className="text-xs text-gray-500">{four.done} of {four.planned} days</span></p>
+                    ) : (
+                      <p className="text-sm text-gray-500 mt-1">No plans yet</p>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
             {client?.weight_kg ? (
               <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
                 <div>
