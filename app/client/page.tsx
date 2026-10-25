@@ -7,6 +7,7 @@ import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
+import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -111,7 +112,7 @@ const [profileMessage, setProfileMessage] = useState('')
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country)')
+      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country, business_type)')
       .eq('id', user.id)
       .single()
 
@@ -340,7 +341,8 @@ const handleChangePassword = async () => {
     setSavingDay(false)
     setOpenDay(null)
     setDayForm({ session_date: localToday(), duration_minutes: '', notes: '', star_rating: 0 })
-    showToast(`✓ ${dayKey(label)} done — nice work!`)
+    const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, label, businessType: profile?.companies?.business_type })
+    showToast(`✓ ${dayKey(label)} done — nice work!${kcal ? ` ${kcalText(kcal)} (estimate)` : ''}`)
     initialize()
   }
 
@@ -392,6 +394,11 @@ const handleChangePassword = async () => {
   })()
 
   const activePlan = plans.find(p => p.id === activePlanId)
+  // Calorie estimate per session (null without weight or minutes) and this week's total (from Monday)
+  const sessionKcal = (s: Session) =>
+    estimateKcal({ minutes: s.duration_minutes, weightKg: profile?.weight_kg, label: s.plan_day, businessType: profile?.companies?.business_type })
+  const weekStartIso = thisWeekMonday()
+  const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
   if (loading) return (
@@ -590,7 +597,7 @@ const handleChangePassword = async () => {
                                   const fb = getFeedback(s.id)
                                   return (
                                     <div key={s.id} className="text-xs text-gray-300 space-y-1">
-                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}</p>
+                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}</p>
                                       {s.notes && <p className="text-gray-400 bg-gray-900 rounded-lg px-3 py-2">{s.notes}</p>}
                                       {fb?.admin_feedback && (
                                         <p className="text-orange-200 bg-orange-950/60 border border-orange-900 rounded-lg px-3 py-2">💬 Coach: {fb.admin_feedback}</p>
@@ -708,6 +715,7 @@ const handleChangePassword = async () => {
                             )}
                           </div>
                           <PlanDays plan={planJson} weekStart={activePlan.week_start} done={done}
+                            doneNote={doneDayNotes(activePlan.id, sessions, sessionKcal)}
                             openDay={openDay ? dayKey(openDay) : null}
                             onToggle={d => {
                               setDayError('')
@@ -863,6 +871,19 @@ const handleChangePassword = async () => {
               </div>
             </div>
 
+            {/* Calories: an estimate from effort × weight × minutes */}
+            {profile?.weight_kg ? (
+              <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Calories this week</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Estimate from workout type, minutes and your weight</p>
+                </div>
+                <p className="text-2xl font-bold text-orange-500 shrink-0">{kcalText(weekKcal) || '~0 kcal'}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 px-1">Add your weight in Profile to see calorie estimates.</p>
+            )}
+
 {/* AI Insights */}
 {profile?.companies?.ai_insights_enabled !== false && (
 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
@@ -908,7 +929,7 @@ const handleChangePassword = async () => {
                           {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} minutes{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>

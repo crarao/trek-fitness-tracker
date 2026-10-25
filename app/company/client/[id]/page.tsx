@@ -8,6 +8,7 @@ import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import { type PlanJson, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
+import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
@@ -171,6 +172,19 @@ export default function ClientDetailPage() {
     const t = setInterval(() => setAiElapsed(s => s + 1), 1000)
     return () => clearInterval(t)
   }, [generatingPlan])
+
+  // Calorie estimate per session (null without weight or minutes); weekly totals from Monday
+  const sessionKcal = (s: Session) => estimateKcal({
+    minutes: s.duration_minutes, weightKg: client?.weight_kg, label: s.plan_day,
+    businessType: (client as { companies?: { business_type?: string } } | null)?.companies?.business_type,
+  })
+  const weekStartIso = thisWeekMonday()
+  const lastWeekStartIso = (() => {
+    const d = new Date(weekStartIso + 'T00:00:00'); d.setDate(d.getDate() - 7)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+  const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
+  const lastWeekKcal = sessions.filter(s => s.session_date >= lastWeekStartIso && s.session_date < weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
 
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
@@ -1439,7 +1453,7 @@ const handleResetPassword = async () => {
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
             {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} compact />
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact />
               : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
           </div>
         )}
@@ -1478,7 +1492,7 @@ const handleResetPassword = async () => {
                           {formatDate(session.session_date, country, 'weekday')}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
@@ -1521,6 +1535,17 @@ const handleResetPassword = async () => {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
+            {client?.weight_kg ? (
+              <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Calories this week</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Estimate from workout type, minutes and {client.weight_kg} kg · last week {kcalText(lastWeekKcal) || '~0 kcal'}</p>
+                </div>
+                <p className="text-2xl font-bold text-orange-500 shrink-0">{kcalText(weekKcal) || '~0 kcal'}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 px-1">Add the client&apos;s weight in Profile to see calorie estimates.</p>
+            )}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No activities logged yet by this client.

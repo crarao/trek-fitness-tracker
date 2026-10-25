@@ -43,7 +43,7 @@ _Last updated: 25 Oct 2026_
 
 - [x] **#14 Structured weekly plan** — AI fills a fixed form (7 days → exercises with sets, reps, rest, note), saved in `weekly_plans.plan_json` (SQL in `db/2026-10-25-plan-json.md`) with a text copy in `plan_details`; coach and client see 7 day rows (tap for exercises), client ticks off the day inside its row, today's workout opens first; day-by-day editor for AI drafts, new plans and edits (Workout / Rest per day, add / move / remove exercises), paste-as-text with "Convert to days", older text plans can be converted (#26, #27). Shared code: `lib/plan-structure.ts`, `app/plan-days.tsx`, `app/plan-editor.tsx`.
 - [ ] **#15 Client day-by-day logging** — **light version shipped (#25):** on this week's plan the client taps a day chip → Done ✓ with minutes, date, how it felt, notes; saves a session linked to the plan and day (`logged_sessions.plan_day`, SQL in `db/2026-10-25-plan-day.md`); ✓ on done days for client and on coach plan cards ("2 of 4 done"), day shown on the coach's Sessions tab. **Still to do — full version (after #14):** each day lists its own exercises; tick off exercises; exact adherence for #17.
-- [ ] **#16 Calorie estimate on each Done** — weight × duration × the day's effort level.
+- [x] **#16 Calorie estimate** — "~260 kcal (estimate)" from effort level (read from the day's focus, else the gym's business type) × client weight × minutes; client sees it on the Done message, done days, Activity History and "Calories this week" on Progress; coach sees it on each session and this week / last week on Progress. Nothing stored, no SQL (`lib/calories.ts`) (#28)
 - [ ] **#17 Adherence stat for owners** — "3 of 4 days done".
 
 ## P4 — Next features
