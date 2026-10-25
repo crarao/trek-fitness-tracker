@@ -5,7 +5,9 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
+import { type PlanJson, planJsonOf, summarizeAny, planToText } from '@/lib/plan-structure'
+import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -51,6 +53,7 @@ type Plan = {
   week_start: string
   plan_details: string
   workout_time: string | null
+  plan_json?: unknown   // structured days (newer plans); null for text-only plans
 }
 
 type Session = {
@@ -98,6 +101,7 @@ export default function ClientDetailPage() {
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [generatedPlan, setGeneratedPlan] = useState('')
+  const [generatedJson, setGeneratedJson] = useState<PlanJson | null>(null) // structured copy of the AI draft
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
@@ -268,19 +272,25 @@ export default function ClientDetailPage() {
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
-  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string }) => {
+  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string; plan_json?: PlanJson | null }) => {
     if (!plan.week_start || !plan.plan_details.trim()) {
       setPlanError('Pick a week and add plan details before saving.')
       return false
     }
     setSaving(true)
     setPlanError('')
-    const { data: inserted, error } = await supabase.from('weekly_plans').insert({
+    const row = {
       client_id: clientId,
       week_start: plan.week_start,
       plan_details: plan.plan_details,
-      workout_time: plan.workout_time || null
-    }).select('id').single()
+      workout_time: plan.workout_time || null,
+    }
+    let { data: inserted, error } = await supabase.from('weekly_plans')
+      .insert(plan.plan_json ? { ...row, plan_json: plan.plan_json } : row).select('id').single()
+    // If the plan_json column hasn't been added in Supabase yet, save the text plan alone
+    if (error && plan.plan_json && /plan_json/i.test(error.message)) {
+      ;({ data: inserted, error } = await supabase.from('weekly_plans').insert(row).select('id').single())
+    }
     setSaving(false)
     if (error) {
       setPlanError('Could not save the plan: ' + error.message)
@@ -305,9 +315,12 @@ export default function ClientDetailPage() {
   }
 
   const handleAssignGeneratedPlan = async () => {
-    const ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan })
+    // Keep the structured days only if the coach didn't rewrite the text
+    const json = generatedJson && planToText(generatedJson) === generatedPlan ? generatedJson : null
+    const ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan, plan_json: json })
     if (ok) {
       setGeneratedPlan('')
+      setGeneratedJson(null)
       setAiPlanMeta({ week_start: '', workout_time: '' })
       setShowGeneratedPlan(false)
     }
@@ -330,7 +343,10 @@ const handleUpdatePlan = async () => {
     .update({
       week_start: editingPlan.week_start,
       plan_details: editingPlan.plan_details,
-      workout_time: editingPlan.workout_time || null
+      workout_time: editingPlan.workout_time || null,
+      // If the text no longer matches the structured days, show the text instead
+      ...(editingPlan.plan_json && planJsonOf(editingPlan) && planToText(planJsonOf(editingPlan)!) !== editingPlan.plan_details
+        ? { plan_json: null } : {}),
     })
     .eq('id', editingPlan.id)
   setSaving(false)
@@ -463,11 +479,12 @@ const handleGeneratePlan = async () => {
       })
     })
 
-    let data: { plan?: string; error?: string } = {}
+    let data: { plan?: string; plan_json?: unknown; error?: string } = {}
     try { data = await response.json() } catch { /* non-JSON, e.g. server timeout page */ }
 
     if (response.ok && data.plan) {
       setGeneratedPlan(data.plan)
+      setGeneratedJson(data.plan_json ? planJsonOf({ plan_json: data.plan_json }) : null)
       setAiPlanMeta(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
       setShowGeneratedPlan(true)
     } else if (response.status === 504) {
@@ -1256,7 +1273,8 @@ const handleResetPassword = async () => {
     ) : (
       // View mode: compact card, tap to expand
       (() => {
-        const summary = summarizePlan(plan.plan_details)
+        const summary = summarizeAny(plan, plan.week_start)
+        const planJson = planJsonOf(plan)
         const status = weekStatus(plan.week_start)
         const open = expandedPlanId === plan.id
         const done = doneDayKeys(plan.id, sessions)
@@ -1323,7 +1341,9 @@ const handleResetPassword = async () => {
         </div>
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
-            <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+            {planJson
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} compact />
+              : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
           </div>
         )}
       </>

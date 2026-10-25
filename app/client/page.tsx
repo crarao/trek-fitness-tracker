@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
+import { planJsonOf, summarizeAny, dayLabel, todayWeekday } from '@/lib/plan-structure'
+import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -18,6 +20,7 @@ type WeeklyPlan = {
   week_start: string
   plan_details: string
   workout_time: string | null
+  plan_json?: unknown   // structured days (newer plans); null for text-only plans
 }
 
 type Session = {
@@ -93,6 +96,13 @@ const [profileMessage, setProfileMessage] = useState('')
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
 
+  // On this week's structured plan, open today's workout (null for rest days and text plans)
+  const todaysDayLabel = (plan: WeeklyPlan): string | null => {
+    const pj = planJsonOf(plan)
+    const today = pj?.days.find(d => d.day === todayWeekday())
+    return today && !today.rest ? dayLabel(today) : null
+  }
+
   useEffect(() => { initialize() }, [])
 
   const initialize = async () => {
@@ -134,6 +144,7 @@ if (prof) {
       // Start on this week's plan if there is one, otherwise the newest
       const current = plansData.find(p => weekStatus(p.week_start) === 'current')
       setActivePlanId((current || plansData[0]).id)
+      setOpenDay(current ? todaysDayLabel(current) : null)
       setPlanOpen(!!current) // full text open only for this week's plan
     }
 
@@ -531,7 +542,7 @@ const handleChangePassword = async () => {
               <>
                 <div className="flex gap-2 flex-wrap mb-4">
                   {plans.map(plan => (
-                    <button key={plan.id} onClick={() => { setActivePlanId(plan.id); setOpenDay(null); setPlanOpen(weekStatus(plan.week_start) === 'current') }}
+                    <button key={plan.id} onClick={() => { setActivePlanId(plan.id); setOpenDay(weekStatus(plan.week_start) === 'current' ? todaysDayLabel(plan) : null); setPlanOpen(weekStatus(plan.week_start) === 'current') }}
                       className={`text-xs px-3 py-1.5 rounded-full border transition ${activePlanId === plan.id
                         ? 'bg-orange-500 border-orange-500 text-white'
                         : 'border-gray-700 text-gray-400 hover:text-white hover:border-gray-500'}`}>
@@ -563,46 +574,18 @@ const handleChangePassword = async () => {
                       <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
                     )}
                     {(() => {
-                      const summary = summarizePlan(activePlan.plan_details)
+                      const planJson = planJsonOf(activePlan)
+                      const summary = summarizeAny(activePlan, activePlan.week_start)
                       const isCurrent = weekStatus(activePlan.week_start) === 'current'
                       const done = doneDayKeys(activePlan.id, sessions)
                       const workoutLabels = summary.days.filter(d => !isRestDay(d))
                       const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
-                      // This week's days as tappable chips: tap → Done ✓ panel, or what was logged
-                      const dayPicker = (
-                        <div className="mb-1">
-                          <div className="flex items-baseline justify-between gap-2">
-                            <p className="text-xs text-gray-400">Tap a day when you&apos;ve done it</p>
-                            <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>
-                              {doneCount} of {workoutLabels.length} done
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {summary.days.map((d, i) => {
-                              const rest = isRestDay(d)
-                              const isDone = done.has(dayKey(d))
-                              const selected = openDay === d
-                              if (rest) return (
-                                <span key={i} className="text-xs px-3 py-2 rounded-lg border border-gray-800 text-gray-600">{d}</span>
-                              )
-                              return (
-                                <button key={i} type="button" aria-expanded={selected}
-                                  onClick={() => { setDayError(''); setOpenDay(selected ? null : d) }}
-                                  className={`text-xs px-3 py-2 rounded-lg border font-medium ${selected
-                                    ? 'border-orange-500 bg-orange-950 text-orange-200'
-                                    : isDone
-                                      ? 'border-green-700 bg-green-950 text-green-300'
-                                      : 'border-gray-600 bg-gray-800 text-gray-200 hover:border-gray-400'}`}>
-                                  {isDone ? '✓ ' : ''}{d}
-                                </button>
-                              )
-                            })}
-                          </div>
-                          {openDay && summary.days.includes(openDay) && (() => {
-                            const logged = sessions.filter(s => s.weekly_plan_id === activePlan.id && dayKey(s.plan_day) === dayKey(openDay))
+                      // Done ✓ form for a day, or what was logged if it's already done
+                      const renderDayPanel = (label: string, inRow: boolean) => {
+                            const logged = sessions.filter(s => s.weekly_plan_id === activePlan.id && dayKey(s.plan_day) === dayKey(label))
                             if (logged.length) return (
-                              <div className="mt-3 rounded-xl border border-green-800 bg-green-950/40 p-4 space-y-2">
-                                <p className="text-sm font-semibold text-green-300">✓ {openDay}</p>
+                              <div className={`${inRow ? '' : 'mt-3 '}rounded-xl border border-green-800 bg-green-950/40 p-4 space-y-2`}>
+                                {!inRow && <p className="text-sm font-semibold text-green-300">✓ {label}</p>}
                                 {logged.map(s => {
                                   const fb = getFeedback(s.id)
                                   return (
@@ -619,8 +602,8 @@ const handleChangePassword = async () => {
                               </div>
                             )
                             return (
-                              <div className="mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4 space-y-3">
-                                <p className="text-sm font-semibold text-white">{openDay}</p>
+                              <div className={`${inRow ? 'border-t border-gray-800 pt-3' : 'mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4'} space-y-3`}>
+                                {inRow ? <p className="text-xs font-semibold text-green-400">Done this workout?</p> : <p className="text-sm font-semibold text-white">{label}</p>}
                                 <div className="grid grid-cols-2 gap-3">
                                   <div>
                                     <label htmlFor="day-minutes" className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Minutes</label>
@@ -669,7 +652,7 @@ const handleChangePassword = async () => {
                                 )}
                                 {dayError && <p className="text-sm text-red-400">{dayError}</p>}
                                 <div className="flex gap-2">
-                                  <button type="button" onClick={() => handleLogDay(activePlan.id, openDay)} disabled={savingDay}
+                                  <button type="button" onClick={() => handleLogDay(activePlan.id, label)} disabled={savingDay}
                                     className="flex-1 bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm disabled:opacity-50">
                                     {savingDay ? 'Saving…' : 'Done ✓'}
                                   </button>
@@ -680,7 +663,58 @@ const handleChangePassword = async () => {
                                 </div>
                               </div>
                             )
-                          })()}
+                      }
+                      // This week's days as tappable chips: tap → Done ✓ panel, or what was logged
+                      const dayPicker = (
+                        <div className="mb-1">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="text-xs text-gray-400">Tap a day when you&apos;ve done it</p>
+                            <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>
+                              {doneCount} of {workoutLabels.length} done
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {summary.days.map((d, i) => {
+                              const rest = isRestDay(d)
+                              const isDone = done.has(dayKey(d))
+                              const selected = openDay === d
+                              if (rest) return (
+                                <span key={i} className="text-xs px-3 py-2 rounded-lg border border-gray-800 text-gray-600">{d}</span>
+                              )
+                              return (
+                                <button key={i} type="button" aria-expanded={selected}
+                                  onClick={() => { setDayError(''); setOpenDay(selected ? null : d) }}
+                                  className={`text-xs px-3 py-2 rounded-lg border font-medium ${selected
+                                    ? 'border-orange-500 bg-orange-950 text-orange-200'
+                                    : isDone
+                                      ? 'border-green-700 bg-green-950 text-green-300'
+                                      : 'border-gray-600 bg-gray-800 text-gray-200 hover:border-gray-400'}`}>
+                                  {isDone ? '✓ ' : ''}{d}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          {openDay && summary.days.includes(openDay) && renderDayPanel(openDay, false)}
+                        </div>
+                      )
+                      if (planJson) return (
+                        <div className="border-t border-gray-800 pt-4">
+                          <div className="flex items-baseline justify-between gap-2 mb-2">
+                            <p className="text-xs text-gray-400">
+                              {isCurrent ? 'Tap a day to see it and tick it off' : `${summary.workoutDays} workout day${summary.workoutDays === 1 ? '' : 's'} · ${summary.exercises} exercises`}
+                            </p>
+                            {isCurrent && (
+                              <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>{doneCount} of {workoutLabels.length} done</p>
+                            )}
+                          </div>
+                          <PlanDays plan={planJson} weekStart={activePlan.week_start} done={done}
+                            openDay={openDay ? dayKey(openDay) : null}
+                            onToggle={d => {
+                              setDayError('')
+                              const day = planJson.days.find(x => x.day === d)
+                              setOpenDay(day ? dayLabel(day) : null)
+                            }}
+                            renderOpen={isCurrent ? (day, label) => (day.rest ? null : renderDayPanel(label, true)) : undefined} />
                         </div>
                       )
                       return (
