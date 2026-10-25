@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys } from '@/lib/plan-summary'
+import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -1046,6 +1046,9 @@ const handleResetPassword = async () => {
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
           <div>
+<p className="text-xs text-gray-400 mb-3">
+  📅 Today is <span className="text-white font-medium">{formatDate(new Date(), country, 'weekday')}</span>. Each plan covers 7 days from its start date; the client can tick off days only during that week.
+</p>
 {client?.goal && (
   <div className="bg-orange-950 border border-orange-900 rounded-2xl px-5 py-4 mb-4">
     <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Client Goal</p>
@@ -1156,7 +1159,7 @@ const handleResetPassword = async () => {
       <input type="date" value={aiPlanMeta.week_start}
         onChange={e => setAiPlanMeta({ ...aiPlanMeta, week_start: e.target.value })}
         className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm mb-1" />
-      <p className="text-xs text-gray-400 mb-3">{aiPlanMeta.week_start ? `Week of ${formatDate(aiPlanMeta.week_start, country, 'long')}` : '\u00a0'}</p>
+      <p className="text-xs text-gray-400 mb-3">{aiPlanMeta.week_start ? `Covers ${formatDate(aiPlanMeta.week_start, country, 'weekday')} – ${formatDate(weekEnd(aiPlanMeta.week_start), country, 'weekday')} (7 days)` : '\u00a0'}</p>
       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
       <input type="time" value={aiPlanMeta.workout_time}
         onChange={e => setAiPlanMeta({ ...aiPlanMeta, workout_time: e.target.value })}
@@ -1179,7 +1182,7 @@ const handleResetPassword = async () => {
                   <input type="date" value={newPlan.week_start}
                     onChange={e => setNewPlan({ ...newPlan, week_start: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-                  {newPlan.week_start && <p className="text-xs text-gray-400 mt-1">Week of {formatDate(newPlan.week_start, country, 'long')}</p>}
+                  {newPlan.week_start && <p className="text-xs text-gray-400 mt-1">Covers {formatDate(newPlan.week_start, country, 'weekday')} – {formatDate(weekEnd(newPlan.week_start), country, 'weekday')} (7 days)</p>}
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
@@ -1268,7 +1271,7 @@ const handleResetPassword = async () => {
             className="flex-1 min-w-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
-              <p className="font-semibold text-sm">Week of {formatDate(plan.week_start.slice(0, 10), country, 'medium')}</p>
+              <p className="font-semibold text-sm">{formatDate(plan.week_start.slice(0, 10), country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}</p>
               {status === 'current' && <span className="text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full">This week</span>}
               {status === 'upcoming' && <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>}
               {status === 'past' && <span className="text-[11px] text-gray-500">Past</span>}

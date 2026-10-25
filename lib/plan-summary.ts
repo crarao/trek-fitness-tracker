@@ -87,3 +87,10 @@ export function localToday(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+// Last day of a plan's week: a plan covers 7 days from its start date (start + 6)
+export function weekEnd(weekStart: string): Date {
+  const end = parseDate(weekStart.slice(0, 10))
+  end.setDate(end.getDate() + 6)
+  return end
+}

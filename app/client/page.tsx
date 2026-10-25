@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, localToday } from '@/lib/plan-summary'
+import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -543,14 +543,21 @@ const handleChangePassword = async () => {
                 {activePlan && (
                   <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Week of</p>
-                    <p className="text-base font-semibold mb-1">
+                    <p className="text-base font-semibold">
                       {formatDate(activePlan.week_start, country, 'long')}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-2">
+                      {formatDate(activePlan.week_start, country, 'weekday')} – {formatDate(weekEnd(activePlan.week_start), country, 'weekday')}
+                      <span className="text-gray-500"> · today is {formatDate(new Date(), country, 'weekday')}</span>
                     </p>
                     {weekStatus(activePlan.week_start) === 'current' && (
                       <span className="inline-block text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full mb-2">This week</span>
                     )}
                     {weekStatus(activePlan.week_start) === 'upcoming' && (
-                      <span className="inline-block text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full mb-2">Upcoming</span>
+                      <p className="mb-2">
+                        <span className="inline-block text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>
+                        <span className="text-xs text-gray-500"> · you can tick off days from {formatDate(activePlan.week_start, country, 'weekday')}</span>
+                      </p>
                     )}
                     {activePlan.workout_time && (
                       <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
