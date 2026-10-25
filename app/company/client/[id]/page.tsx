@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { summarizePlan, weekStatus } from '@/lib/plan-summary'
+import { summarizePlan, weekStatus, dayKey, isRestDay, doneDayKeys } from '@/lib/plan-summary'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -58,6 +58,8 @@ type Session = {
   session_date: string
   duration_minutes: number
   notes: string
+  weekly_plan_id?: string | null
+  plan_day?: string | null   // set when the client logged it from a day of the plan
 }
 
 type Feedback = {
@@ -1254,6 +1256,9 @@ const handleResetPassword = async () => {
         const summary = summarizePlan(plan.plan_details)
         const status = weekStatus(plan.week_start)
         const open = expandedPlanId === plan.id
+        const done = doneDayKeys(plan.id, sessions)
+        const workoutLabels = summary.days.filter(d => !isRestDay(d))
+        const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
         return (
       <>
         <div className="flex justify-between items-start gap-3">
@@ -1275,12 +1280,20 @@ const handleResetPassword = async () => {
                   <p className="text-xs text-gray-400">
                     {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
                     {summary.exercises > 0 ? ` · ${summary.exercises} exercises` : ''}
+                    {(doneCount > 0 || status === 'current') && (
+                      <span className={doneCount > 0 ? 'text-green-400 font-medium' : 'text-gray-500'}> · {doneCount} of {workoutLabels.length} done</span>
+                    )}
                   </p>
                   {!open && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      {summary.days.map((d, i) => (
-                        <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${d.endsWith('Rest') ? 'border-gray-800 text-gray-600' : 'border-gray-700 text-gray-300'}`}>{d}</span>
-                      ))}
+                      {summary.days.map((d, i) => {
+                        const isDone = !isRestDay(d) && done.has(dayKey(d))
+                        return (
+                          <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${isRestDay(d) ? 'border-gray-800 text-gray-600' : isDone ? 'border-green-700 bg-green-950 text-green-300' : 'border-gray-700 text-gray-300'}`}>
+                            {isDone ? '✓ ' : ''}{d}
+                          </span>
+                        )
+                      })}
                     </div>
                   )}
                 </>
@@ -1346,6 +1359,9 @@ const handleResetPassword = async () => {
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins</p>
+                        )}
+                        {session.plan_day && (
+                          <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
                         )}
                       </div>
                       {fb?.star_rating && (
