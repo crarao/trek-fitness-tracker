@@ -5,7 +5,7 @@ import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherenc
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil } from '@/lib/locale'
 
 type Membership = {
   id: string
@@ -406,8 +406,9 @@ export default function CompanyAdminPage() {
   }
 
   const trialDaysLeft = () => {
-    if (!trialInfo?.trial_end) return null
-    return Math.ceil((new Date(trialInfo.trial_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    // Days left including today (end date is the last full day); null when no end date is set
+    const d = daysUntil(trialInfo?.trial_end)
+    return d == null ? null : d + 1
   }
 
   const statusCounts = {
@@ -618,7 +619,8 @@ export default function CompanyAdminPage() {
           </p>
         </div>
       )}
-      {trialInfo?.is_active && (trialDaysLeft() ?? 0) <= 0 && (
+      {/* No end date = nothing to warn about (not "expired") */}
+      {trialInfo?.is_active && trialDaysLeft() !== null && (trialDaysLeft() as number) <= 0 && (
         <div className="mx-4 sm:mx-8 mt-4 bg-red-950 border border-red-800 rounded-xl px-5 py-3">
           <p className="text-red-400 text-sm">
             🔒 {trialInfo.is_trial ? 'Your trial has ended.' : 'Your subscription has expired.'} Contact CoachBoard to reactivate.
@@ -747,10 +749,12 @@ export default function CompanyAdminPage() {
       {trialInfo?.trial_end && (
         <div className="px-4 sm:px-8 pt-3">
           {(() => {
+            // days left including today; 0 or less means the end date has passed
             const days = trialDaysLeft() ?? 0
+            const overdue = days <= 0
             const expiry = formatDate(trialInfo.trial_end, country, 'medium')
-            const color = days < 0 ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
-            const borderColor = days < 0 ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
+            const color = overdue ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
+            const borderColor = overdue ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
             return (
               <div className={`bg-gray-900 border ${borderColor} rounded-2xl px-5 py-3.5 flex items-center justify-between`}>
                 <div>
@@ -760,8 +764,8 @@ export default function CompanyAdminPage() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className={`text-2xl font-bold ${color}`}>{Math.abs(days)}</p>
-                  <p className="text-xs text-gray-500">{days < 0 ? 'days overdue' : 'days left'}</p>
+                  <p className={`text-2xl font-bold ${color}`}>{overdue ? 1 - days : days}</p>
+                  <p className="text-xs text-gray-500">{overdue ? (1 - days === 1 ? 'day overdue' : 'days overdue') : days === 1 ? 'day left (last day)' : 'days left'}</p>
                 </div>
               </div>
             )

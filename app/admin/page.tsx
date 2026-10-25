@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod } from '@/lib/locale'
+import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
 
 type Company = {
   id: string
@@ -65,8 +65,8 @@ export default function AdminPage() {
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
-  trial_start: new Date().toISOString().split('T')[0],
-  trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  trial_start: localDateIso(),
+  trial_end: localDateIso(7)
 })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -214,14 +214,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ? 'Enter a valid email or 10-digit phone number for the admin login'
         : newCompany.adminPassword.length < 6
           ? 'Admin password must be at least 6 characters'
-          : ''
+          : !newCompany.trial_start || !newCompany.trial_end
+            ? 'Pick the trial start and end dates'
+            : newCompany.trial_end < newCompany.trial_start
+              ? 'Trial end must be on or after the start date'
+              : ''
     if (problem) {
       setMessage('Error: ' + problem)
       setSaving(false)
       return
     }
 
-    const companyFields = { name: newCompany.name, email: resolvedEmail, phone: newCompany.phone, country: newCompany.country, currency: currencyForCountry(newCompany.country) }
+    // Trial dates were shown on the form but not saved before (#33), so new companies looked expired
+    const companyFields = {
+      name: newCompany.name, email: resolvedEmail, phone: newCompany.phone,
+      country: newCompany.country, currency: currencyForCountry(newCompany.country),
+      trial_start: newCompany.trial_start, trial_end: newCompany.trial_end, is_trial: true, is_active: true,
+    }
     const { data: company, error: companyError } = pendingCompanyId
       ? await supabase.from('companies').update(companyFields).eq('id', pendingCompanyId).select().single()
       : await supabase.from('companies').insert(companyFields).select().single()
@@ -262,8 +271,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
-  trial_start: new Date().toISOString().split('T')[0],
-  trial_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  trial_start: localDateIso(),
+  trial_end: localDateIso(7)
 })
     setShowForm(false)
     setSaving(false)
@@ -637,9 +646,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             </span>
                             {company.trial_end && (
                               <span className="text-xs whitespace-nowrap" style={{
-                                color: new Date(company.trial_end) < new Date() ? '#f87171' : '#34d399'
+                                color: (daysUntil(company.trial_end) ?? 0) < 0 ? '#f87171' : '#34d399'
                               }}>
-                                · {new Date(company.trial_end) < new Date()
+                                · {(daysUntil(company.trial_end) ?? 0) < 0
                                   ? company.is_trial ? 'Trial expired' : 'Subscription expired'
                                   : company.is_trial
                                     ? `Trial ends ${formatDate(company.trial_end, normalizeCountry(company.country), 'medium')}`
