@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
@@ -115,6 +116,9 @@ export default function CompanyAdminPage() {
   const [showNewClientPassword, setShowNewClientPassword] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showRevenueDrillIn, setShowRevenueDrillIn] = useState(false)
+  // Train module: PT clients' plans and plan-linked sessions from the last 4 weeks (for adherence)
+  const [trainModule, setTrainModule] = useState(false)
+  const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
 
   useEffect(() => { initialize() }, [])
 
@@ -139,7 +143,7 @@ export default function CompanyAdminPage() {
     // Profile + company in one request
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id, companies:company_id(name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country)')
+      .select('company_id, companies:company_id(name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country, client_module_enabled)')
       .eq('id', user.id)
       .single()
 
@@ -152,11 +156,12 @@ export default function CompanyAdminPage() {
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
       client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
-      currency: string | null; country: string | null
+      currency: string | null; country: string | null; client_module_enabled: boolean | null
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
+    setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
     setClientLimit(company?.client_limit || 50)
@@ -204,9 +209,35 @@ export default function CompanyAdminPage() {
 
     setClients(withMemberships(profiles || []))
     setArchivedCount(archivedTotal || 0)
+    fetchTraining(((profiles || []) as Client[]).filter(p => p.client_type === 'pt').map(p => p.id))
     setLoading(false)
     // Keep the archived list fresh if it has been opened before (e.g. after restore)
     if (archivedLoaded.current) fetchArchived(cId, memberships || [])
+  }
+
+  // Plans from the last 4 weeks for PT clients, and the sessions logged against them
+  const fetchTraining = async (ptIds: string[]) => {
+    if (!ptIds.length) { setTraining({ plans: [], sessions: [] }); return }
+    const since = new Date()
+    since.setDate(since.getDate() - 34) // 4 weeks back, plus the start of a plan still running then
+    const sinceIso = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`
+    const { data: plans, error } = await supabase
+      .from('weekly_plans')
+      .select('*')
+      .in('client_id', ptIds)
+      .gte('week_start', sinceIso)
+    if (error) { console.error('Training plans fetch error:', error); return }
+    const planIds = (plans || []).map(p => p.id)
+    let sessions: AdherenceSession[] = []
+    if (planIds.length) {
+      const { data, error: sErr } = await supabase
+        .from('logged_sessions')
+        .select('*')
+        .in('weekly_plan_id', planIds)
+      if (sErr) { console.error('Training sessions fetch error:', sErr); return }
+      sessions = data || []
+    }
+    setTraining({ plans: plans || [], sessions })
   }
 
   const fetchArchived = async (cId: string, knownMemberships?: unknown[]) => {
@@ -439,6 +470,26 @@ export default function CompanyAdminPage() {
 
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
   const ptCount = clients.filter(c => c.client_type === 'pt').length
+
+  // Adherence for PT clients: this week's plan per client (null = no plan this week)
+  const ptClients = clients.filter(c => c.client_type === 'pt')
+  const weekAdherence: Record<string, Adherence | null | 'no-plan'> = {}
+  if (training) {
+    for (const c of ptClients) {
+      const plan = currentPlan(training.plans.filter(p => p.client_id === c.id))
+      weekAdherence[c.id] = plan ? planAdherence(plan, training.sessions) : 'no-plan'
+    }
+  }
+  const weekTotals = Object.values(weekAdherence).reduce<Adherence>((t, a) =>
+    a && a !== 'no-plan' ? { planned: t.planned + a.planned, done: t.done + a.done } : t, { planned: 0, done: 0 })
+  const fourWeeks = training ? recentAdherence(training.plans, training.sessions, 4) : null
+  const noPlanClients = ptClients.filter(c => weekAdherence[c.id] === 'no-plan')
+  const withPlanCount = ptClients.filter(c => { const a = weekAdherence[c.id]; return a && a !== 'no-plan' }).length
+  // Furthest behind first (most workout days still to do this week)
+  const behindClients = ptClients
+    .map(c => ({ c, a: weekAdherence[c.id] }))
+    .filter((x): x is { c: Client; a: Adherence } => !!x.a && x.a !== 'no-plan' && x.a.done < x.a.planned)
+    .sort((x, y) => (y.a.planned - y.a.done) - (x.a.planned - x.a.done) || x.a.done / x.a.planned - y.a.done / y.a.planned)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -718,6 +769,63 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Training this week — PT clients' plan adherence (Train module) */}
+      {trainModule && ptCount > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training this week <span className="normal-case text-gray-600">(PT clients)</span></p>
+              {fourWeeks && (
+                <p className="text-xs text-gray-500 shrink-0">Last 4 weeks <span className={`font-semibold ${pctColor(pct(fourWeeks))}`}>{pct(fourWeeks)}%</span></p>
+              )}
+            </div>
+            {!training ? (
+              <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
+            ) : weekTotals.planned === 0 ? (
+              <p className="text-sm text-gray-400 mt-2">No PT client has a plan for this week yet.</p>
+            ) : (
+              <>
+                <div className="flex items-baseline gap-2 mt-2">
+                  <p className={`text-3xl font-bold ${pctColor(pct(weekTotals))}`}>{pct(weekTotals)}%</p>
+                  <p className="text-sm text-gray-400">{weekTotals.done} of {weekTotals.planned} workout days done so far</p>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-gray-800 overflow-hidden" role="progressbar" aria-valuenow={pct(weekTotals) ?? 0} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="h-full bg-purple-500 rounded-full" style={{ width: `${pct(weekTotals)}%` }} />
+                </div>
+                <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} PT clients have a plan this week</p>
+              </>
+            )}
+            {training && behindClients.length > 0 && (
+              <div className="mt-3 border-t border-gray-800 pt-3">
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Most days left</p>
+                <div className="flex flex-wrap gap-2">
+                  {behindClients.slice(0, 6).map(({ c, a }) => (
+                    <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                      {c.full_name.split(' ')[0]} <span className={pctColor(pct(a))}>{a.done}/{a.planned}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {training && noPlanClients.length > 0 && (
+              <div className="mt-3 border-t border-gray-800 pt-3">
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">No plan this week</p>
+                <div className="flex flex-wrap gap-2">
+                  {noPlanClients.slice(0, 8).map(c => (
+                    <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-900 bg-amber-950/40 text-amber-200 hover:border-amber-600">
+                      {c.full_name.split(' ')[0]}
+                    </button>
+                  ))}
+                  {noPlanClients.length > 8 && <span className="text-xs text-gray-500 self-center">+{noPlanClients.length - 8} more</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Plan breakdown */}
       <div className="px-4 sm:px-8 pt-3">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
@@ -907,6 +1015,16 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
+                              {trainModule && client.client_type === 'pt' && (() => {
+                                const a = weekAdherence[client.id]
+                                if (!a) return null
+                                if (a === 'no-plan') return <span className="text-[10px] text-amber-400/80 leading-none" title="No plan this week">no plan</span>
+                                return (
+                                  <span className={`text-[10px] font-semibold leading-none ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                    {a.done}/{a.planned} wk
+                                  </span>
+                                )
+                              })()}
                             </div>
                             {openingClientId === client.id ? (
                               <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
