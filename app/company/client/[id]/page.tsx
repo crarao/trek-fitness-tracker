@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
-import { type PlanJson, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan } from '@/lib/plan-structure'
+import { type PlanJson, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import PlanDays from '@/app/plan-days'
@@ -65,6 +65,7 @@ type Session = {
   notes: string
   weekly_plan_id?: string | null
   plan_day?: string | null   // set when the client logged it from a day of the plan
+  exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
 }
 
 type Feedback = {
@@ -1453,7 +1454,12 @@ const handleResetPassword = async () => {
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
             {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact />
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact
+                  ticks={Object.fromEntries(planJson.days.map(d => {
+                    // What the client ticked on that day (latest session for the day)
+                    const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                    return [d.day, saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done) : []]
+                  }).filter(([, list]) => (list as number[]).length))} />
               : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
           </div>
         )}
@@ -1495,7 +1501,13 @@ const handleResetPassword = async () => {
                           <p className="text-xs text-gray-500 mt-0.5">{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
-                          <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
+                          <p className="text-xs text-green-400 mt-1">
+                            ✓ {session.plan_day}
+                            {(() => {
+                              const ex = session.exercises_done as ExercisesDone | null | undefined
+                              return ex && Array.isArray(ex.done) && ex.total ? <span className="text-gray-400"> · {ex.done.length} of {ex.total} exercises</span> : null
+                            })()}
+                          </p>
                         )}
                       </div>
                       {fb?.star_rating && (

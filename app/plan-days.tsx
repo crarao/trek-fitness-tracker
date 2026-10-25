@@ -7,12 +7,14 @@ import { type PlanJson, type PlanDay, daysInWeekOrder, dayLabel, exerciseDetail 
 // Used on the coach's plan cards and the client's My Plan. `done` holds day keys ("Mon") logged
 // against this plan; `renderOpen` adds content under an open day (the client's Done ✓ form).
 export default function PlanDays({
-  plan, weekStart, done, doneNote, openDay, onToggle, renderOpen, compact = false,
+  plan, weekStart, done, doneNote, ticks, onTick, openDay, onToggle, renderOpen, compact = false,
 }: {
   plan: PlanJson
   weekStart: string
   done?: Set<string>
   doneNote?: Record<string, string>   // e.g. { Tue: '45 min · ~265 kcal' } shown on done rows
+  ticks?: Record<string, number[]>    // ticked exercise positions per day ("Tue": [0, 2]); shows tick circles
+  onTick?: (day: string, index: number) => void  // makes the exercises tappable (client, this week, not yet done)
   openDay?: string | null            // controlled: which day is open ("Mon"); omit to let the rows manage it
   onToggle?: (day: string | null) => void
   renderOpen?: (day: PlanDay, label: string) => ReactNode
@@ -47,7 +49,9 @@ export default function PlanDays({
                   {d.rest ? 'Rest day' : d.focus || 'Workout'}
                 </span>
                 <span className="block text-[11px] text-gray-500">
-                  {d.exercises.length} exercise{d.exercises.length === 1 ? '' : 's'}
+                  {ticks?.[d.day]?.length && d.exercises.length
+                    ? <span className={ticks[d.day].length >= d.exercises.length ? 'text-green-400' : 'text-orange-300'}>{Math.min(ticks[d.day].length, d.exercises.length)} of {d.exercises.length} exercises</span>
+                    : <>{d.exercises.length} exercise{d.exercises.length === 1 ? '' : 's'}</>}
                   {isDone && doneNote?.[d.day] && <span className="text-green-400"> · {doneNote[d.day]}</span>}
                 </span>
               </span>
@@ -58,15 +62,40 @@ export default function PlanDays({
               <div className="px-3 pb-3 space-y-3">
                 {d.exercises.length > 0 && (
                   <ol className="divide-y divide-gray-800 rounded-lg border border-gray-800 bg-gray-900">
-                    {d.exercises.map((e, i) => (
-                      <li key={i} className="px-3 py-2">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <span className="text-sm text-gray-100">{e.name}</span>
-                          {exerciseDetail(e) && <span className="text-xs text-orange-300 shrink-0 text-right">{exerciseDetail(e)}</span>}
-                        </div>
-                        {e.note && <p className="text-[11px] text-gray-500 mt-0.5">{e.note}</p>}
-                      </li>
-                    ))}
+                    {d.exercises.map((e, i) => {
+                      // Tappable only on days not yet done; circles also show saved ticks (read-only)
+                      const canTick = !!onTick && !isDone
+                      const showTicks = canTick || !!ticks?.[d.day]?.length
+                      const ticked = !!ticks?.[d.day]?.includes(i)
+                      const body = (
+                        <>
+                          {showTicks && (
+                            <span aria-hidden="true"
+                              className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border grid place-items-center text-[11px] font-bold ${ticked ? 'bg-green-600 border-green-500 text-white' : 'border-gray-600 text-transparent'}`}>✓</span>
+                          )}
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-baseline justify-between gap-3">
+                              <span className={`text-sm ${ticked ? 'text-gray-400 line-through decoration-gray-600' : 'text-gray-100'}`}>{e.name}</span>
+                              {exerciseDetail(e) && <span className="text-xs text-orange-300 shrink-0 text-right">{exerciseDetail(e)}</span>}
+                            </span>
+                            {e.note && <span className="block text-[11px] text-gray-500 mt-0.5">{e.note}</span>}
+                          </span>
+                        </>
+                      )
+                      return (
+                        <li key={i}>
+                          {canTick ? (
+                            <button type="button" role="checkbox" aria-checked={ticked}
+                              onClick={() => onTick!(d.day, i)}
+                              className="w-full flex items-start gap-3 text-left px-3 py-2.5">
+                              {body}
+                            </button>
+                          ) : (
+                            <div className="flex items-start gap-3 px-3 py-2">{body}</div>
+                          )}
+                        </li>
+                      )
+                    })}
                   </ol>
                 )}
                 {renderOpen?.(d, dayLabel(d))}
