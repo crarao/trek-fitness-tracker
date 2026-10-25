@@ -43,3 +43,21 @@ export function thisWeekMonday(): string {
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+// "45 min · ~265 kcal" per day key ("Tue") for a plan's done days (several sessions on a day add up)
+export function doneDayNotes<T extends { weekly_plan_id?: string | null; plan_day?: string | null; duration_minutes: number | null }>(
+  planId: string,
+  sessions: T[],
+  kcalOf: (s: T) => number | null,
+): Record<string, string> {
+  const totals: Record<string, { min: number; kcal: number }> = {}
+  for (const s of sessions) {
+    if (s.weekly_plan_id !== planId || !s.plan_day) continue
+    const key = s.plan_day.split(' · ')[0].trim()
+    const t = (totals[key] ??= { min: 0, kcal: 0 })
+    t.min += s.duration_minutes || 0
+    t.kcal += kcalOf(s) || 0
+  }
+  return Object.fromEntries(Object.entries(totals).map(([k, t]) =>
+    [k, [t.min ? `${t.min} min` : '', t.kcal ? `${kcalText(t.kcal)} (est.)` : ''].filter(Boolean).join(' · ')]))
+}

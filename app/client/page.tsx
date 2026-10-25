@@ -7,7 +7,7 @@ import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, localToday, weekEnd } from '@/lib/plan-summary'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
-import { estimateKcal, kcalText, thisWeekMonday } from '@/lib/calories'
+import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -715,6 +715,7 @@ const handleChangePassword = async () => {
                             )}
                           </div>
                           <PlanDays plan={planJson} weekStart={activePlan.week_start} done={done}
+                            doneNote={doneDayNotes(activePlan.id, sessions, sessionKcal)}
                             openDay={openDay ? dayKey(openDay) : null}
                             onToggle={d => {
                               setDayError('')

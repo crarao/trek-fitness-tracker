@@ -8,7 +8,7 @@ import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import { type PlanJson, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
-import { estimateKcal, kcalText, thisWeekMonday } from '@/lib/calories'
+import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
@@ -1453,7 +1453,7 @@ const handleResetPassword = async () => {
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
             {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} compact />
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact />
               : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
           </div>
         )}

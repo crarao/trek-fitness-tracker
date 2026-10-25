@@ -7,11 +7,12 @@ import { type PlanJson, type PlanDay, daysInWeekOrder, dayLabel, exerciseDetail 
 // Used on the coach's plan cards and the client's My Plan. `done` holds day keys ("Mon") logged
 // against this plan; `renderOpen` adds content under an open day (the client's Done ✓ form).
 export default function PlanDays({
-  plan, weekStart, done, openDay, onToggle, renderOpen, compact = false,
+  plan, weekStart, done, doneNote, openDay, onToggle, renderOpen, compact = false,
 }: {
   plan: PlanJson
   weekStart: string
   done?: Set<string>
+  doneNote?: Record<string, string>   // e.g. { Tue: '45 min · ~265 kcal' } shown on done rows
   openDay?: string | null            // controlled: which day is open ("Mon"); omit to let the rows manage it
   onToggle?: (day: string | null) => void
   renderOpen?: (day: PlanDay, label: string) => ReactNode
@@ -47,6 +48,7 @@ export default function PlanDays({
                 </span>
                 <span className="block text-[11px] text-gray-500">
                   {d.exercises.length} exercise{d.exercises.length === 1 ? '' : 's'}
+                  {isDone && doneNote?.[d.day] && <span className="text-green-400"> · {doneNote[d.day]}</span>}
                 </span>
               </span>
               {isDone && <span className="text-[11px] font-semibold text-green-300 bg-green-900/60 border border-green-700 px-2 py-0.5 rounded-full">✓ Done</span>}
