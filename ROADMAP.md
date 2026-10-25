@@ -3,7 +3,7 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 25 Oct 2026_
+_Last updated: 25 Oct 2026 (evening)_
 
 ---
 
@@ -45,6 +45,7 @@ _Last updated: 25 Oct 2026_
 - [ ] **#15 Client day-by-day logging** — **light version shipped (#25):** on this week's plan the client taps a day chip → Done ✓ with minutes, date, how it felt, notes; saves a session linked to the plan and day (`logged_sessions.plan_day`, SQL in `db/2026-10-25-plan-day.md`); ✓ on done days for client and on coach plan cards ("2 of 4 done"), day shown on the coach's Sessions tab. **Still to do — full version (after #14):** each day lists its own exercises; tick off exercises; exact adherence for #17.
 - [x] **#16 Calorie estimate** — "~260 kcal (estimate)" from effort level (read from the day's focus, else the gym's business type) × client weight × minutes; client sees it on the Done message, done days, Activity History and "Calories this week" on Progress; coach sees it on each session and this week / last week on Progress. Nothing stored, no SQL (`lib/calories.ts`) (#28)
 - [ ] **#17 Adherence stat for owners** — "3 of 4 days done".
+- [ ] **#32 Activity type on the Log tab** — discussed 25 Oct, waiting for SQL access. Sessions logged outside the plan have no "what was done". Plan: one SQL line (`alter table public.logged_sessions add column if not exists activity text;`); required "What did you do?" tap buttons on the Log tab (Gym / Weights, Walk, Run, Cycling, Yoga, Pilates, Swim, Trek / Hike, Sport, Other — Sport / Other ask for a name, e.g. Badminton); calorie estimate uses the activity's effort level (Walk 3.5, Run 9, Swim 7, Sport 6…); shown in the client's Activity History and the coach's Sessions tab; older sessions unchanged. Plan-day ticks don't need it (the day's focus says what was done).
 
 ## P4 — Next features
 
