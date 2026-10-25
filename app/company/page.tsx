@@ -499,7 +499,7 @@ export default function CompanyAdminPage() {
               className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Settings
             </button>
-            <button onClick={handleLogout}
+            <button data-nav onClick={handleLogout}
               className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Logout
             </button>
@@ -894,6 +894,7 @@ export default function CompanyAdminPage() {
                       aria-busy={openingClientId === client.id}
                       onMouseEnter={() => router.prefetch(`/company/client/${client.id}`)}
                       onTouchStart={() => router.prefetch(`/company/client/${client.id}`)}
+                      data-nav
                       onClick={() => openClient(client.id)}>
                       <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-3">
