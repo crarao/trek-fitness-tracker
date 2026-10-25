@@ -49,6 +49,8 @@ _Last updated: 25 Oct 2026 (evening)_
 
 ## P4 — Next features
 
+- [ ] **#37 Cap AI plans at 5 per PT client per month** — asked by Anand 25 Oct to contain AI costs. Count AI plan generations per client per calendar month from `ai_usage` (needs a `client_id` on each row: today it records the coach who asked) and refuse a 6th on the server with a clear message; the coach sees "3 of 5 AI plans used this month" by the Create plan with AI button; hand-written plans and edits stay unlimited. The 5 sits in `lib/ai-pricing.ts` (optionally per gym later). Needs #40 / #41 merged and their SQL run first.
+
 - [ ] **#18 Diet chart** — generic version shipped (#19): AI diet chart from food preference (incl. Jain / Vegan), meals per day, goal, weight/height; India vs US foods by company country; coach reviews and saves to the diet plan. **Still to add:** region / cuisine and allergies / foods to avoid fields (allergies after the remaining RLS rules in #1).
 - [ ] **#19 SMS reminders** — MSG91 + DLT registration (takes 5–7 days, start the paperwork early). US: Twilio.
 - [ ] **#20 Multi-branch** — `branch_id`, owner dashboard across branches, coach assignment.
