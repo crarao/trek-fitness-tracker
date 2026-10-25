@@ -949,6 +949,7 @@ export default function CompanyAdminPage() {
                 : `No ${activeFilter} members.`}
             </div>
           ) : (
+            <div className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
@@ -1015,16 +1016,7 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
-                              {trainModule && client.client_type === 'pt' && (() => {
-                                const a = weekAdherence[client.id]
-                                if (!a) return null
-                                if (a === 'no-plan') return <span className="text-[10px] text-amber-400/80 leading-none" title="No plan this week">no plan</span>
-                                return (
-                                  <span className={`text-[10px] font-semibold leading-none ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
-                                    {a.done}/{a.planned} wk
-                                  </span>
-                                )
-                              })()}
+
                             </div>
                             {openingClientId === client.id ? (
                               <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
@@ -1032,7 +1024,20 @@ export default function CompanyAdminPage() {
                                 Opening…
                               </p>
                             ) : (
-                              <p className="text-xs text-gray-500">{client.phone || client.email}</p>
+                              <p className="text-xs text-gray-500">
+                                {client.phone || client.email}
+                                {/* PT plan progress this week, on the second line so the row stays phone-width */}
+                                {trainModule && client.client_type === 'pt' && (() => {
+                                  const a = weekAdherence[client.id]
+                                  if (!a) return null
+                                  if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  return (
+                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                      {' '}· {a.done}/{a.planned} this wk
+                                    </span>
+                                  )
+                                })()}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -1090,6 +1095,7 @@ export default function CompanyAdminPage() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>
