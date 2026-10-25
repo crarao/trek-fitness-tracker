@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, checkCanManageClient } from '@/lib/auth-server'
+import { recordAiUsage } from '@/lib/ai-usage'
 
 export const maxDuration = 60
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     )
     const { data: p, error: pError } = await admin
       .from('profiles')
-      .select('full_name, goal, age, gender, height_cm, weight_kg, fitness_level, food_preference, meals_per_day, medical_conditions, available_days, companies:company_id(country, business_type)')
+      .select('company_id, full_name, goal, age, gender, height_cm, weight_kg, fitness_level, food_preference, meals_per_day, medical_conditions, available_days, companies:company_id(country, business_type)')
       .eq('id', clientId)
       .single()
     if (pError || !p) return NextResponse.json({ error: 'Client not found' }, { status: 404 })
@@ -80,6 +81,8 @@ Output nothing else.`
       max_tokens: 1200,
       messages: [{ role: 'user', content: prompt }],
     })
+
+    await recordAiUsage({ companyId: p.company_id, userId: caller.userId, feature: 'diet', model: message.model, usage: message.usage })
 
     const diet = message.content[0].type === 'text' ? message.content[0].text.trim() : null
     if (!diet) return NextResponse.json({ error: 'The AI returned an empty diet chart' }, { status: 502 })
