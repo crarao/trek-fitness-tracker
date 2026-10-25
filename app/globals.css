@@ -24,3 +24,27 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ---- Tap feedback for every button and link (phones give no hover) ----
+   A quick press-in + brighten while the finger is down, so a tap visibly "registers".
+   touch-action: manipulation removes the browser's double-tap-zoom wait on taps. */
+button, a, summary, [role="button"], select, label[for] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button:not(:disabled), a, summary, [role="button"] {
+  transition-property: transform, filter, background-color, border-color, color, opacity, box-shadow;
+  transition-duration: 120ms;
+}
+button:not(:disabled):active, a:active, summary:active, [role="button"]:active {
+  transform: scale(0.96);
+  filter: brightness(1.25);
+}
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active, a:active, summary:active, [role="button"]:active { transform: none; }
+}
+
+/* Top-of-screen page loading bar (app/nav-progress.tsx) */
+@keyframes cb-nav-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+.cb-nav-bar { animation: cb-nav-slide 1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .cb-nav-bar { animation: none; width: 100%; opacity: .6; } }

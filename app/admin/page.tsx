@@ -451,7 +451,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
     Settings
   </button>
-  <button onClick={handleLogout}
+  <button data-nav onClick={handleLogout}
     className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
     Logout
   </button>

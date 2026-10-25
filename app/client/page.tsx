@@ -368,7 +368,7 @@ const handleChangePassword = async () => {
     className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
     Settings
   </button>
-  <button onClick={() => { supabase.auth.signOut(); router.push('/login') }}
+  <button data-nav onClick={() => { supabase.auth.signOut(); router.push('/login') }}
     className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
     Logout
   </button>

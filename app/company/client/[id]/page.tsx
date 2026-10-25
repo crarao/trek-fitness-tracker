@@ -743,7 +743,7 @@ const handleResetPassword = async () => {
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/company')}
+          <button data-nav onClick={() => router.push('/company')}
             className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
             ← Back
           </button>
