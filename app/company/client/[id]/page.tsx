@@ -6,7 +6,8 @@ import { useRouter, useParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
-import { type PlanJson, planJsonOf, summarizeAny, planToText } from '@/lib/plan-structure'
+import { type PlanJson, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan } from '@/lib/plan-structure'
+import PlanEditor from '@/app/plan-editor'
 import PlanDays from '@/app/plan-days'
 import dynamic from 'next/dynamic'
 
@@ -101,7 +102,11 @@ export default function ClientDetailPage() {
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null)
   const [generatingPlan, setGeneratingPlan] = useState(false)
   const [generatedPlan, setGeneratedPlan] = useState('')
-  const [generatedJson, setGeneratedJson] = useState<PlanJson | null>(null) // structured copy of the AI draft
+  const [generatedJson, setGeneratedJson] = useState<PlanJson | null>(null) // structured AI draft, edited day by day
+  // Day-by-day editor state: new manual plan (or pasted text) and the plan being edited
+  const [newPlanJson, setNewPlanJson] = useState<PlanJson | null>(null)
+  const [newPlanTextMode, setNewPlanTextMode] = useState(false)
+  const [editingJson, setEditingJson] = useState<PlanJson | null>(null)
   const [showGeneratedPlan, setShowGeneratedPlan] = useState(false)
   const [aiPlanMeta, setAiPlanMeta] = useState({ week_start: '', workout_time: '' })
   const [highlightPlanId, setHighlightPlanId] = useState<string | null>(null)
@@ -306,18 +311,56 @@ export default function ClientDetailPage() {
     return true
   }
 
+  // Cleans a structured plan for saving; null (with an error shown) if it has no workout yet
+  const readyToSave = (plan: PlanJson): PlanJson | null => {
+    const cleaned = cleanPlan(plan)
+    if (workoutDays(cleaned).length === 0 || !cleaned.days.some(d => !d.rest && d.exercises.length)) {
+      setPlanError('Add at least one workout day with an exercise.')
+      return null
+    }
+    return cleaned
+  }
+
   const handleAddPlan = async () => {
-    const ok = await insertPlan(newPlan)
+    let ok = false
+    if (!newPlanTextMode && newPlanJson) {
+      if (!newPlan.week_start) { setPlanError('Pick the week first.'); return }
+      const cleaned = readyToSave(newPlanJson)
+      if (!cleaned) return
+      ok = await insertPlan({ ...newPlan, plan_details: planToText(cleaned), plan_json: cleaned })
+    } else {
+      ok = await insertPlan(newPlan)
+    }
     if (ok) {
       setNewPlan({ week_start: '', plan_details: '', workout_time: '' })
+      setNewPlanJson(null)
+      setNewPlanTextMode(false)
       setShowPlanForm(false)
     }
   }
 
+  // Pasted text → days for the editor (coach checks the result)
+  const convertTextToDays = (text: string, apply: (p: PlanJson) => void) => {
+    const parsed = textToPlan(text, client?.available_days)
+    if (!parsed) {
+      setPlanError('Could not find day headings (like "Monday – Legs" or "Day 1 – Legs"). Add the days by hand, or save it as text.')
+      return false
+    }
+    setPlanError('')
+    apply(parsed)
+    showToast('Converted to days ✓ Check each day before saving')
+    return true
+  }
+
   const handleAssignGeneratedPlan = async () => {
-    // Keep the structured days only if the coach didn't rewrite the text
-    const json = generatedJson && planToText(generatedJson) === generatedPlan ? generatedJson : null
-    const ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan, plan_json: json })
+    let ok = false
+    if (generatedJson) {
+      const cleaned = readyToSave(generatedJson)
+      if (!cleaned) return
+      ok = await insertPlan({ ...aiPlanMeta, plan_details: planToText(cleaned), plan_json: cleaned })
+    } else {
+      ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan })
+    }
     if (ok) {
       setGeneratedPlan('')
       setGeneratedJson(null)
@@ -332,29 +375,36 @@ export default function ClientDetailPage() {
 
 const handleUpdatePlan = async () => {
   if (!editingPlan) return
-  if (!editingPlan.week_start || !editingPlan.plan_details.trim()) {
+  let cleaned: PlanJson | null = null
+  if (editingJson) {
+    if (!editingPlan.week_start) { setPlanError('Pick the week first.'); return }
+    cleaned = readyToSave(editingJson)
+    if (!cleaned) return
+  } else if (!editingPlan.week_start || !editingPlan.plan_details.trim()) {
     setPlanError('Pick a week and add plan details before saving.')
     return
   }
   setSaving(true)
   setPlanError('')
-  const { error } = await supabase
-    .from('weekly_plans')
-    .update({
-      week_start: editingPlan.week_start,
-      plan_details: editingPlan.plan_details,
-      workout_time: editingPlan.workout_time || null,
-      // If the text no longer matches the structured days, show the text instead
-      ...(editingPlan.plan_json && planJsonOf(editingPlan) && planToText(planJsonOf(editingPlan)!) !== editingPlan.plan_details
-        ? { plan_json: null } : {}),
-    })
-    .eq('id', editingPlan.id)
+  const base = {
+    week_start: editingPlan.week_start,
+    plan_details: cleaned ? planToText(cleaned) : editingPlan.plan_details,
+    workout_time: editingPlan.workout_time || null,
+  }
+  // Structured: save the days; text edit of a plan that had days: clear them so the text shows
+  const withJson = cleaned ? { ...base, plan_json: cleaned } : editingPlan.plan_json ? { ...base, plan_json: null } : base
+  let { error } = await supabase.from('weekly_plans').update(withJson).eq('id', editingPlan.id)
+  // If the plan_json column hasn't been added in Supabase yet, save the text alone
+  if (error && /plan_json/i.test(error.message)) {
+    ;({ error } = await supabase.from('weekly_plans').update(base).eq('id', editingPlan.id))
+  }
   setSaving(false)
   if (error) {
     setPlanError('Could not save changes: ' + error.message)
     return
   }
   setEditingPlan(null)
+  setEditingJson(null)
   loadData(['plans'])
   showToast('Plan updated ✓')
 }
@@ -1107,6 +1157,9 @@ const handleResetPassword = async () => {
       if (!showPlanForm) {
         setShowGeneratedPlan(false)
         setNewPlan(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
+        // Start from the client's available days as workout days
+        setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days))
+        setNewPlanTextMode(false)
       }
       setShowPlanForm(!showPlanForm)
     }}
@@ -1166,11 +1219,15 @@ const handleResetPassword = async () => {
         Dismiss
       </button>
     </div>
+    {generatedJson ? (
+      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} />
+    ) : (
     <textarea
   value={generatedPlan}
   onChange={e => setGeneratedPlan(e.target.value)}
   rows={15}
   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 text-sm resize-none" />
+    )}
     <div className="border-t border-gray-800 pt-4">
       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
       <input type="date" value={aiPlanMeta.week_start}
@@ -1184,7 +1241,7 @@ const handleResetPassword = async () => {
       {planError && <p className="text-xs text-red-400 mb-3">{planError}</p>}
       <button
         onClick={handleAssignGeneratedPlan}
-        disabled={saving || !aiPlanMeta.week_start || !generatedPlan.trim()}
+        disabled={saving || !aiPlanMeta.week_start || (!generatedJson && !generatedPlan.trim())}
         className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
         {saving ? 'Assigning...' : 'Assign plan to client'}
       </button>
@@ -1207,18 +1264,39 @@ const handleResetPassword = async () => {
                     onChange={e => setNewPlan({ ...newPlan, workout_time: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 </div>
+                {!newPlanTextMode && newPlanJson ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs text-gray-500 uppercase tracking-wider">Days</label>
+                      <button type="button" onClick={() => { setPlanError(''); setNewPlanTextMode(true) }}
+                        className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Paste a plan as text instead</button>
+                    </div>
+                    <PlanEditor value={newPlanJson} onChange={setNewPlanJson} weekStart={newPlan.week_start} />
+                  </div>
+                ) : (
                 <div>
-                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Plan details</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs text-gray-500 uppercase tracking-wider">Plan details</label>
+                    <button type="button" onClick={() => { setPlanError(''); setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days)); setNewPlanTextMode(false) }}
+                      className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Back to day-by-day</button>
+                  </div>
                   <textarea
-                    placeholder="Mon: 5km run&#10;Tue: Rest&#10;Wed: Gym - squats 3x10..."
+                    placeholder="Monday – Legs&#10;- Squats – 3 x 10, rest 60 s&#10;Tuesday – Rest&#10;Wednesday – Upper body&#10;- Push-ups – 3 x 12"
                     value={newPlan.plan_details}
                     onChange={e => setNewPlan({ ...newPlan, plan_details: e.target.value })}
                     rows={6}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+                  <button type="button" disabled={!newPlan.plan_details.trim()}
+                    onClick={() => convertTextToDays(newPlan.plan_details, p => { setNewPlanJson(p); setNewPlanTextMode(false) })}
+                    className="mt-2 w-full text-xs text-orange-300 border border-orange-800 hover:border-orange-500 py-2 rounded-lg disabled:opacity-40">
+                    Convert to days ▸
+                  </button>
+                  <p className="text-[11px] text-gray-500 mt-1">Or assign it as text. The client will see it as written, without day rows.</p>
                 </div>
+                )}
                 {planError && <p className="text-xs text-red-400">{planError}</p>}
                 <div className="flex gap-2">
-                  <button onClick={handleAddPlan} disabled={saving || !newPlan.week_start || !newPlan.plan_details.trim()}
+                  <button onClick={handleAddPlan} disabled={saving || !newPlan.week_start || (newPlanTextMode && !newPlan.plan_details.trim())}
                     className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
                     {saving ? 'Assigning...' : 'Assign plan to client'}
                   </button>
@@ -1246,25 +1324,44 @@ const handleResetPassword = async () => {
           value={editingPlan.week_start}
           onChange={e => setEditingPlan({ ...editingPlan, week_start: e.target.value })}
           className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-        {editingPlan.week_start && <p className="text-xs text-gray-400 -mt-1">Week of {formatDate(editingPlan.week_start, country, 'long')}</p>}
+        {editingPlan.week_start && <p className="text-xs text-gray-400 -mt-1">Covers {formatDate(editingPlan.week_start, country, 'weekday')} – {formatDate(weekEnd(editingPlan.week_start), country, 'weekday')} (7 days)</p>}
         <div>
           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Workout Time</label>
           <input type="time" value={editingPlan.workout_time || ''}
             onChange={e => setEditingPlan({ ...editingPlan, workout_time: e.target.value })}
             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
         </div>
-        <textarea
-          value={editingPlan.plan_details}
-          onChange={e => setEditingPlan({ ...editingPlan, plan_details: e.target.value })}
-          rows={10}
-          className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+        {editingJson ? (
+          <PlanEditor value={editingJson} onChange={setEditingJson} weekStart={editingPlan.week_start} />
+        ) : (
+          <>
+            <textarea
+              value={editingPlan.plan_details}
+              onChange={e => setEditingPlan({ ...editingPlan, plan_details: e.target.value })}
+              rows={10}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
+            <div className="flex gap-2">
+              <button type="button"
+                onClick={() => convertTextToDays(editingPlan.plan_details, setEditingJson)}
+                className="flex-1 text-xs text-orange-300 border border-orange-800 hover:border-orange-500 py-2 rounded-lg">
+                Convert to day-by-day ▸
+              </button>
+              <button type="button"
+                onClick={() => { setPlanError(''); setEditingJson(emptyPlan(client?.available_days)) }}
+                className="flex-1 text-xs text-gray-300 border border-gray-700 hover:border-gray-500 py-2 rounded-lg">
+                Start fresh day-by-day
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 -mt-1">This is an older text plan. Converting doesn&apos;t save anything until you tap Save Changes.</p>
+          </>
+        )}
         {planError && <p className="text-xs text-red-400">{planError}</p>}
         <div className="flex gap-2">
-          <button onClick={handleUpdatePlan} disabled={saving || !editingPlan.week_start || !editingPlan.plan_details.trim()}
+          <button onClick={handleUpdatePlan} disabled={saving || !editingPlan.week_start || (!editingJson && !editingPlan.plan_details.trim())}
             className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm py-2.5 rounded-xl transition disabled:opacity-50 font-medium">
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
-          <button onClick={() => { setEditingPlan(null); setPlanError('') }}
+          <button onClick={() => { setEditingPlan(null); setEditingJson(null); setPlanError('') }}
             className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
             Cancel
           </button>
@@ -1325,7 +1422,7 @@ const handleResetPassword = async () => {
           </button>
           <div className="flex gap-1.5 shrink-0">
             <button
-              onClick={e => { e.stopPropagation(); setPlanError(''); setEditingPlan(plan) }}
+              onClick={e => { e.stopPropagation(); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
               aria-label={`Edit plan for week of ${formatWeekStart(plan.week_start)}`}
               className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 rounded-lg transition">
               ✏️

@@ -41,7 +41,7 @@ _Last updated: 25 Oct 2026_
 
 ## P3 — Product upgrade (replaces 22 Oct Task 8, compact plan cards)
 
-- [ ] **#14 Structured weekly plan** — AI returns days and exercises as JSON (new `plan_json` column); coach sees 7 expandable day rows.
+- [x] **#14 Structured weekly plan** — AI fills a fixed form (7 days → exercises with sets, reps, rest, note), saved in `weekly_plans.plan_json` (SQL in `db/2026-10-25-plan-json.md`) with a text copy in `plan_details`; coach and client see 7 day rows (tap for exercises), client ticks off the day inside its row, today's workout opens first; day-by-day editor for AI drafts, new plans and edits (Workout / Rest per day, add / move / remove exercises), paste-as-text with "Convert to days", older text plans can be converted (#26, #27). Shared code: `lib/plan-structure.ts`, `app/plan-days.tsx`, `app/plan-editor.tsx`.
 - [ ] **#15 Client day-by-day logging** — **light version shipped (#25):** on this week's plan the client taps a day chip → Done ✓ with minutes, date, how it felt, notes; saves a session linked to the plan and day (`logged_sessions.plan_day`, SQL in `db/2026-10-25-plan-day.md`); ✓ on done days for client and on coach plan cards ("2 of 4 done"), day shown on the coach's Sessions tab. **Still to do — full version (after #14):** each day lists its own exercises; tick off exercises; exact adherence for #17.
 - [ ] **#16 Calorie estimate on each Done** — weight × duration × the day's effort level.
 - [ ] **#17 Adherence stat for owners** — "3 of 4 days done".
