@@ -63,6 +63,7 @@ _Last updated: 25 Oct 2026 (evening)_
 ## Small follow-ups noted along the way
 
 - [x] **#25 US partner logins use email** — super admin → company → Partner Logins follows the company's country: US partners get name + email (login) + password + optional phone; India unchanged (phone login, password = phone); partner list shows the login (#30)
+- [ ] **#33 New company shows "trial expired" until edited** — reported by Anand 25 Oct. Cause found: Create Company in `app/admin/page.tsx` (`handleCreateCompany`) shows the trial start / end date boxes but doesn't send them — `companyFields` only has name, email, phone, country, currency — so the company is saved without trial dates and the coach sees "expired". Editing works because Save Company does send `trial_start` / `trial_end` / `is_trial`. Fix: include the trial dates (and `is_trial: true`) when creating; also use local dates for the default start/end (today uses UTC, a day behind before 5:30 am in India); check the coach dashboard banner handles a missing date. No SQL.
 - [ ] **#26 Email alert for contact form requests** — needs a sending address (admin@getcoachboard.com via Zoho Mail / Namecheap Private Email) and an email provider (e.g. Resend).
 - [ ] **#27 Fresh demo video** — the YouTube demo is from April; a new 60-second recording would show today's app (could go on the landing page).
 
