@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
-import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor } from '@/lib/plan-structure'
+import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
@@ -96,6 +96,11 @@ export default function ClientDetailPage() {
   const router = useRouter()
   const params = useParams()
   const clientId = params.id as string
+  // "?tab=plans&day=today" (owner dashboard → Mark today): open Plans on today's day of this week's plan
+  const searchParams = useSearchParams()
+  const linkTab = searchParams.get('tab')
+  const linkDay = searchParams.get('day')
+  const linkApplied = useRef(false)
 
   const [client, setClient] = useState<ClientProfile | null>(null)
   const [plans, setPlans] = useState<Plan[]>([])
@@ -216,6 +221,21 @@ export default function ClientDetailPage() {
   const [savingMark, setSavingMark] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Apply the link once the client and plans have loaded
+  useEffect(() => {
+    if (linkApplied.current || loading || !client) return
+    linkApplied.current = true
+    if (linkTab !== 'plans') return
+    setActiveTab('plans')
+    if (linkDay !== 'today') return
+    const cur = currentPlan(plans)
+    if (!cur) return
+    setExpandedPlanId(cur.id)
+    setScrollToPlanId(cur.id)
+    const today = planJsonOf(cur)?.days.find(d => d.day === todayWeekday())
+    if (today && !today.rest) setCoachOpenDay(today.day)
+  }, [loading, client, plans, linkTab, linkDay])
 
   // Seconds counter for the AI "working" panel
   useEffect(() => {

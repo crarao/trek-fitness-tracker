@@ -265,10 +265,11 @@ export default function CompanyAdminPage() {
   }
 
   // Open a client: highlight the tapped row immediately, then navigate
-  const openClient = (id: string) => {
+  // (query e.g. "?tab=plans&day=today" opens the Plans tab on today's day, for "Mark today")
+  const openClient = (id: string, query = '') => {
     if (openingClientId) return
     setOpeningClientId(id)
-    router.push(`/company/client/${id}`)
+    router.push(`/company/client/${id}${query}`)
     setTimeout(() => setOpeningClientId(prev => (prev === id ? null : prev)), 10000) // safety reset
   }
 
@@ -1043,9 +1044,18 @@ export default function CompanyAdminPage() {
                                   if (!a) return null
                                   if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
                                   return (
-                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
-                                      {' '}· {a.done}/{a.planned} this wk
-                                    </span>
+                                    <>
+                                      <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                        {' '}· {a.done}/{a.planned} this wk
+                                      </span>
+                                      {' '}
+                                      {/* Coach marks today's workout done for the client: opens Plans on today's day */}
+                                      <button type="button"
+                                        onClick={e => { e.stopPropagation(); openClient(client.id, '?tab=plans&day=today') }}
+                                        className="whitespace-nowrap text-[11px] font-medium text-green-300 border border-green-800 hover:border-green-500 px-1.5 py-0.5 rounded-md ml-1">
+                                        Mark today
+                                      </button>
+                                    </>
                                   )
                                 })()}
                               </p>
