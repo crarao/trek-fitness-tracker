@@ -1,4 +1,4 @@
-# 26 Oct 2026 — `ai_plans_enabled` on companies (AI plans on/off per company) — RUN WHEN AT A COMPUTER
+# 26 Oct 2026 — `ai_plans_enabled` on companies (AI plans on/off per company) — RUN BY ANAND 26 OCT
 
 Adds one column, `true` for every existing company (nothing changes until the super admin turns it off).
 One switch per company: a gym or an online coach's business.
