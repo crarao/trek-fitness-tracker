@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, daysUntil } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
@@ -35,6 +35,7 @@ type Session = {
   plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
   exercises_done?: unknown   // { done: [names], total } when exercises were ticked (needs the column)
   activity?: string | null   // what was done, from the Log tab ("run", "sport:Badminton")
+  logged_by?: string | null  // set when the coach logged it for the client (gym PT); null = logged here
 }
 
 type Feedback = {
@@ -49,6 +50,9 @@ export default function ClientPage() {
   const [profile, setProfile] = useState<any>(null)
   const [plans, setPlans] = useState<WeeklyPlan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
+  // Gym without the client app (companies.client_module_enabled off): a simple membership screen;
+  // the coach still logs the training from their side
+  const [membership, setMembership] = useState<{ plan_type: string; start_date: string; end_date: string } | null>(null)
   const [feedback, setFeedback] = useState<Feedback[]>([])
   const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
@@ -129,11 +133,23 @@ const [profileMessage, setProfileMessage] = useState('')
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country, business_type)')
+      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country, business_type, client_module_enabled)')
       .eq('id', user.id)
       .single()
 
     setProfile(prof)
+
+    if (prof?.companies && !prof.companies.client_module_enabled) {
+      const { data: ms } = await supabase
+        .from('memberships')
+        .select('plan_type, start_date, end_date')
+        .eq('profile_id', user.id)
+        .order('start_date', { ascending: false })
+        .limit(1)
+      setMembership(ms?.[0] ?? null)
+      setLoading(false)
+      return
+    }
 
 if (prof) {
   setProfileForm({
@@ -430,12 +446,61 @@ const handleChangePassword = async () => {
   const weekStartIso = thisWeekMonday()
   const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
+  const byCoach = (s: Session) => !!s.logged_by && s.logged_by !== profile?.id
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <p className="text-gray-400">Loading...</p>
     </div>
   )
+
+  if (profile?.companies && !profile.companies.client_module_enabled) {
+    const left = daysUntil(membership?.end_date)
+    return (
+      <div className="min-h-screen bg-gray-950 text-white">
+        <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            {profile.companies.logo_url ? (
+              <img src={profile.companies.logo_url} alt={profile.companies.name} className="w-8 h-8 rounded-lg object-cover" />
+            ) : (
+              <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                <span className="text-white text-sm font-bold">{profile.companies.name?.[0] || 'C'}</span>
+              </div>
+            )}
+            <div>
+              <h1 className="text-base font-bold text-white">{profile.companies.name || 'CoachBoard'}</h1>
+              <p className="text-xs text-gray-500">{profile.full_name}</p>
+            </div>
+          </div>
+          <button data-nav onClick={() => { supabase.auth.signOut(); router.push('/login') }}
+            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+            Logout
+          </button>
+        </div>
+        <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
+          <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">My Membership</p>
+            {membership ? (
+              <>
+                <p className="text-lg font-semibold">{membership.plan_type}</p>
+                <p className="text-sm text-gray-400 mt-1">
+                  {formatDate(membership.start_date, country, 'medium')} → {formatDate(membership.end_date, country, 'medium')}
+                </p>
+                {left !== null && (
+                  <p className={`text-sm font-medium mt-2 ${left < 0 ? 'text-red-400' : left <= 11 ? 'text-amber-400' : 'text-green-400'}`}>
+                    {left < 0 ? `Expired ${Math.abs(left)} day${Math.abs(left) === 1 ? '' : 's'} ago` : `${left} day${left === 1 ? '' : 's'} left`}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-gray-500 italic">No membership on record yet. Please ask at the front desk.</p>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 px-1">Your coach keeps track of your training. Talk to them about your plan.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -627,7 +692,7 @@ const handleChangePassword = async () => {
                                   const fb = getFeedback(s.id)
                                   return (
                                     <div key={s.id} className="text-xs text-gray-300 space-y-1">
-                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}</p>
+                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}{byCoach(s) ? ' · Logged by your coach' : ''}</p>
                                       {s.notes && <p className="text-gray-400 bg-gray-900 rounded-lg px-3 py-2">{s.notes}</p>}
                                       {fb?.admin_feedback && (
                                         <p className="text-orange-200 bg-orange-950/60 border border-orange-900 rounded-lg px-3 py-2">💬 Coach: {fb.admin_feedback}</p>
@@ -864,6 +929,9 @@ const handleChangePassword = async () => {
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
+                        )}
+                        {byCoach(session) && (
+                          <p className="text-xs text-gray-400 mt-1">Logged by your coach</p>
                         )}
                       </div>
                       {fb?.star_rating && (

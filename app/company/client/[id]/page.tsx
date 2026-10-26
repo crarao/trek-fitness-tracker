@@ -2,16 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
-import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
-import { type PlanJson, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved } from '@/lib/plan-structure'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
+import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
+import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -69,6 +70,7 @@ type Session = {
   plan_day?: string | null   // set when the client logged it from a day of the plan
   exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
   activity?: string | null   // what was done, from the client's Log tab ("run", "sport:Badminton")
+  logged_by?: string | null  // staff member who logged it for the client; null = the client logged it
 }
 
 type Feedback = {
@@ -94,11 +96,18 @@ export default function ClientDetailPage() {
   const router = useRouter()
   const params = useParams()
   const clientId = params.id as string
+  // "?tab=plans&day=today" (owner dashboard → Mark today): open Plans on today's day of this week's plan
+  const searchParams = useSearchParams()
+  const linkTab = searchParams.get('tab')
+  const linkDay = searchParams.get('day')
+  const linkApplied = useRef(false)
 
   const [client, setClient] = useState<ClientProfile | null>(null)
   const [plans, setPlans] = useState<Plan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
+  // Names of the staff who logged sessions for this client (logged_by → profiles.full_name)
+  const [staffNames, setStaffNames] = useState<Record<string, string>>({})
   const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('profile')
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '', workout_time: '' })
@@ -168,8 +177,65 @@ export default function ClientDetailPage() {
   })
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
+  // Coach marks a plan day done for the client (gym PT: the client trains in front of the coach).
+  // Ticks per "planId:Day", kept on this device under "coach-ticks:<planId>:<Day>" so they never mix
+  // with the client's own ticks ("cb-ticks") on a shared phone.
+  const COACH_TICKS = 'coach-ticks:'
+  const [coachTicks, setCoachTicks] = useState<Record<string, number[]>>(() => {
+    if (typeof window === 'undefined') return {}
+    const out: Record<string, number[]> = {}
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (!k?.startsWith(COACH_TICKS)) continue
+        const list = JSON.parse(localStorage.getItem(k) || '[]')
+        if (Array.isArray(list) && list.length) out[k.slice(COACH_TICKS.length)] = list.filter(n => typeof n === 'number')
+      }
+    } catch { /* storage unavailable: ticks just won't survive a reload */ }
+    return out
+  })
+  const setDayTicks = (key: string, list: number[]) => {
+    setCoachTicks(prev => {
+      const next = { ...prev }
+      if (list.length) next[key] = list; else delete next[key]
+      return next
+    })
+    try {
+      if (list.length) localStorage.setItem(COACH_TICKS + key, JSON.stringify(list))
+      else localStorage.removeItem(COACH_TICKS + key)
+    } catch { /* ignore */ }
+  }
+  const toggleCoachTick = (planId: string, day: string, i: number) => {
+    const key = `${planId}:${day}`
+    const cur = coachTicks[key] || []
+    setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
+  }
+  // Open day row on this week's plan ("Mon"), the open "Mark done" form ("planId:Mon", or "planId:" for a
+  // text plan), and a day already done that the coach asked to log again (confirm step)
+  const [coachOpenDay, setCoachOpenDay] = useState<string | null>(null)
+  const [markKey, setMarkKey] = useState<string | null>(null)
+  const [markAgainKey, setMarkAgainKey] = useState<string | null>(null)
+  const coachDraft = (): SessionDraft => ({ ...emptyDraft(), duration_minutes: '60', session_date: localToday() })
+  const [markForm, setMarkForm] = useState<SessionDraft>(coachDraft)
+  const [markError, setMarkError] = useState('')
+  const [savingMark, setSavingMark] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Apply the link once the client and plans have loaded
+  useEffect(() => {
+    if (linkApplied.current || loading || !client) return
+    linkApplied.current = true
+    if (linkTab !== 'plans') return
+    setActiveTab('plans')
+    if (linkDay !== 'today') return
+    const cur = currentPlan(plans)
+    if (!cur) return
+    setExpandedPlanId(cur.id)
+    setScrollToPlanId(cur.id)
+    const today = planJsonOf(cur)?.days.find(d => d.day === todayWeekday())
+    if (today && !today.rest) setCoachOpenDay(today.day)
+  }, [loading, client, plans, linkTab, linkDay])
 
   // Seconds counter for the AI "working" panel
   useEffect(() => {
@@ -241,6 +307,13 @@ export default function ClientDetailPage() {
   type Part = 'client' | 'memberships' | 'plans' | 'sessions'
   const loadData = async (parts: Part[] = ['client', 'memberships', 'plans', 'sessions']) => {
     const want = (p: Part) => parts.includes(p)
+    // One small query for the names of everyone who logged a session for the client (not one per session)
+    const loadStaffNames = async (rows: Session[]) => {
+      const ids = [...new Set(rows.map(r => r.logged_by).filter((x): x is string => !!x && x !== clientId))]
+      if (!ids.length) { setStaffNames({}); return }
+      const { data } = await supabase.from('profiles').select('id, full_name').in('id', ids)
+      setStaffNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name || ''])))
+    }
     await Promise.all([
       want('client') && (async () => {
         const { data: clientData } = await supabase
@@ -279,6 +352,7 @@ export default function ClientDetailPage() {
           const rows = (joined.data || []) as (Session & { session_feedback?: Feedback[] | null })[]
           setSessions(rows.map(r => { const copy = { ...r }; delete copy.session_feedback; return copy as Session }))
           setFeedback(rows.flatMap(r => r.session_feedback || []))
+          await loadStaffNames(rows)
           return
         }
         const { data: sessionsData } = await supabase
@@ -287,6 +361,7 @@ export default function ClientDetailPage() {
           .eq('client_id', clientId)
           .order('session_date', { ascending: true })
         setSessions(sessionsData || [])
+        await loadStaffNames(sessionsData || [])
         const sessionIds = sessionsData?.map(s => s.id) || []
         if (sessionIds.length) {
           const { data: feedbackData } = await supabase
@@ -302,6 +377,77 @@ export default function ClientDetailPage() {
     setLoading(false)
   }
   const initialize = () => loadData()
+
+  const clientFirstName = (client?.full_name || '').trim().split(/\s+/)[0] || 'client'
+  // "by Coach Priya" when staff logged it for the client, "by client" when the client logged it
+  const loggedByText = (s: Session) => {
+    if (!s.logged_by || s.logged_by === clientId) return 'by client'
+    const first = (staffNames[s.logged_by] || '').trim().split(/\s+/)[0]
+    return first ? `by Coach ${first}` : 'by coach'
+  }
+  // Done-day notes on plan cards ("45 min · ~265 kcal") plus who logged the day's latest session
+  const doneNotesWithWho = (planId: string) => {
+    const notes = doneDayNotes(planId, sessions, sessionKcal)
+    for (const day of Object.keys(notes)) {
+      const latest = sessions.filter(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day).pop()
+      if (latest) notes[day] = [notes[day], loggedByText(latest)].filter(Boolean).join(' · ')
+    }
+    return notes
+  }
+  const openMarkForm = (key: string) => {
+    setMarkError('')
+    setMarkAgainKey(null)
+    setMarkForm(coachDraft())
+    setMarkKey(key)
+  }
+  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError('') }
+
+  // "Mark done for <client>": saves a session for the client like the client's own Done ✓
+  // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
+  // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
+  const handleCoachLogDay = async (plan: Plan, day: PlanDay | null, label: string | null) => {
+    setMarkError('')
+    const minutes = parseInt(markForm.duration_minutes)
+    if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return }
+    if (!markForm.session_date) { setMarkError('Pick the date'); return }
+    setSavingMark(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSavingMark(false); router.push('/login'); return }
+    const tickKey = day ? `${plan.id}:${day.day}` : ''
+    const ticked = day ? coachTicks[tickKey] || [] : []
+    const row: Record<string, unknown> = {
+      client_id: clientId,
+      weekly_plan_id: plan.id,
+      session_date: markForm.session_date,
+      duration_minutes: minutes,
+      notes: markForm.notes,
+      plan_day: label,
+      logged_by: user.id,
+      ...(day && ticked.length ? { exercises_done: exercisesDoneFor(day, ticked) } : {}),
+    }
+    let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
+    // Columns added later in Supabase (exercises_done, plan_day, logged_by): if one is missing, save without it
+    for (const col of ['exercises_done', 'plan_day', 'logged_by']) {
+      if (error && col in row && new RegExp(col, 'i').test(error.message)) {
+        delete row[col]
+        ;({ data: session, error } = await supabase.from('logged_sessions').insert(row).select().single())
+      }
+    }
+    if (error || !session) {
+      setSavingMark(false)
+      setMarkError('Could not save: ' + (error?.message || 'please try again'))
+      return
+    }
+    if (markForm.star_rating > 0) {
+      await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
+    }
+    setSavingMark(false)
+    closeMarkForm()
+    setMarkForm(coachDraft())
+    if (tickKey) setDayTicks(tickKey, []) // saved with the session now
+    showToast(`✓ ${day ? day.day : 'Session'} done for ${clientFirstName}`)
+    loadData(['sessions'])
+  }
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
@@ -1410,6 +1556,56 @@ const handleResetPassword = async () => {
         const done = doneDayKeys(plan.id, sessions)
         const workoutLabels = summary.days.filter(d => !isRestDay(d))
         const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
+        const isCurrent = status === 'current'
+        // Under an open day of this week's plan: "Mark done for <client>" → the session form.
+        // A day already done needs a confirm step before a second session is logged for it.
+        const renderMarkPanel = (day: PlanDay | null, label: string | null) => {
+          const key = `${plan.id}:${day?.day ?? ''}`
+          const isDone = !!day && done.has(day.day)
+          const n = day ? (coachTicks[key] || []).length : 0
+          if (markKey === key) return (
+            <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
+              <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
+                country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
+                notesLabel="Notes (optional)"
+                error={markError} saving={savingMark} submitLabel={`Done ✓ for ${clientFirstName}`}
+                onSubmit={() => handleCoachLogDay(plan, day, label)} onCancel={closeMarkForm}
+                heading={
+                  <p className="text-xs font-semibold text-green-400">
+                    {day ? `${day.day} done for ${clientFirstName}` : `Session done for ${clientFirstName}`}
+                    {day && (n
+                      ? <span className="font-normal text-gray-400"> · {n} of {day.exercises.length} exercise{day.exercises.length === 1 ? '' : 's'} ticked</span>
+                      : <span className="font-normal text-gray-500"> · tick exercises above, or just save</span>)}
+                  </p>
+                } />
+            </div>
+          )
+          if (isDone && markAgainKey === key) return (
+            <div className="border-t border-gray-800 pt-3 space-y-2">
+              <p className="text-xs text-amber-300">{day!.day} is already marked done. Log another session for this day?</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => openMarkForm(key)}
+                  className="flex-1 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium py-2.5 rounded-xl">Yes, log again</button>
+                <button type="button" onClick={() => setMarkAgainKey(null)}
+                  className="px-4 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl">Cancel</button>
+              </div>
+            </div>
+          )
+          if (isDone) return (
+            <div className="border-t border-gray-800 pt-3">
+              <button type="button" onClick={() => { setMarkError(''); setMarkAgainKey(key) }}
+                className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Log another session for {day!.day}</button>
+            </div>
+          )
+          return (
+            <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
+              <button type="button" onClick={() => openMarkForm(key)}
+                className="w-full bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm">
+                Mark done for {clientFirstName}
+              </button>
+            </div>
+          )
+        }
         return (
       <>
         <div className="flex justify-between items-start gap-3">
@@ -1472,14 +1668,25 @@ const handleResetPassword = async () => {
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
             {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneNotesWithWho(plan.id)} compact
                   ticks={Object.fromEntries(planJson.days.map(d => {
-                    // What the client ticked on that day (latest session for the day)
+                    // What was ticked on that day (latest session for the day); this week's days not yet done show the coach's ticks
                     const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
-                    return [d.day, saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done) : []]
-                  }).filter(([, list]) => (list as number[]).length))} />
+                    if (saved.length) return [d.day, tickedFromSaved(d, saved[saved.length - 1].exercises_done)]
+                    return [d.day, isCurrent && !done.has(d.day) ? coachTicks[`${plan.id}:${d.day}`] || [] : []]
+                  }).filter(([, list]) => (list as number[]).length))}
+                  {...(isCurrent ? {
+                    onTick: (d: string, i: number) => { if (!done.has(d)) toggleCoachTick(plan.id, d, i) },
+                    openDay: coachOpenDay,
+                    onToggle: (d: string | null) => { setCoachOpenDay(d); closeMarkForm() },
+                    renderOpen: (day: PlanDay, label: string) => (day.rest ? null : renderMarkPanel(day, label)),
+                  } : {})} />
               : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
           </div>
+        )}
+        {/* Older text-only plans: one "Mark done" for this week, saved without a plan day */}
+        {!planJson && isCurrent && (
+          <div className="border-t border-gray-800 pt-3 mt-3">{renderMarkPanel(null, null)}</div>
         )}
       </>
         )
@@ -1514,6 +1721,7 @@ const handleResetPassword = async () => {
                       <div>
                         <p className="text-sm font-medium text-white">
                           {formatDate(session.session_date, country, 'weekday')}
+                          <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>

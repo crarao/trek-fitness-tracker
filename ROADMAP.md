@@ -54,6 +54,9 @@ _Last updated: 25 Oct 2026 (evening)_
 - [ ] **#18 Diet chart** — generic version shipped (#19): AI diet chart from food preference (incl. Jain / Vegan), meals per day, goal, weight/height; India vs US foods by company country; coach reviews and saves to the diet plan. **Still to add:** region / cuisine and allergies / foods to avoid fields (allergies after the remaining RLS rules in #1).
 - [ ] **#19 SMS reminders** — MSG91 + DLT registration (takes 5–7 days, start the paperwork early). US: Twilio.
 - [ ] **#20 Multi-branch** — `branch_id`, owner dashboard across branches, coach assignment.
+- [x] **#39 Coach logs sessions for clients** — gym feedback 26 Oct: in gym PT the client trains in front of the coach. Coach → client → Plans: on this week's plan the coach ticks exercises (kept on the device under `coach-ticks:`) and taps "Mark done for <client>" (60 min, today by default), saved like the client's Done ✓ plus `logged_sessions.logged_by`; a done day needs a confirm step to log again; text-only plans get one Mark done. Sessions tab and plan cards show "by Coach <name>" / "by client"; the client sees "Logged by your coach". Owner dashboard: "Mark today" on PT rows opens the client on today's day. Gyms with the client app off: clients see a simple membership screen. SQL (already run 26 Oct) in `db/2026-10-26-coach-logging.md` (#42)
+- [ ] **#40 Coach logins with assigned clients** — `coach` role (or partner with `coach_id` on each PT client); a coach sees only their clients, the owner sees all. Part of #20.
+- [ ] **#41 Owner "Today's sessions" view** — per coach: clients trained today, exercises done, missed sessions this week; feeds #17 adherence.
 
 ## Later (after #1 and a consent flow)
 
