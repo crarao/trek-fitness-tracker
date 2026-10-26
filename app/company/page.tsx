@@ -2,10 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
+import { type TodaySession, missedAndDue, loggerOf, sessionsByLogger } from '@/lib/todays-sessions'
+import { type ExercisesDone } from '@/lib/plan-structure'
+import { thisWeekMonday } from '@/lib/calories'
+import { activityText } from '@/lib/activities'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso } from '@/lib/locale'
 
 type Membership = {
   id: string
@@ -119,6 +123,8 @@ export default function CompanyAdminPage() {
   // Train module: PT clients' plans and plan-linked sessions from the last 4 weeks (for adherence)
   const [trainModule, setTrainModule] = useState(false)
   const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
+  // Today's sessions (#41): PT clients' sessions since this week's Monday, and the names of staff who logged them
+  const [recent, setRecent] = useState<{ sessions: TodaySession[]; names: Record<string, string> } | null>(null)
 
   useEffect(() => { initialize() }, [])
 
@@ -217,7 +223,8 @@ export default function CompanyAdminPage() {
 
   // Plans from the last 4 weeks for PT clients, and the sessions logged against them
   const fetchTraining = async (ptIds: string[]) => {
-    if (!ptIds.length) { setTraining({ plans: [], sessions: [] }); return }
+    if (!ptIds.length) { setTraining({ plans: [], sessions: [] }); setRecent({ sessions: [], names: {} }); return }
+    fetchRecent(ptIds)
     const since = new Date()
     since.setDate(since.getDate() - 34) // 4 weeks back, plus the start of a plan still running then
     const sinceIso = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`
@@ -238,6 +245,25 @@ export default function CompanyAdminPage() {
       sessions = data || []
     }
     setTraining({ plans: plans || [], sessions })
+  }
+
+  // Every session PT clients logged this week (plan or not), plus one query for who logged them
+  const fetchRecent = async (ptIds: string[]) => {
+    const { data, error } = await supabase
+      .from('logged_sessions')
+      .select('*')
+      .in('client_id', ptIds)
+      .gte('session_date', thisWeekMonday())
+      .order('created_at', { ascending: true })
+    if (error) { console.error('Recent sessions fetch error:', error); return }
+    const sessions = (data || []) as TodaySession[]
+    const ids = [...new Set(sessions.map(loggerOf).filter(id => id !== 'client'))]
+    let names: Record<string, string> = {}
+    if (ids.length) {
+      const { data: staff } = await supabase.from('profiles').select('id, full_name').in('id', ids)
+      names = Object.fromEntries((staff || []).map(p => [p.id, p.full_name || '']))
+    }
+    setRecent({ sessions, names })
   }
 
   const fetchArchived = async (cId: string, knownMemberships?: unknown[]) => {
@@ -492,6 +518,31 @@ export default function CompanyAdminPage() {
     .map(c => ({ c, a: weekAdherence[c.id] }))
     .filter((x): x is { c: Client; a: Adherence } => !!x.a && x.a !== 'no-plan' && x.a.done < x.a.planned)
     .sort((x, y) => (y.a.planned - y.a.done) - (x.a.planned - x.a.done) || x.a.done / x.a.planned - y.a.done / y.a.planned)
+
+  // Today's sessions (#41): trained today, today's workout not done yet, workout days missed this week
+  const todayIso = localDateIso()
+  const ptById = Object.fromEntries(ptClients.map(c => [c.id, c]))
+  const trainedToday = (recent?.sessions || []).filter(s => s.session_date === todayIso && ptById[s.client_id])
+  const dueToday: { c: Client; label: string }[] = []
+  const missedWeek: { c: Client; days: string[] }[] = []
+  if (training) {
+    for (const c of ptClients) {
+      const plan = currentPlan(training.plans.filter(p => p.client_id === c.id))
+      if (!plan) continue
+      const r = missedAndDue(plan, training.sessions as TodaySession[], todayIso)
+      if (r.dueToday && !trainedToday.some(s => s.client_id === c.id)) dueToday.push({ c, label: r.dueToday.label })
+      if (r.missed.length) missedWeek.push({ c, days: r.missed.map(d => d.day) })
+    }
+    missedWeek.sort((a, b) => b.days.length - a.days.length)
+  }
+  const byLogger = Object.entries(sessionsByLogger(recent?.sessions || [], thisWeekMonday(), todayIso))
+    .sort(([a, x], [b, y]) => (a === 'client' ? 1 : 0) - (b === 'client' ? 1 : 0) || y.today - x.today || y.week - x.week)
+  const loggerName = (id: string) => {
+    if (id === 'client') return 'Clients themselves'
+    const first = (recent?.names[id] || '').trim().split(/\s+/)[0]
+    return first ? `Coach ${first}` : 'Coach'
+  }
+  const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -826,6 +877,92 @@ export default function CompanyAdminPage() {
                   {noPlanClients.length > 8 && <span className="text-xs text-gray-500 self-center">+{noPlanClients.length - 8} more</span>}
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Today's sessions — PT clients trained today, still due today, missed this week; sessions per coach (#41) */}
+      {trainModule && ptCount > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Today&apos;s sessions <span className="normal-case text-gray-600">· {formatDate(new Date(), country, 'weekday')}</span></p>
+              {recent && <p className="text-xs text-gray-500 shrink-0"><span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained</p>}
+            </div>
+            {!recent || !training ? (
+              <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
+            ) : (
+              <>
+                {trainedToday.length === 0 ? (
+                  <p className="text-sm text-gray-400 mt-2">No PT sessions logged yet today.</p>
+                ) : (
+                  <ul className="mt-2 divide-y divide-gray-800">
+                    {trainedToday.map(s => {
+                      const c = ptById[s.client_id]
+                      const ex = s.exercises_done as ExercisesDone | null | undefined
+                      const what = s.plan_day ? s.plan_day : s.activity ? activityText(s.activity) : 'Session'
+                      return (
+                        <li key={s.id}>
+                          <button type="button" data-nav onClick={() => openClient(c.id, '?tab=sessions')}
+                            className="w-full text-left py-2 flex items-baseline justify-between gap-3">
+                            <span className="min-w-0">
+                              <span className="block text-sm text-white truncate">✓ {c.full_name}</span>
+                              <span className="block text-[11px] text-gray-500 truncate">
+                                {what}
+                                {ex && Array.isArray(ex.done) && ex.total ? ` · ${ex.done.length} of ${ex.total} exercises` : ''}
+                                {s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}
+                              </span>
+                            </span>
+                            <span className="text-[11px] text-gray-400 shrink-0">{loggedByText(s)}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                {dueToday.length > 0 && (
+                  <div className="mt-3 border-t border-gray-800 pt-3">
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Workout today, not done yet</p>
+                    <div className="flex flex-wrap gap-2">
+                      {dueToday.map(({ c, label }) => (
+                        <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=plans&day=today')}
+                          title={label}
+                          className="text-xs px-2.5 py-1.5 rounded-lg border border-green-800 bg-gray-800 text-gray-200 hover:border-green-500">
+                          {c.full_name.split(' ')[0]} <span className="text-green-300">Mark today</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {missedWeek.length > 0 && (
+                  <div className="mt-3 border-t border-gray-800 pt-3">
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Missed this week</p>
+                    <div className="flex flex-wrap gap-2">
+                      {missedWeek.slice(0, 10).map(({ c, days }) => (
+                        <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=plans')}
+                          className="text-xs px-2.5 py-1.5 rounded-lg border border-red-900 bg-red-950/30 text-red-200 hover:border-red-600">
+                          {c.full_name.split(' ')[0]} <span className="text-red-300">{days.join(', ')}</span>
+                        </button>
+                      ))}
+                      {missedWeek.length > 10 && <span className="text-xs text-gray-500 self-center">+{missedWeek.length - 10} more</span>}
+                    </div>
+                  </div>
+                )}
+                {byLogger.length > 0 && (
+                  <div className="mt-3 border-t border-gray-800 pt-3">
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Logged by <span className="normal-case">· today / this week</span></p>
+                    <ul className="space-y-1">
+                      {byLogger.map(([id, n]) => (
+                        <li key={id} className="flex items-baseline justify-between gap-3 text-sm">
+                          <span className="text-gray-200 truncate">{loggerName(id)}</span>
+                          <span className="text-gray-400 shrink-0"><span className="text-white font-semibold">{n.today}</span> / {n.week}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
