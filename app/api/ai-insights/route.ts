@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { getCaller } from '@/lib/auth-server'
 import { recordAiUsage } from '@/lib/ai-usage'
+import { createClient } from '@supabase/supabase-js'
 
 export async function POST(request: Request) {
   // Must be logged in (clients request their own insights; staff may too)
@@ -13,6 +14,19 @@ export async function POST(request: Request) {
 
     if (!sessions || sessions.length === 0) {
       return NextResponse.json({ insight: null })
+    }
+
+    // Turned off for this gym by the super admin: no AI call (and no cost)
+    if (caller.companyId) {
+      const admin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SECRET_KEY!,
+        { auth: { autoRefreshToken: false, persistSession: false } }
+      )
+      const { data: co } = await admin.from('companies').select('ai_insights_enabled').eq('id', caller.companyId).single()
+      if (co?.ai_insights_enabled === false) {
+        return NextResponse.json({ error: 'AI insights are turned off for this gym' }, { status: 403 })
+      }
     }
 
     const client = new Anthropic({
@@ -40,7 +54,7 @@ Be warm, specific and motivating.`
       }]
     })
 
-    await recordAiUsage({ companyId: caller.companyId, userId: caller.userId, feature: 'insights', model: message.model, usage: message.usage })
+    await recordAiUsage({ companyId: caller.companyId, userId: caller.userId, clientId: caller.role === 'client' ? caller.userId : null, feature: 'insights', model: message.model, usage: message.usage })
 
     const insight = message.content[0].type === 'text' ? message.content[0].text : null
     return NextResponse.json({ insight })

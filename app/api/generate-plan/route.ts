@@ -113,7 +113,7 @@ Plain words only, no markdown symbols.`
     // Cost of this call, per gym, for the super admin Dashboard (the client's gym)
     await recordAiUsage({
       companyId: caller.role === 'super_admin' ? profile?.company_id : caller.companyId,
-      userId: caller.userId, feature: 'plan', model: message.model, usage: message.usage,
+      userId: caller.userId, clientId: profile?.id, feature: 'plan', model: message.model, usage: message.usage,
     })
 
     // The plan comes back as structured days; the text copy is built from it

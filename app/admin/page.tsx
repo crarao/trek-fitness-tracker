@@ -18,6 +18,7 @@ type Company = {
   created_at: string
   feedback_enabled: boolean
   ai_insights_enabled: boolean
+  ai_diet_enabled?: boolean | null   // AI diet chart on/off (column added 25 Oct; absent before the SQL)
   session_notes_enabled: boolean
   client_limit: number
   is_trial: boolean
@@ -88,7 +89,7 @@ export default function AdminPage() {
   // AI cost rows (this + last month) and estimated data stored, per gym — from /api/admin/costs
   const [costs, setCosts] = useState<{
     aiReady: boolean
-    ai: { company_id: string | null; feature: string; cost_usd: number; created_at: string }[]
+    ai: { company_id: string | null; client_id?: string | null; feature: string; cost_usd: number; created_at: string }[]
     storage: Record<string, { rows: number; bytes: number }>
   } | null>(null)
   const [costsError, setCostsError] = useState('')
@@ -96,6 +97,11 @@ export default function AdminPage() {
   const [clientSearch, setClientSearch] = useState('')
   const [clientFilter, setClientFilter] = useState<'all' | 'pt' | 'expired'>('all')
   const [showTestClients, setShowTestClients] = useState(false)
+  // Dashboard: include test companies (for trying features, e.g. checking AI cost recording)
+  const [dashIncludeTest, setDashIncludeTest] = useState(false)
+  // Dashboard AI card: tap to see this month's AI cost by gym, then by member
+  const [aiBreakdownOpen, setAiBreakdownOpen] = useState(false)
+  const [aiOpenGym, setAiOpenGym] = useState<string | null>(null)
   const [collapsedCompanies, setCollapsedCompanies] = useState<Set<string>>(new Set())
   const [requests, setRequests] = useState<ContactRequest[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -396,6 +402,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         is_active: editingCompany.is_active,
         feedback_enabled: editingCompany.feedback_enabled,
         ai_insights_enabled: editingCompany.ai_insights_enabled,
+        // Only once the ai_diet_enabled column exists (its value then comes back with the company)
+        ...('ai_diet_enabled' in editingCompany ? { ai_diet_enabled: editingCompany.ai_diet_enabled !== false } : {}),
         session_notes_enabled: editingCompany.session_notes_enabled,
         client_module_enabled: editingCompany.client_module_enabled,
         pt_limit: ptLimit,
@@ -623,18 +631,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         {/* DASHBOARD TAB — real (non-test) companies: are they using it, and what to do next */}
         {activeTab === 'dashboard' && (() => {
           if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
-          const real = companies.filter(c => !c.is_test)
+          const real = companies.filter(c => dashIncludeTest || !c.is_test)
           const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || []))
           // AI cost this calendar month and last, per gym (USD; shown in ₹ at a fixed rate)
           const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
           const aiThis: Record<string, { usd: number; calls: number }> = {}
           const aiByFeature: Record<string, { usd: number; calls: number }> = {}
+          // gym → member ('' = not recorded) → cost, uses, features
+          const aiByGymMember: Record<string, Record<string, { usd: number; calls: number; features: Record<string, number> }>> = {}
           let aiLastUsd = 0
           for (const r of costs?.ai || []) {
-            if (!r.company_id || companies.find(c => c.id === r.company_id)?.is_test) continue
+            if (!r.company_id || (!dashIncludeTest && companies.find(c => c.id === r.company_id)?.is_test)) continue
             if (r.created_at >= monthStart) {
               const a = (aiThis[r.company_id] ??= { usd: 0, calls: 0 }); a.usd += Number(r.cost_usd); a.calls += 1
               const f = (aiByFeature[r.feature] ??= { usd: 0, calls: 0 }); f.usd += Number(r.cost_usd); f.calls += 1
+              const gm = (aiByGymMember[r.company_id] ??= {})
+              const m = (gm[r.client_id || ''] ??= { usd: 0, calls: 0, features: {} })
+              m.usd += Number(r.cost_usd); m.calls += 1; m.features[r.feature] = (m.features[r.feature] || 0) + 1
             } else aiLastUsd += Number(r.cost_usd)
           }
           const aiTotal = Object.values(aiThis).reduce((t, a) => ({ usd: t.usd + a.usd, calls: t.calls + a.calls }), { usd: 0, calls: 0 })
@@ -652,11 +665,17 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           const paying = live.filter(u => u.status === 'paid' && (u.daysLeft == null || u.daysLeft > 0)).length
           const trials = live.filter(u => u.status === 'trial' && (u.daysLeft == null || u.daysLeft > 0)).length
           const members = usage.reduce((n, u) => n + u.members, 0)
-          const testCount = companies.length - real.length
+          const testCount = companies.filter(c => c.is_test).length
           const toneCls = { good: 'border-green-800 bg-green-950/30', warn: 'border-amber-800 bg-amber-950/20', bad: 'border-red-900 bg-red-950/30' }
           const actionCls = { good: 'bg-green-600 text-white', warn: 'bg-amber-500 text-gray-950', bad: 'bg-red-600 text-white' }
           return (
             <div className="space-y-6">
+              {testCount > 0 && (
+                <label className={`flex items-center gap-2 text-xs w-fit px-3 py-1.5 rounded-lg border ${dashIncludeTest ? 'border-amber-700 bg-amber-950/40 text-amber-200' : 'border-gray-800 text-gray-400'}`}>
+                  <input type="checkbox" checked={dashIncludeTest} onChange={e => setDashIncludeTest(e.target.checked)} className="accent-orange-500" />
+                  Include test accounts ({testCount}){dashIncludeTest ? ': numbers below include them' : ''}
+                </label>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   { label: 'Paying gyms', value: paying, cls: 'text-green-400' },
@@ -682,7 +701,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         className={`w-full text-left rounded-2xl border px-4 py-3 flex items-center gap-3 ${toneCls[a.tone]}`}>
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${HEALTH_STYLE[a.usage.health].dot}`} title={HEALTH_STYLE[a.usage.health].label} />
                         <span className="flex-1 min-w-0">
-                          <span className="block text-sm font-medium text-white truncate">{a.usage.company.name}</span>
+                          <span className="block text-sm font-medium text-white truncate">{a.usage.company.name}{a.usage.company.is_test && <span className="ml-1.5 text-[9px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1 py-0.5 rounded align-middle">TEST</span>}</span>
                           <span className="block text-xs text-gray-400">{a.reason}</span>
                         </span>
                         <span className={`shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg ${actionCls[a.tone]}`}>{a.action}</span>
@@ -698,19 +717,71 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-sm text-gray-500">{costsError || 'Loading costs…'}</div>
                 ) : (
                   <div className="grid sm:grid-cols-2 gap-3">
-                    <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">AI</p>
-                      {!costs.aiReady ? (
-                        <p className="text-sm text-amber-300 mt-1">Not recording yet: run the SQL in db/2026-10-25-ai-usage.md</p>
-                      ) : (
-                        <>
-                          <p className="mt-1"><span className="text-2xl font-bold text-white">{inr(aiTotal.usd)}</span> <span className="text-xs text-gray-500">{aiTotal.calls} uses · ${aiTotal.usd.toFixed(2)} · last month {inr(aiLastUsd)}</span></p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {Object.entries(aiByFeature).length === 0 ? 'No AI use yet this month.' : Object.entries(aiByFeature)
-                              .sort((a, b) => b[1].usd - a[1].usd)
-                              .map(([f, v]) => `${AI_FEATURES[f] || f} ${inr(v.usd)} (${v.calls})`).join(' · ')}
-                          </p>
-                        </>
+                    <div className={`bg-gray-900 rounded-2xl border border-gray-800 ${aiBreakdownOpen ? 'sm:col-span-2' : ''}`}>
+                      <button type="button" aria-expanded={aiBreakdownOpen} disabled={!costs.aiReady || aiTotal.calls === 0}
+                        onClick={() => setAiBreakdownOpen(o => !o)}
+                        className="w-full text-left p-4 rounded-2xl">
+                        <span className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500 uppercase tracking-wider">AI</span>
+                          {costs.aiReady && aiTotal.calls > 0 && <span className="text-xs text-orange-400">{aiBreakdownOpen ? 'Hide ▴' : 'By gym and member ▾'}</span>}
+                        </span>
+                        {!costs.aiReady ? (
+                          <span className="block text-sm text-amber-300 mt-1">Not recording yet: run the SQL in db/2026-10-25-ai-usage.md</span>
+                        ) : (
+                          <>
+                            <span className="block mt-1"><span className="text-2xl font-bold text-white">{inr(aiTotal.usd)}</span> <span className="text-xs text-gray-500">{aiTotal.calls} uses · ${aiTotal.usd.toFixed(2)} · last month {inr(aiLastUsd)}</span></span>
+                            <span className="block text-xs text-gray-500 mt-1">
+                              {Object.entries(aiByFeature).length === 0 ? 'No AI use yet this month.' : Object.entries(aiByFeature)
+                                .sort((a, b) => b[1].usd - a[1].usd)
+                                .map(([f, v]) => `${AI_FEATURES[f] || f} ${inr(v.usd)} (${v.calls})`).join(' · ')}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                      {aiBreakdownOpen && (
+                        <div className="border-t border-gray-800 divide-y divide-gray-800">
+                          {Object.entries(aiThis).sort((a, b) => b[1].usd - a[1].usd).map(([gymId, g]) => {
+                            const gym = companies.find(c => c.id === gymId)
+                            const open = aiOpenGym === gymId
+                            const members = Object.entries(aiByGymMember[gymId] || {}).sort((a, b) => b[1].usd - a[1].usd)
+                            return (
+                              <div key={gymId}>
+                                <button type="button" aria-expanded={open} onClick={() => setAiOpenGym(open ? null : gymId)}
+                                  className="w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-gray-800/50">
+                                  <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                                  <span className="flex-1 min-w-0 text-sm text-white truncate">
+                                    {gym?.name || 'Unknown gym'}
+                                    {gym?.is_test && <span className="ml-1.5 text-[9px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1 py-0.5 rounded align-middle">TEST</span>}
+                                  </span>
+                                  <span className="text-sm font-semibold text-white shrink-0">{inr(g.usd)}</span>
+                                  <span className="text-xs text-gray-500 shrink-0 w-14 text-right">{g.calls} use{g.calls === 1 ? '' : 's'}</span>
+                                </button>
+                                {open && (
+                                  <div className="pb-2">
+                                    {members.map(([memberId, m]) => {
+                                      const who = memberId ? clients.find(c => c.id === memberId)?.full_name || 'Removed member' : 'Member not recorded'
+                                      return (
+                                        <div key={memberId || 'none'} className="pl-10 pr-4 py-1.5 flex items-center gap-3">
+                                          <span className="flex-1 min-w-0">
+                                            <span className={`block text-xs truncate ${memberId ? 'text-gray-200' : 'text-gray-500 italic'}`}>{who}</span>
+                                            <span className="block text-[11px] text-gray-500">
+                                              {Object.entries(m.features).map(([f, n]) => `${AI_FEATURES[f] || f} ${n}`).join(' · ')}
+                                            </span>
+                                          </span>
+                                          <span className="text-xs text-white shrink-0">{inr(m.usd)}</span>
+                                          <span className="text-[11px] text-gray-500 shrink-0 w-14 text-right">{m.calls} use{m.calls === 1 ? '' : 's'}</span>
+                                        </div>
+                                      )
+                                    })}
+                                    {members.some(([id]) => !id) && (
+                                      <p className="pl-10 pr-4 pt-1 text-[11px] text-gray-500">&quot;Member not recorded&quot; = AI use before the member column was added (db/2026-10-26-ai-usage-client.md).</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
                       )}
                     </div>
                     <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
@@ -745,7 +816,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${h.dot}`} />
                           <span className="flex-1 min-w-0">
                             <span className="flex items-baseline justify-between gap-2">
-                              <span className="text-sm font-medium text-white truncate">{u.company.name}</span>
+                              <span className="text-sm font-medium text-white truncate">{u.company.name}{u.company.is_test && <span className="ml-1.5 text-[9px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1 py-0.5 rounded align-middle">TEST</span>}</span>
                               <span className={`text-[11px] shrink-0 ${u.daysLeft != null && u.daysLeft <= 0 ? 'text-red-400' : u.status === 'trial' ? 'text-blue-300' : 'text-gray-400'}`}>{plan}</span>
                             </span>
                             <span className="block text-xs text-gray-500 mt-0.5">
@@ -768,7 +839,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                 )}
                 <p className="text-[11px] text-gray-500 mt-2">
                   Activity = members added, memberships recorded and plans assigned by the gym&apos;s staff.
-                  {testCount > 0 ? ` ${testCount} test ${testCount === 1 ? 'company is' : 'companies are'} left out.` : ' Mark test companies in their edit panel to leave them out.'}
+                  {testCount > 0 ? (dashIncludeTest ? ` Including ${testCount} test ${testCount === 1 ? 'company' : 'companies'}.` : ` ${testCount} test ${testCount === 1 ? 'company is' : 'companies are'} left out.`) : ' Mark test companies in their edit panel to leave them out.'}
                   {planLoadError ? ` ${planLoadError}.` : ''}
                 </p>
               </div>
@@ -1035,6 +1106,23 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 ? 'bg-green-950 border-green-700 text-green-400'
                                 : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
                               {editingCompany.ai_insights_enabled ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <p className="text-sm text-white">AI Diet Chart</p>
+                              <p className="text-xs text-gray-500">
+                                {'ai_diet_enabled' in editingCompany
+                                  ? 'Coaches can create diet charts with AI (typed diet plans always work)'
+                                  : 'Needs one SQL line first (db/2026-10-25-ai-diet-toggle.md)'}
+                              </p>
+                            </div>
+                            <button type="button" disabled={!('ai_diet_enabled' in editingCompany)}
+                              onClick={() => setEditingCompany({ ...editingCompany, ai_diet_enabled: editingCompany.ai_diet_enabled === false })}
+                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.ai_diet_enabled !== false
+                                ? 'bg-green-950 border-green-700 text-green-400'
+                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                              {editingCompany.ai_diet_enabled !== false ? 'ON' : 'OFF'}
                             </button>
                           <div className="flex justify-between items-center">
                             <div>

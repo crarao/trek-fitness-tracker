@@ -245,7 +245,7 @@ export default function ClientDetailPage() {
       want('client') && (async () => {
         const { data: clientData } = await supabase
           .from('profiles')
-          .select('*, companies:company_id(business_type, feedback_enabled, client_module_enabled, currency, country)')
+          .select('*, companies:company_id(*)') // all gym settings, incl. ai_diet_enabled once that column exists
           .eq('id', clientId)
           .single()
         setClient(clientData)
@@ -1971,8 +1971,8 @@ const handleResetPassword = async () => {
               <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
             </div>
 
-            {/* AI diet chart */}
-            {!dietDraft && !dietGenerating && (
+            {/* AI diet chart (super admin can turn it off per gym; typed diet plans still work) */}
+            {(client as { companies?: { ai_diet_enabled?: boolean | null } } | null)?.companies?.ai_diet_enabled !== false && !dietDraft && !dietGenerating && (
               <div className="space-y-2">
                 {(!client?.food_preference || !client?.weight_kg) && (
                   <p className="text-xs text-yellow-300">

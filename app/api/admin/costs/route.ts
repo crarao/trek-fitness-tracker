@@ -24,7 +24,7 @@ export async function GET() {
   const since = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
   const { data: ai, error: aiError } = await admin
     .from('ai_usage')
-    .select('company_id, feature, cost_usd, created_at')
+    .select('*') // includes client_id once that column exists
     .gte('created_at', since)
     .limit(50000)
   const aiReady = !aiError
