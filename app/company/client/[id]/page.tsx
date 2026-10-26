@@ -96,7 +96,8 @@ export default function ClientDetailPage() {
   const router = useRouter()
   const params = useParams()
   const clientId = params.id as string
-  // "?tab=plans&day=today" (owner dashboard → Mark today): open Plans on today's day of this week's plan
+  // "?tab=plans&day=today" (owner dashboard → Mark today): open Plans on today's day of this week's plan;
+  // "?tab=sessions" opens the Sessions tab
   const searchParams = useSearchParams()
   const linkTab = searchParams.get('tab')
   const linkDay = searchParams.get('day')
@@ -226,6 +227,7 @@ export default function ClientDetailPage() {
   useEffect(() => {
     if (linkApplied.current || loading || !client) return
     linkApplied.current = true
+    if (linkTab === 'sessions') { setActiveTab('sessions'); return } // owner dashboard → Today's sessions
     if (linkTab !== 'plans') return
     setActiveTab('plans')
     if (linkDay !== 'today') return
