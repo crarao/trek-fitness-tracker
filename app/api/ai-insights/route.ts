@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { getCaller } from '@/lib/auth-server'
+import { recordAiUsage } from '@/lib/ai-usage'
 
 export async function POST(request: Request) {
   // Must be logged in (clients request their own insights; staff may too)
-  const { error: authError } = await getCaller(['client', 'company_admin', 'partner', 'super_admin'])
+  const { caller, error: authError } = await getCaller(['client', 'company_admin', 'partner', 'super_admin'])
   if (authError) return authError
 
   try {
@@ -38,6 +39,8 @@ ${sessionSummary}
 Be warm, specific and motivating.`
       }]
     })
+
+    await recordAiUsage({ companyId: caller.companyId, userId: caller.userId, feature: 'insights', model: message.model, usage: message.usage })
 
     const insight = message.content[0].type === 'text' ? message.content[0].text : null
     return NextResponse.json({ insight })

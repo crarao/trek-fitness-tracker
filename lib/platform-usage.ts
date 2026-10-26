@@ -78,7 +78,7 @@ export function companyUsage(
   }
 }
 
-export type ActionKind = 'convert' | 'lapse' | 'collect' | 'deactivate' | 'check-in' | 'limit' | 'onboard'
+export type ActionKind = 'convert' | 'lapse' | 'collect' | 'deactivate' | 'check-in' | 'limit' | 'onboard' | 'ai-cost'
 
 export type Action = {
   kind: ActionKind
@@ -132,7 +132,7 @@ export function actionsFor(u: CompanyUsage): Action[] {
 }
 
 // Most urgent first: money and churn before growth
-const ORDER: ActionKind[] = ['collect', 'convert', 'lapse', 'deactivate', 'check-in', 'onboard', 'limit']
+const ORDER: ActionKind[] = ['collect', 'convert', 'lapse', 'deactivate', 'check-in', 'ai-cost', 'onboard', 'limit']
 export const sortActions = (list: Action[]) =>
   [...list].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)
     || (a.usage.daysLeft ?? 999) - (b.usage.daysLeft ?? 999))

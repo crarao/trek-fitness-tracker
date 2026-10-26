@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
+import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -84,6 +85,13 @@ export default function AdminPage() {
   const [memberships, setMemberships] = useState<AdminMembership[]>([])
   const [planRows, setPlanRows] = useState<UsagePlan[] | null>(null)
   const [planLoadError, setPlanLoadError] = useState('')
+  // AI cost rows (this + last month) and estimated data stored, per gym — from /api/admin/costs
+  const [costs, setCosts] = useState<{
+    aiReady: boolean
+    ai: { company_id: string | null; feature: string; cost_usd: number; created_at: string }[]
+    storage: Record<string, { rows: number; bytes: number }>
+  } | null>(null)
+  const [costsError, setCostsError] = useState('')
   // Clients tab: grouped by company
   const [clientSearch, setClientSearch] = useState('')
   const [clientFilter, setClientFilter] = useState<'all' | 'pt' | 'expired'>('all')
@@ -196,6 +204,14 @@ export default function AdminPage() {
         setPlanLoadError('')
       })
       .catch(e => { setPlanRows([]); setPlanLoadError('Plans assigned could not be loaded (' + e.message + ')') })
+    fetch('/api/admin/costs')
+      .then(async r => {
+        const body = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`)
+        setCosts(body)
+        setCostsError('')
+      })
+      .catch(e => setCostsError('Costs could not be loaded (' + e.message + ')'))
 
     // Landing page contact form submissions (super admin only, via RLS)
     const { data: requestsData } = await supabase
@@ -609,7 +625,29 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
           const real = companies.filter(c => !c.is_test)
           const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || []))
-          const actions = sortActions(usage.flatMap(actionsFor))
+          // AI cost this calendar month and last, per gym (USD; shown in ₹ at a fixed rate)
+          const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+          const aiThis: Record<string, { usd: number; calls: number }> = {}
+          const aiByFeature: Record<string, { usd: number; calls: number }> = {}
+          let aiLastUsd = 0
+          for (const r of costs?.ai || []) {
+            if (!r.company_id || companies.find(c => c.id === r.company_id)?.is_test) continue
+            if (r.created_at >= monthStart) {
+              const a = (aiThis[r.company_id] ??= { usd: 0, calls: 0 }); a.usd += Number(r.cost_usd); a.calls += 1
+              const f = (aiByFeature[r.feature] ??= { usd: 0, calls: 0 }); f.usd += Number(r.cost_usd); f.calls += 1
+            } else aiLastUsd += Number(r.cost_usd)
+          }
+          const aiTotal = Object.values(aiThis).reduce((t, a) => ({ usd: t.usd + a.usd, calls: t.calls + a.calls }), { usd: 0, calls: 0 })
+          const storageBytes = real.reduce((n, c) => n + (costs?.storage[c.id]?.bytes || 0), 0)
+          const mb = (b: number) => b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`
+          const actions = sortActions([
+            ...usage.flatMap(actionsFor),
+            // AI cost high: no price per gym is stored yet, so a fixed ₹ line (lib/ai-pricing.ts)
+            ...usage.filter(u => u.company.is_active && (aiThis[u.company.id]?.usd || 0) * USD_TO_INR > AI_COST_ALERT_INR).map(u => ({
+              kind: 'ai-cost' as const, usage: u, tone: 'warn' as const, action: 'Review AI use',
+              reason: `AI this month ${inr(aiThis[u.company.id].usd)} · ${aiThis[u.company.id].calls} uses (over ₹${AI_COST_ALERT_INR})`,
+            })),
+          ])
           const live = usage.filter(u => u.company.is_active)
           const paying = live.filter(u => u.status === 'paid' && (u.daysLeft == null || u.daysLeft > 0)).length
           const trials = live.filter(u => u.status === 'trial' && (u.daysLeft == null || u.daysLeft > 0)).length
@@ -655,6 +693,36 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
               </div>
 
               <div>
+                <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Running costs this month</h2>
+                {!costs ? (
+                  <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-sm text-gray-500">{costsError || 'Loading costs…'}</div>
+                ) : (
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">AI</p>
+                      {!costs.aiReady ? (
+                        <p className="text-sm text-amber-300 mt-1">Not recording yet: run the SQL in db/2026-10-25-ai-usage.md</p>
+                      ) : (
+                        <>
+                          <p className="mt-1"><span className="text-2xl font-bold text-white">{inr(aiTotal.usd)}</span> <span className="text-xs text-gray-500">{aiTotal.calls} uses · ${aiTotal.usd.toFixed(2)} · last month {inr(aiLastUsd)}</span></p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {Object.entries(aiByFeature).length === 0 ? 'No AI use yet this month.' : Object.entries(aiByFeature)
+                              .sort((a, b) => b[1].usd - a[1].usd)
+                              .map(([f, v]) => `${AI_FEATURES[f] || f} ${inr(v.usd)} (${v.calls})`).join(' · ')}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                    <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">Data stored (estimate)</p>
+                      <p className="mt-1"><span className="text-2xl font-bold text-white">≈ {mb(storageBytes)}</span> <span className="text-xs text-gray-500">of 8 GB included in the Supabase plan</span></p>
+                      <p className="text-xs text-gray-500 mt-1">₹0 extra per gym until the 8 GB is used. No files are stored yet (logos are links).</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
                 <div className="flex items-baseline justify-between gap-3 mb-3">
                   <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Companies</h2>
                   <p className="text-[11px] text-gray-500">
@@ -686,6 +754,12 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               {u.membersAdded30} added · {u.renewals30} renewed · {planRows ? `${u.plans30} plans` : '… plans'}
                               <span className={h.text}> · {u.lastWorkDays == null ? 'no activity yet' : u.lastWorkDays === 0 ? 'active today' : `last ${u.lastWorkDays}d ago`}</span>
                             </span>
+                            {costs && (
+                              <span className="block text-[11px] text-gray-500 mt-0.5">
+                                {costs.aiReady ? <>AI {inr(aiThis[u.company.id]?.usd || 0)} this month ({aiThis[u.company.id]?.calls || 0})</> : 'AI not recording yet'}
+                                {' · '}data ≈ {mb(costs.storage[u.company.id]?.bytes || 0)}
+                              </span>
+                            )}
                           </span>
                         </button>
                       )

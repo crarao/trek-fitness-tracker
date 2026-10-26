@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
 import { normalizePlan, planToText, workoutDays } from '@/lib/plan-structure'
+import { recordAiUsage } from '@/lib/ai-usage'
 
 export const maxDuration = 60
 
@@ -107,6 +108,12 @@ Plain words only, no markdown symbols.`
       tools: [PLAN_TOOL],
       tool_choice: { type: 'tool', name: 'weekly_plan' },
       messages: [{ role: 'user', content: prompt }]
+    })
+
+    // Cost of this call, per gym, for the super admin Dashboard (the client's gym)
+    await recordAiUsage({
+      companyId: caller.role === 'super_admin' ? profile?.company_id : caller.companyId,
+      userId: caller.userId, feature: 'plan', model: message.model, usage: message.usage,
     })
 
     // The plan comes back as structured days; the text copy is built from it
