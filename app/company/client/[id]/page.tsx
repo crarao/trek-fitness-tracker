@@ -70,6 +70,7 @@ type Session = {
   plan_day?: string | null   // set when the client logged it from a day of the plan
   exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
   activity?: string | null   // what was done, from the client's Log tab ("run", "sport:Badminton")
+  logged_by?: string | null  // staff member who logged it for the client; null = the client logged it
 }
 
 type Feedback = {
@@ -100,6 +101,8 @@ export default function ClientDetailPage() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
+  // Names of the staff who logged sessions for this client (logged_by → profiles.full_name)
+  const [staffNames, setStaffNames] = useState<Record<string, string>>({})
   const [activeTab, setActiveTab] = useState<'plans' | 'sessions' | 'progress' | 'profile'>('profile')
   const [showPlanForm, setShowPlanForm] = useState(false)
   const [newPlan, setNewPlan] = useState({ week_start: '', plan_details: '', workout_time: '' })
@@ -284,6 +287,13 @@ export default function ClientDetailPage() {
   type Part = 'client' | 'memberships' | 'plans' | 'sessions'
   const loadData = async (parts: Part[] = ['client', 'memberships', 'plans', 'sessions']) => {
     const want = (p: Part) => parts.includes(p)
+    // One small query for the names of everyone who logged a session for the client (not one per session)
+    const loadStaffNames = async (rows: Session[]) => {
+      const ids = [...new Set(rows.map(r => r.logged_by).filter((x): x is string => !!x && x !== clientId))]
+      if (!ids.length) { setStaffNames({}); return }
+      const { data } = await supabase.from('profiles').select('id, full_name').in('id', ids)
+      setStaffNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name || ''])))
+    }
     await Promise.all([
       want('client') && (async () => {
         const { data: clientData } = await supabase
@@ -322,6 +332,7 @@ export default function ClientDetailPage() {
           const rows = (joined.data || []) as (Session & { session_feedback?: Feedback[] | null })[]
           setSessions(rows.map(r => { const copy = { ...r }; delete copy.session_feedback; return copy as Session }))
           setFeedback(rows.flatMap(r => r.session_feedback || []))
+          await loadStaffNames(rows)
           return
         }
         const { data: sessionsData } = await supabase
@@ -330,6 +341,7 @@ export default function ClientDetailPage() {
           .eq('client_id', clientId)
           .order('session_date', { ascending: true })
         setSessions(sessionsData || [])
+        await loadStaffNames(sessionsData || [])
         const sessionIds = sessionsData?.map(s => s.id) || []
         if (sessionIds.length) {
           const { data: feedbackData } = await supabase
@@ -347,6 +359,21 @@ export default function ClientDetailPage() {
   const initialize = () => loadData()
 
   const clientFirstName = (client?.full_name || '').trim().split(/\s+/)[0] || 'client'
+  // "by Coach Priya" when staff logged it for the client, "by client" when the client logged it
+  const loggedByText = (s: Session) => {
+    if (!s.logged_by || s.logged_by === clientId) return 'by client'
+    const first = (staffNames[s.logged_by] || '').trim().split(/\s+/)[0]
+    return first ? `by Coach ${first}` : 'by coach'
+  }
+  // Done-day notes on plan cards ("45 min · ~265 kcal") plus who logged the day's latest session
+  const doneNotesWithWho = (planId: string) => {
+    const notes = doneDayNotes(planId, sessions, sessionKcal)
+    for (const day of Object.keys(notes)) {
+      const latest = sessions.filter(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day).pop()
+      if (latest) notes[day] = [notes[day], loggedByText(latest)].filter(Boolean).join(' · ')
+    }
+    return notes
+  }
   const openMarkForm = (key: string) => {
     setMarkError('')
     setMarkAgainKey(null)
@@ -1621,7 +1648,7 @@ const handleResetPassword = async () => {
         {open && (
           <div className="border-t border-gray-800 pt-3 mt-3">
             {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneDayNotes(plan.id, sessions, sessionKcal)} compact
+              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneNotesWithWho(plan.id)} compact
                   ticks={Object.fromEntries(planJson.days.map(d => {
                     // What was ticked on that day (latest session for the day); this week's days not yet done show the coach's ticks
                     const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
@@ -1674,6 +1701,7 @@ const handleResetPassword = async () => {
                       <div>
                         <p className="text-sm font-medium text-white">
                           {formatDate(session.session_date, country, 'weekday')}
+                          <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>

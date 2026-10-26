@@ -35,6 +35,7 @@ type Session = {
   plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
   exercises_done?: unknown   // { done: [names], total } when exercises were ticked (needs the column)
   activity?: string | null   // what was done, from the Log tab ("run", "sport:Badminton")
+  logged_by?: string | null  // set when the coach logged it for the client (gym PT); null = logged here
 }
 
 type Feedback = {
@@ -430,6 +431,7 @@ const handleChangePassword = async () => {
   const weekStartIso = thisWeekMonday()
   const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
+  const byCoach = (s: Session) => !!s.logged_by && s.logged_by !== profile?.id
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -627,7 +629,7 @@ const handleChangePassword = async () => {
                                   const fb = getFeedback(s.id)
                                   return (
                                     <div key={s.id} className="text-xs text-gray-300 space-y-1">
-                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}</p>
+                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}{byCoach(s) ? ' · Logged by your coach' : ''}</p>
                                       {s.notes && <p className="text-gray-400 bg-gray-900 rounded-lg px-3 py-2">{s.notes}</p>}
                                       {fb?.admin_feedback && (
                                         <p className="text-orange-200 bg-orange-950/60 border border-orange-900 rounded-lg px-3 py-2">💬 Coach: {fb.admin_feedback}</p>
@@ -864,6 +866,9 @@ const handleChangePassword = async () => {
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
+                        )}
+                        {byCoach(session) && (
+                          <p className="text-xs text-gray-400 mt-1">Logged by your coach</p>
                         )}
                       </div>
                       {fb?.star_rating && (
