@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
 import { normalizePlan, planToText, workoutDays } from '@/lib/plan-structure'
 import { recordAiUsage } from '@/lib/ai-usage'
@@ -68,6 +69,21 @@ export async function POST(request: Request) {
     // Staff can only generate for clients in their own gym
     if (caller.role !== 'super_admin' && profile?.company_id && profile.company_id !== caller.companyId) {
       return forbidden()
+    }
+
+    // Turned off for this company by the super admin (absent before the column exists = allowed).
+    // The company comes from the caller (or the client's row for super admin), not from the request.
+    const companyId = caller.role === 'super_admin' ? profile?.company_id : caller.companyId
+    if (companyId) {
+      const admin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SECRET_KEY!,
+        { auth: { autoRefreshToken: false, persistSession: false } }
+      )
+      const { data: company } = await admin.from('companies').select('*').eq('id', companyId).single()
+      if ((company as { ai_plans_enabled?: boolean | null } | null)?.ai_plans_enabled === false) {
+        return NextResponse.json({ error: 'AI plans are turned off for this gym. You can still write or edit plans by hand.' }, { status: 403 })
+      }
     }
 
     const businessType = profile.business_type || 'gym'
