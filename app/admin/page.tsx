@@ -97,6 +97,8 @@ export default function AdminPage() {
   const [clientSearch, setClientSearch] = useState('')
   const [clientFilter, setClientFilter] = useState<'all' | 'pt' | 'expired'>('all')
   const [showTestClients, setShowTestClients] = useState(false)
+  // Dashboard: include test companies (for trying features, e.g. checking AI cost recording)
+  const [dashIncludeTest, setDashIncludeTest] = useState(false)
   const [collapsedCompanies, setCollapsedCompanies] = useState<Set<string>>(new Set())
   const [requests, setRequests] = useState<ContactRequest[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -626,7 +628,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         {/* DASHBOARD TAB — real (non-test) companies: are they using it, and what to do next */}
         {activeTab === 'dashboard' && (() => {
           if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
-          const real = companies.filter(c => !c.is_test)
+          const real = companies.filter(c => dashIncludeTest || !c.is_test)
           const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || []))
           // AI cost this calendar month and last, per gym (USD; shown in ₹ at a fixed rate)
           const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
@@ -634,7 +636,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           const aiByFeature: Record<string, { usd: number; calls: number }> = {}
           let aiLastUsd = 0
           for (const r of costs?.ai || []) {
-            if (!r.company_id || companies.find(c => c.id === r.company_id)?.is_test) continue
+            if (!r.company_id || (!dashIncludeTest && companies.find(c => c.id === r.company_id)?.is_test)) continue
             if (r.created_at >= monthStart) {
               const a = (aiThis[r.company_id] ??= { usd: 0, calls: 0 }); a.usd += Number(r.cost_usd); a.calls += 1
               const f = (aiByFeature[r.feature] ??= { usd: 0, calls: 0 }); f.usd += Number(r.cost_usd); f.calls += 1
@@ -655,11 +657,17 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           const paying = live.filter(u => u.status === 'paid' && (u.daysLeft == null || u.daysLeft > 0)).length
           const trials = live.filter(u => u.status === 'trial' && (u.daysLeft == null || u.daysLeft > 0)).length
           const members = usage.reduce((n, u) => n + u.members, 0)
-          const testCount = companies.length - real.length
+          const testCount = companies.filter(c => c.is_test).length
           const toneCls = { good: 'border-green-800 bg-green-950/30', warn: 'border-amber-800 bg-amber-950/20', bad: 'border-red-900 bg-red-950/30' }
           const actionCls = { good: 'bg-green-600 text-white', warn: 'bg-amber-500 text-gray-950', bad: 'bg-red-600 text-white' }
           return (
             <div className="space-y-6">
+              {testCount > 0 && (
+                <label className={`flex items-center gap-2 text-xs w-fit px-3 py-1.5 rounded-lg border ${dashIncludeTest ? 'border-amber-700 bg-amber-950/40 text-amber-200' : 'border-gray-800 text-gray-400'}`}>
+                  <input type="checkbox" checked={dashIncludeTest} onChange={e => setDashIncludeTest(e.target.checked)} className="accent-orange-500" />
+                  Include test accounts ({testCount}){dashIncludeTest ? ': numbers below include them' : ''}
+                </label>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   { label: 'Paying gyms', value: paying, cls: 'text-green-400' },
@@ -685,7 +693,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         className={`w-full text-left rounded-2xl border px-4 py-3 flex items-center gap-3 ${toneCls[a.tone]}`}>
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${HEALTH_STYLE[a.usage.health].dot}`} title={HEALTH_STYLE[a.usage.health].label} />
                         <span className="flex-1 min-w-0">
-                          <span className="block text-sm font-medium text-white truncate">{a.usage.company.name}</span>
+                          <span className="block text-sm font-medium text-white truncate">{a.usage.company.name}{a.usage.company.is_test && <span className="ml-1.5 text-[9px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1 py-0.5 rounded align-middle">TEST</span>}</span>
                           <span className="block text-xs text-gray-400">{a.reason}</span>
                         </span>
                         <span className={`shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg ${actionCls[a.tone]}`}>{a.action}</span>
@@ -748,7 +756,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${h.dot}`} />
                           <span className="flex-1 min-w-0">
                             <span className="flex items-baseline justify-between gap-2">
-                              <span className="text-sm font-medium text-white truncate">{u.company.name}</span>
+                              <span className="text-sm font-medium text-white truncate">{u.company.name}{u.company.is_test && <span className="ml-1.5 text-[9px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1 py-0.5 rounded align-middle">TEST</span>}</span>
                               <span className={`text-[11px] shrink-0 ${u.daysLeft != null && u.daysLeft <= 0 ? 'text-red-400' : u.status === 'trial' ? 'text-blue-300' : 'text-gray-400'}`}>{plan}</span>
                             </span>
                             <span className="block text-xs text-gray-500 mt-0.5">
@@ -771,7 +779,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                 )}
                 <p className="text-[11px] text-gray-500 mt-2">
                   Activity = members added, memberships recorded and plans assigned by the gym&apos;s staff.
-                  {testCount > 0 ? ` ${testCount} test ${testCount === 1 ? 'company is' : 'companies are'} left out.` : ' Mark test companies in their edit panel to leave them out.'}
+                  {testCount > 0 ? (dashIncludeTest ? ` Including ${testCount} test ${testCount === 1 ? 'company' : 'companies'}.` : ` ${testCount} test ${testCount === 1 ? 'company is' : 'companies are'} left out.`) : ' Mark test companies in their edit panel to leave them out.'}
                   {planLoadError ? ` ${planLoadError}.` : ''}
                 </p>
               </div>
