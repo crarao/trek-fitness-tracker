@@ -9,6 +9,7 @@ import { localToday } from '@/lib/plan-summary'
 //  - 'log': Log tab, for anything (asks "What did you do?" and which plan week it belongs to)
 //  - 'day': Done ✓ on a day of this week's plan (the day says what was done)
 // Same fields, order and buttons in both: Minutes · Date · How did it feel · Notes · save.
+// The coach's "Mark done for <client>" on a plan day uses 'day' mode too (app/company/client/[id]).
 
 export type SessionDraft = {
   session_date: string
@@ -37,7 +38,7 @@ const inputCls = 'w-full min-w-0 bg-gray-800 text-white rounded-xl px-3 py-2.5 o
 const labelCls = 'text-[11px] text-gray-500 uppercase tracking-wider block mb-1.5'
 
 export default function SessionForm({
-  mode, value, onChange, heading, idPrefix, country, notesEnabled, plans = [],
+  mode, value, onChange, heading, idPrefix, country, notesEnabled, notesLabel = 'Notes for your coach (optional)', plans = [],
   error, saving, submitLabel, onSubmit, onCancel,
 }: {
   mode: 'log' | 'day'
@@ -47,6 +48,7 @@ export default function SessionForm({
   idPrefix: string
   country: Country | null
   notesEnabled: boolean
+  notesLabel?: string   // the coach logging for a client sees "Notes (optional)"
   plans?: { id: string; week_start: string }[]
   error?: string
   saving: boolean
@@ -116,7 +118,7 @@ export default function SessionForm({
 
       {notesEnabled && (
         <div>
-          <label htmlFor={`${idPrefix}-notes`} className={labelCls}>Notes for your coach (optional)</label>
+          <label htmlFor={`${idPrefix}-notes`} className={labelCls}>{notesLabel}</label>
           <textarea id={`${idPrefix}-notes`} rows={2} placeholder="How did it go? Anything to share…"
             value={value.notes} onChange={e => set({ notes: e.target.value })}
             className={inputCls + ' resize-none'} />
