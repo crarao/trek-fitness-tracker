@@ -871,7 +871,7 @@ const handleChangePassword = async () => {
             {profile?.weight_kg ? (
               <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wider">Calories this week</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Calories since Mon</p>
                   <p className="text-[11px] text-gray-600 mt-0.5">Estimate from workout type, minutes and your weight</p>
                 </div>
                 <p className="text-2xl font-bold text-orange-500 shrink-0">{kcalText(weekKcal) || '~0 kcal'}</p>
