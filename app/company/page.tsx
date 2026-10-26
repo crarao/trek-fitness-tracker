@@ -1165,19 +1165,11 @@ export default function CompanyAdminPage() {
                                   const a = weekAdherence[client.id]
                                   if (!a) return null
                                   if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  // "Mark today" lives on the Training card (#44), not on each row
                                   return (
-                                    <>
-                                      <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
-                                        {' '}· {a.done}/{a.planned} this wk
-                                      </span>
-                                      {' '}
-                                      {/* Coach marks today's workout done for the client: opens Plans on today's day */}
-                                      <button type="button"
-                                        onClick={e => { e.stopPropagation(); openClient(client.id, '?tab=plans&day=today') }}
-                                        className="whitespace-nowrap text-[11px] font-medium text-green-300 border border-green-800 hover:border-green-500 px-1.5 py-0.5 rounded-md ml-1">
-                                        Mark today
-                                      </button>
-                                    </>
+                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                      {' '}· {a.done}/{a.planned} this wk
+                                    </span>
                                   )
                                 })()}
                               </p>
