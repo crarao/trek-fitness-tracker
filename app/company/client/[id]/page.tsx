@@ -1309,7 +1309,8 @@ const handleResetPassword = async () => {
     !client?.fitness_level && 'fitness level',
     !client?.available_days && 'available days',
   ].filter(Boolean) as string[]
-  if (!missing.length) return null
+  // Only about AI plans: nothing to say when they're turned off for this company
+  if (!missing.length || (client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled === false) return null
   return (
     <div className="bg-yellow-950/60 border border-yellow-800 rounded-2xl px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-2">
       <p className="text-xs text-yellow-300">
@@ -1326,12 +1327,15 @@ const handleResetPassword = async () => {
               <div className="flex flex-wrap justify-between items-center gap-2">
                 <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
                 <div className="flex flex-wrap gap-2">
+  {/* AI plans can be turned off per company by the super admin (companies.ai_plans_enabled) */}
+  {(client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
   <button
     onClick={handleGeneratePlan}
     disabled={generatingPlan}
     className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
     {generatingPlan ? '⏳ Creating…' : '✨ Create plan with AI'}
   </button>
+  )}
   <button onClick={() => {
       setPlanError('')
       setAiError('')
