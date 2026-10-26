@@ -86,7 +86,7 @@ Output nothing else.`
       messages: [{ role: 'user', content: prompt }],
     })
 
-    await recordAiUsage({ companyId: p.company_id, userId: caller.userId, feature: 'diet', model: message.model, usage: message.usage })
+    await recordAiUsage({ companyId: p.company_id, userId: caller.userId, clientId, feature: 'diet', model: message.model, usage: message.usage })
 
     const diet = message.content[0].type === 'text' ? message.content[0].text.trim() : null
     if (!diet) return NextResponse.json({ error: 'The AI returned an empty diet chart' }, { status: 502 })

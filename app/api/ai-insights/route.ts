@@ -54,7 +54,7 @@ Be warm, specific and motivating.`
       }]
     })
 
-    await recordAiUsage({ companyId: caller.companyId, userId: caller.userId, feature: 'insights', model: message.model, usage: message.usage })
+    await recordAiUsage({ companyId: caller.companyId, userId: caller.userId, clientId: caller.role === 'client' ? caller.userId : null, feature: 'insights', model: message.model, usage: message.usage })
 
     const insight = message.content[0].type === 'text' ? message.content[0].text : null
     return NextResponse.json({ insight })

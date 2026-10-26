@@ -7,7 +7,8 @@ export type AiFeature = 'plan' | 'diet' | 'insights'
 
 export async function recordAiUsage(opts: {
   companyId: string | null | undefined
-  userId: string | null | undefined
+  userId: string | null | undefined   // who asked (coach, or the client for insights)
+  clientId?: string | null            // the member it was for (column added later; skipped if missing)
   feature: AiFeature
   model: string
   usage: { input_tokens?: number | null; output_tokens?: number | null } | null | undefined
@@ -20,15 +21,22 @@ export async function recordAiUsage(opts: {
       process.env.SUPABASE_SECRET_KEY!,
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
-    const { error } = await admin.from('ai_usage').insert({
+    const row: Record<string, unknown> = {
       company_id: opts.companyId || null,
       user_id: opts.userId || null,
+      client_id: opts.clientId || null,
       feature: opts.feature,
       model: opts.model,
       input_tokens: input,
       output_tokens: output,
       cost_usd: aiCostUsd(opts.model, input, output),
-    })
+    }
+    let { error } = await admin.from('ai_usage').insert(row)
+    // Before the client_id column exists: record without it
+    if (error && /client_id/i.test(error.message)) {
+      delete row.client_id
+      ;({ error } = await admin.from('ai_usage').insert(row))
+    }
     // Before the ai_usage table exists this fails quietly; the AI feature itself is unaffected
     if (error) console.warn('AI usage not recorded:', error.message)
   } catch (e) {
