@@ -13,7 +13,7 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
-import { buildProgressMessage, buildSessionMessage, maskPhone, type ShareClient } from '@/lib/progress-share'
+import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, weeklyTotals, type ShareClient } from '@/lib/progress-share'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -234,6 +234,7 @@ export default function ClientDetailPage() {
   const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
   const [coachName, setCoachName] = useState('')        // logged-in staff user, for the sign-off
   const sharePanelRef = useRef<HTMLDivElement | null>(null)
+  const [makingPdf, setMakingPdf] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
 
@@ -990,13 +991,17 @@ const handleResetPassword = async () => {
   const company = (client as { companies?: { name?: string | null; business_type?: string | null } } | null)?.companies
   // The week being shared: the plan covering today (or a day a week ago), so "week" means the client's
   // plan week like everywhere else; Monday–Sunday when there's no plan
-  const shareMessage = () => {
+  const shareWeekPlan = () => {
     const ref = new Date()
     if (shareWeek === 'last') ref.setDate(ref.getDate() - 7)
     const refIso = formatIso(ref)
     const plan = plans
       .filter(p => p.week_start.slice(0, 10) <= refIso && formatIso(weekEnd(p.week_start)) >= refIso)
       .sort((a, b) => b.week_start.localeCompare(a.week_start))[0] ?? null
+    return { plan, weekStart: plan ? plan.week_start.slice(0, 10) : shareWeek === 'this' ? weekStartIso : lastWeekStartIso }
+  }
+  const shareMessage = () => {
+    const { plan, weekStart } = shareWeekPlan()
     return buildProgressMessage({
       client: (client || { full_name: '', phone: null }) as ShareClient,
       companyName: company?.name || '',
@@ -1004,10 +1009,31 @@ const handleResetPassword = async () => {
       coachName,
       plan,
       sessions,
-      weekStart: plan ? plan.week_start.slice(0, 10) : shareWeek === 'this' ? weekStartIso : lastWeekStartIso,
+      weekStart,
       note: shareNote,
       country: country ?? 'IN',
     })
+  }
+  // PDF of the week (numbers, the message as edited, charts of the last 8 weeks) to send any way
+  const handleDownloadPdf = async (text: string) => {
+    if (!client) return
+    setMakingPdf(true)
+    try {
+      const { plan, weekStart } = shareWeekPlan()
+      const week = summarizeWeek({ plan, sessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
+      // Last 4 weeks of plans up to this week (same rule as the Progress tab)
+      const four = recentAdherence(plans.filter(p => p.week_start.slice(0, 10) <= weekStart), sessions, 4)
+      const { downloadProgressPdf } = await import('@/lib/progress-pdf')
+      const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
+      await downloadProgressPdf({
+        companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
+        text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8),
+      }, `${safeName}-progress-${weekStart}.pdf`)
+      showToast('✓ PDF downloaded')
+    } catch (e) {
+      showToast('Could not make the PDF: ' + (e instanceof Error ? e.message : 'please try again'), 'error')
+    }
+    setMakingPdf(false)
   }
   const renderShare = () => {
     if (!shareOpen) return (
@@ -1066,6 +1092,10 @@ const handleResetPassword = async () => {
             Copy text
           </button>
         </div>
+        <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
+          className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
+          {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
+        </button>
       </div>
     )
   }

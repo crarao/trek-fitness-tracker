@@ -86,6 +86,62 @@ export function sessionLine(s: ShareSession): string {
   return [label, exText, min].filter(Boolean).join(' · ')
 }
 
+// The numbers for one week (also used by the PDF report, lib/progress-pdf.ts)
+export type WeekSummary = {
+  sessions: ShareSession[]   // inside the week, in date order
+  planned: number            // workout days in the plan (0 = no plan or no readable days)
+  done: number               // planned days done (never more than planned)
+  missed: string[]           // planned weekdays already passed with nothing logged ("Thu")
+  minutes: number
+  kcal: number               // 0 when it can't be estimated (no weight)
+}
+
+export function summarizeWeek(opts: {
+  plan: SharePlan | null
+  sessions: ShareSession[]
+  weekStart: string
+  weightKg?: number | null
+  businessType?: string | null
+  today?: string
+}): WeekSummary {
+  const { plan, weekStart } = opts
+  const today = opts.today ?? localToday()
+  const weekEnd = addDays(weekStart, 6)
+  const sessions = opts.sessions
+    .filter(s => s.session_date >= weekStart && s.session_date <= weekEnd)
+    .sort((a, b) => a.session_date.localeCompare(b.session_date))
+  // Planned workout days, from the plan's days (structured) or its text headings
+  const days = plan ? summarizeAny(plan, plan.week_start).days : []
+  const workoutLabels = days.filter(d => !isRestDay(d))
+  const doneKeys = new Set(sessions.filter(s => s.plan_day).map(s => dayKey(s.plan_day)))
+  const otherDates = new Set(sessions.filter(s => !s.plan_day).map(s => s.session_date))
+  const planned = workoutLabels.length
+  const done = Math.min(planned, workoutLabels.filter(d => doneKeys.has(dayKey(d))).length + otherDates.size)
+  // Missed: planned weekday whose date in this week has passed, with nothing logged for it
+  const missed = workoutLabels.map(dayKey).filter(key => {
+    const idx = WEEKDAY.indexOf(key)
+    if (idx < 0 || doneKeys.has(key)) return false // "Day 1" headings can't be placed on a date
+    const offset = (idx - parseDate(weekStart).getDay() + 7) % 7
+    const date = addDays(weekStart, offset)
+    return date < today && !otherDates.has(date)
+  })
+  const minutes = sessions.reduce((n, s) => n + (s.duration_minutes || 0), 0)
+  const kcal = sessions.reduce((n, s) => n + (estimateKcal({
+    minutes: s.duration_minutes, weightKg: opts.weightKg, label: s.plan_day, activity: s.activity, businessType: opts.businessType,
+  }) || 0), 0)
+  return { sessions, planned, done, missed, minutes, kcal }
+}
+
+// Sessions and minutes per 7-day block, oldest first, the last block starting on weekStart
+export function weeklyTotals(sessions: ShareSession[], weekStart: string, weeks = 8) {
+  return Array.from({ length: weeks }, (_, i) => {
+    const start = addDays(weekStart, -7 * (weeks - 1 - i))
+    const end = addDays(start, 6)
+    const inWeek = sessions.filter(s => s.session_date >= start && s.session_date <= end)
+    return { start, sessions: inWeek.length, minutes: inWeek.reduce((n, s) => n + (s.duration_minutes || 0), 0) }
+  })
+}
+
 const signOff = (coachName: string | null | undefined, companyName: string) =>
   `— ${[firstName(coachName), companyName].filter(Boolean).join(', ')}`
 
@@ -104,12 +160,10 @@ export function buildProgressMessage(opts: {
   const { client, companyName, businessType, coachName, plan, weekStart } = opts
   const country = opts.country ?? 'IN'
   const today = opts.today ?? localToday()
-  const weekEnd = addDays(weekStart, 6)
-  const sessions = opts.sessions
-    .filter(s => s.session_date >= weekStart && s.session_date <= weekEnd)
-    .sort((a, b) => a.session_date.localeCompare(b.session_date))
+  const week = summarizeWeek({ plan, sessions: opts.sessions, weekStart, weightKg: client.weight_kg, businessType, today })
+  const { sessions, planned, done, missed, minutes, kcal } = week
   const to = recipient(client, country)
-  const isCurrent = today >= weekStart && today <= weekEnd
+  const isCurrent = today >= weekStart && today <= addDays(weekStart, 6)
   const out: string[] = []
 
   out.push(to.guardian
@@ -121,14 +175,7 @@ export function buildProgressMessage(opts: {
     const emoji = businessType === 'martial_arts' ? '🥋' : '💪'
     out.push('', `No sessions logged ${isCurrent ? 'this' : 'that'} week. Let's get back on track ${emoji}`)
   } else {
-    // Planned workout days, from the plan's days (structured) or its text headings
-    const days = plan ? summarizeAny(plan, plan.week_start).days : []
-    const workoutLabels = days.filter(d => !isRestDay(d))
-    const doneKeys = new Set(sessions.filter(s => s.plan_day).map(s => dayKey(s.plan_day)))
-    const otherDates = new Set(sessions.filter(s => !s.plan_day).map(s => s.session_date))
-    const planned = workoutLabels.length
     if (planned) {
-      const done = Math.min(planned, workoutLabels.filter(d => doneKeys.has(dayKey(d))).length + otherDates.size)
       out.push('', `✅ ${done} of ${planned} sessions done`)
     } else {
       out.push('', `✅ ${sessions.length} session${sessions.length === 1 ? '' : 's'} logged`)
@@ -138,20 +185,8 @@ export function buildProgressMessage(opts: {
     out.push(...lines.slice(0, MAX_LINES))
     if (lines.length > MAX_LINES) out.push(`+${lines.length - MAX_LINES} more`)
 
-    // Missed: planned weekday whose date in this week has passed, with nothing logged for it
-    const missed = workoutLabels.map(dayKey).filter(key => {
-      const idx = WEEKDAY.indexOf(key)
-      if (idx < 0 || doneKeys.has(key)) return false // "Day 1" headings can't be placed on a date
-      const offset = (idx - parseDate(weekStart).getDay() + 7) % 7
-      const date = addDays(weekStart, offset)
-      return date < today && !otherDates.has(date)
-    })
     if (missed.length) out.push(`Missed: ${missed.join(', ')}`)
 
-    const minutes = sessions.reduce((n, s) => n + (s.duration_minutes || 0), 0)
-    const kcal = sessions.reduce((n, s) => n + (estimateKcal({
-      minutes: s.duration_minutes, weightKg: client.weight_kg, label: s.plan_day, activity: s.activity, businessType,
-    }) || 0), 0)
     const totals = [minutes ? `⏱ ${minutes} min` : '', kcal ? `🔥 about ${kcal.toLocaleString('en-US')} kcal (estimate)` : ''].filter(Boolean)
     if (totals.length) out.push('', totals.join(' · '))
   }
