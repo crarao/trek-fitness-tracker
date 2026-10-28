@@ -972,8 +972,8 @@ const handleResetPassword = async () => {
 
   // ---- Share progress on WhatsApp ----
   const company = (client as { companies?: { name?: string | null; business_type?: string | null } } | null)?.companies
-  // The week being shared: the plan covering today (or a day a week ago), so "week" means the client's
-  // plan week like everywhere else; Monday–Sunday when there's no plan
+  // The week being shared is always Monday–Sunday, like the Progress charts and "Calories since Mon"
+  // (decided 28 Oct). Days done of the plan come from the plan covering today (or a day a week ago).
   const shareWeekPlan = () => {
     const ref = new Date()
     if (shareWeek === 'last') ref.setDate(ref.getDate() - 7)
@@ -981,7 +981,7 @@ const handleResetPassword = async () => {
     const plan = plans
       .filter(p => p.week_start.slice(0, 10) <= refIso && formatIso(weekEnd(p.week_start)) >= refIso)
       .sort((a, b) => b.week_start.localeCompare(a.week_start))[0] ?? null
-    return { plan, weekStart: plan ? plan.week_start.slice(0, 10) : shareWeek === 'this' ? weekStartIso : lastWeekStartIso }
+    return { plan, weekStart: shareWeek === 'this' ? weekStartIso : lastWeekStartIso }
   }
   const shareMessage = () => {
     const { plan, weekStart } = shareWeekPlan()
@@ -1005,12 +1005,12 @@ const handleResetPassword = async () => {
       const { plan, weekStart } = shareWeekPlan()
       const week = summarizeWeek({ plan, sessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
       // Last 4 weeks of plans up to this week (same rule as the Progress tab)
-      const four = recentAdherence(plans.filter(p => p.week_start.slice(0, 10) <= weekStart), sessions, 4)
+      const four = recentAdherence(plans.filter(p => p.week_start.slice(0, 10) <= formatIso(weekEnd(weekStart))), sessions, 4)
       const { downloadProgressPdf } = await import('@/lib/progress-pdf')
       const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
-        text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab when sharing this week
+        text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab
       }, `${safeName}-progress-${weekStart}.pdf`)
       showToast('✓ PDF downloaded')
     } catch (e) {
