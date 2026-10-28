@@ -13,7 +13,7 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
-import { buildProgressMessage, maskPhone, type ShareClient } from '@/lib/progress-share'
+import { buildProgressMessage, buildSessionMessage, maskPhone, type ShareClient } from '@/lib/progress-share'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -224,6 +224,8 @@ export default function ClientDetailPage() {
   const [markForm, setMarkForm] = useState<SessionDraft>(coachDraft)
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
+  // The session the coach just marked done ("planId:Mon" key), for "Send to <client> on WhatsApp"
+  const [lastMarked, setLastMarked] = useState<{ key: string; session: Session } | null>(null)
   // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
   const [shareOpen, setShareOpen] = useState(false)
   const [shareWeek, setShareWeek] = useState<'this' | 'last'>(() => ([1, 2].includes(new Date().getDay()) ? 'last' : 'this'))
@@ -473,6 +475,7 @@ export default function ClientDetailPage() {
     closeMarkForm()
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
+    setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
     showToast(`✓ ${day ? day.day : 'Session'} done for ${clientFirstName}`)
     loadData(['sessions'])
   }
@@ -1679,6 +1682,32 @@ const handleResetPassword = async () => {
           const key = `${plan.id}:${day?.day ?? ''}`
           const isDone = !!day && done.has(day.day)
           const n = day ? (coachTicks[key] || []).length : 0
+          // Right after Mark done: the confirmation with a one-session WhatsApp message
+          const sent = lastMarked?.key === key ? (() => {
+            const msg = buildSessionMessage({
+              client: client as ShareClient, companyName: company?.name || '', businessType: company?.business_type,
+              coachName, session: lastMarked.session, country: country ?? 'IN',
+            })
+            const to = (msg.toLabel.match(/\(([^)]*)\)/)?.[1] || msg.toLabel).trim().split(/\s+/)[0]
+            return (
+              <div className="bg-green-950/40 border border-green-800 rounded-xl px-3 py-2.5 mb-3 space-y-2">
+                <div className="flex justify-between items-start gap-2">
+                  <p className="text-xs font-semibold text-green-400">✓ {day ? day.day : 'Session'} done for {clientFirstName}</p>
+                  <button type="button" onClick={() => setLastMarked(null)} aria-label="Dismiss"
+                    className="text-gray-500 hover:text-white text-sm leading-none">✕</button>
+                </div>
+                {msg.toPhone ? (
+                  <button type="button"
+                    onClick={() => window.open(`https://wa.me/${msg.toPhone}?text=${encodeURIComponent(msg.text)}`, '_blank')}
+                    className="w-full bg-green-600 hover:bg-green-500 text-white text-sm font-medium py-2 rounded-lg transition">
+                    Send to {to} on WhatsApp
+                  </button>
+                ) : (
+                  <p className="text-xs text-gray-500">No phone number on profile to send on WhatsApp</p>
+                )}
+              </div>
+            )
+          })() : null
           if (markKey === key) return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
               <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
@@ -1709,12 +1738,14 @@ const handleResetPassword = async () => {
           )
           if (isDone) return (
             <div className="border-t border-gray-800 pt-3">
+              {sent}
               <button type="button" onClick={() => { setMarkError(''); setMarkAgainKey(key) }}
                 className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Log another session for {day!.day}</button>
             </div>
           )
           return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
+              {sent}
               <button type="button" onClick={() => openMarkForm(key)}
                 className="w-full bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm">
                 Mark done for {clientFirstName}
