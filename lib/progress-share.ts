@@ -89,7 +89,7 @@ export function sessionLine(s: ShareSession): string {
 
 // The numbers for one week (also used by the PDF report, lib/progress-pdf.ts)
 export type WeekSummary = {
-  sessions: ShareSession[]   // inside the week, in date order
+  sessions: ShareSession[]   // inside the week, in date order (empty sessions left out)
   planned: number            // workout days in the plan (0 = no plan or no readable days)
   done: number               // planned days done (never more than planned)
   missed: string[]           // planned weekdays already passed with nothing logged ("Thu")
@@ -108,8 +108,10 @@ export function summarizeWeek(opts: {
   const { plan, weekStart } = opts
   const today = opts.today ?? localToday()
   const weekEnd = addDays(weekStart, 6)
+  // Listed sessions leave out empty ones (no minutes and no plan day): they'd show as a bare "Tue"
   const sessions = opts.sessions
     .filter(s => s.session_date >= weekStart && s.session_date <= weekEnd)
+    .filter(s => (s.duration_minutes && s.duration_minutes > 0) || s.plan_day)
     .sort((a, b) => a.session_date.localeCompare(b.session_date))
   // Days done and missed use the app's rules, so the numbers match the Progress tab
   // ("Plan this week") and the owner's Training card: only sessions saved against the plan count
