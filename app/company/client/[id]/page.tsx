@@ -13,6 +13,7 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
+import { buildProgressMessage, maskPhone, type ShareClient } from '@/lib/progress-share'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -91,6 +92,9 @@ function elapsedPct(startDate: string, endDate: string): number {
   const elapsed = Date.now() - new Date(startDate).getTime()
   return Math.min(Math.max((elapsed / total) * 100, 0), 100)
 }
+
+// Local date as YYYY-MM-DD
+const formatIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 export default function ClientDetailPage() {
   const router = useRouter()
@@ -220,8 +224,30 @@ export default function ClientDetailPage() {
   const [markForm, setMarkForm] = useState<SessionDraft>(coachDraft)
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
+  // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareWeek, setShareWeek] = useState<'this' | 'last'>(() => ([1, 2].includes(new Date().getDay()) ? 'last' : 'this'))
+  const [shareNote, setShareNote] = useState('')
+  const [shareText, setShareText] = useState('')
+  const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
+  const [coachName, setCoachName] = useState('')        // logged-in staff user, for the sign-off
+  const sharePanelRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Logged-in staff member's name, for the WhatsApp sign-off
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+      setCoachName(data?.full_name || '')
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (shareOpen) sharePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [shareOpen])
 
   // Apply the link once the client and plans have loaded
   useEffect(() => {
@@ -956,6 +982,90 @@ const handleResetPassword = async () => {
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
   const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
+
+  // ---- Share progress on WhatsApp ----
+  const company = (client as { companies?: { name?: string | null; business_type?: string | null } } | null)?.companies
+  // The week being shared: the plan covering today (or a day a week ago), so "week" means the client's
+  // plan week like everywhere else; Monday–Sunday when there's no plan
+  const shareMessage = () => {
+    const ref = new Date()
+    if (shareWeek === 'last') ref.setDate(ref.getDate() - 7)
+    const refIso = formatIso(ref)
+    const plan = plans
+      .filter(p => p.week_start.slice(0, 10) <= refIso && formatIso(weekEnd(p.week_start)) >= refIso)
+      .sort((a, b) => b.week_start.localeCompare(a.week_start))[0] ?? null
+    return buildProgressMessage({
+      client: (client || { full_name: '', phone: null }) as ShareClient,
+      companyName: company?.name || '',
+      businessType: company?.business_type,
+      coachName,
+      plan,
+      sessions,
+      weekStart: plan ? plan.week_start.slice(0, 10) : shareWeek === 'this' ? weekStartIso : lastWeekStartIso,
+      note: shareNote,
+      country: country ?? 'IN',
+    })
+  }
+  const renderShare = () => {
+    if (!shareOpen) return (
+      <button type="button" onClick={() => setShareOpen(true)}
+        className="w-full bg-green-700 hover:bg-green-600 text-white text-sm font-medium py-2.5 rounded-xl transition">
+        📤 Share progress
+      </button>
+    )
+    const msg = shareMessage()
+    const text = shareEdited ? shareText : msg.text
+    return (
+      <div ref={sharePanelRef} className="bg-gray-900 rounded-2xl p-4 border border-green-800 space-y-3 scroll-mt-4">
+        <div className="flex justify-between items-center">
+          <p className="text-sm font-semibold text-white">📤 Share progress on WhatsApp</p>
+          <button type="button" onClick={() => setShareOpen(false)} aria-label="Close"
+            className="text-gray-500 hover:text-white text-lg leading-none px-1">✕</button>
+        </div>
+        <div className="flex gap-1 bg-gray-800 p-1 rounded-xl">
+          {(['this', 'last'] as const).map(w => (
+            <button key={w} type="button" onClick={() => setShareWeek(w)}
+              className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${shareWeek === w ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              {w === 'this' ? 'This week' : 'Last week'}
+            </button>
+          ))}
+        </div>
+        <textarea value={shareNote} onChange={e => setShareNote(e.target.value)} rows={2} maxLength={300}
+          placeholder="Add a note (optional)"
+          className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm resize-none" />
+        <div>
+          <div className="flex justify-between items-center mb-1">
+            <label htmlFor="share-preview" className="text-xs text-gray-500 uppercase tracking-wider">Message</label>
+            {shareEdited && (
+              <button type="button" onClick={() => setShareEdited(false)}
+                className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Reset text</button>
+            )}
+          </div>
+          <textarea id="share-preview" value={text} rows={12}
+            onChange={e => { setShareText(e.target.value); setShareEdited(true) }}
+            className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm" />
+        </div>
+        <p className="text-xs text-gray-400">
+          {msg.toPhone ? <>To: <span className="text-white">{msg.toLabel}</span> · {maskPhone(msg.toPhone, country ?? 'IN')}</> : <span className="text-amber-400">No phone number on profile</span>}
+        </p>
+        <div className="flex gap-2">
+          <button type="button" disabled={!msg.toPhone || !text.trim()}
+            onClick={() => msg.toPhone && window.open(`https://wa.me/${msg.toPhone}?text=${encodeURIComponent(text)}`, '_blank')}
+            className="flex-1 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold py-2.5 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">
+            Send on WhatsApp
+          </button>
+          <button type="button" disabled={!text.trim()}
+            onClick={async () => {
+              try { await navigator.clipboard.writeText(text); showToast('✓ Copied') }
+              catch { showToast('Could not copy: select the text and copy it', 'error') }
+            }}
+            className="px-4 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl transition disabled:opacity-40">
+            Copy text
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // Skeleton while loading, so the page appears instantly instead of a blank "Loading..."
   if (loading) return (
@@ -1714,6 +1824,7 @@ const handleResetPassword = async () => {
         {/* SESSIONS TAB */}
         {activeTab === 'sessions' && (
           <div className="space-y-3">
+            {renderShare()}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No sessions logged yet.
@@ -1779,6 +1890,7 @@ const handleResetPassword = async () => {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
+            {renderShare()}
             {(() => {
               // Plan adherence: this week's plan and the last 4 weeks
               const cur = currentPlan(plans)
