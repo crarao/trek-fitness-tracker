@@ -4,8 +4,9 @@
 // membership reminders on the owner dashboard.
 
 import { type Country, dialCode, formatDate, parseDate } from './locale'
-import { dayKey, isRestDay, localToday } from './plan-summary'
-import { summarizeAny } from './plan-structure'
+import { localToday } from './plan-summary'
+import { planAdherence } from './adherence'
+import { missedAndDue, type TodaySession } from './todays-sessions'
 import { estimateKcal } from './calories'
 import { parseActivity } from './activities'
 
@@ -110,21 +111,12 @@ export function summarizeWeek(opts: {
   const sessions = opts.sessions
     .filter(s => s.session_date >= weekStart && s.session_date <= weekEnd)
     .sort((a, b) => a.session_date.localeCompare(b.session_date))
-  // Planned workout days, from the plan's days (structured) or its text headings
-  const days = plan ? summarizeAny(plan, plan.week_start).days : []
-  const workoutLabels = days.filter(d => !isRestDay(d))
-  const doneKeys = new Set(sessions.filter(s => s.plan_day).map(s => dayKey(s.plan_day)))
-  const otherDates = new Set(sessions.filter(s => !s.plan_day).map(s => s.session_date))
-  const planned = workoutLabels.length
-  const done = Math.min(planned, workoutLabels.filter(d => doneKeys.has(dayKey(d))).length + otherDates.size)
-  // Missed: planned weekday whose date in this week has passed, with nothing logged for it
-  const missed = workoutLabels.map(dayKey).filter(key => {
-    const idx = WEEKDAY.indexOf(key)
-    if (idx < 0 || doneKeys.has(key)) return false // "Day 1" headings can't be placed on a date
-    const offset = (idx - parseDate(weekStart).getDay() + 7) % 7
-    const date = addDays(weekStart, offset)
-    return date < today && !otherDates.has(date)
-  })
+  // Days done and missed use the app's rules, so the numbers match the Progress tab
+  // ("Plan this week") and the owner's Training card: only sessions saved against the plan count
+  const adherence = plan ? planAdherence(plan, opts.sessions) : null
+  const planned = adherence?.planned ?? 0
+  const done = adherence?.done ?? 0
+  const missed = plan ? missedAndDue(plan, opts.sessions as TodaySession[], today).missed.map(d => d.day) : []
   const minutes = sessions.reduce((n, s) => n + (s.duration_minutes || 0), 0)
   const kcal = sessions.reduce((n, s) => n + (estimateKcal({
     minutes: s.duration_minutes, weightKg: opts.weightKg, label: s.plan_day, activity: s.activity, businessType: opts.businessType,

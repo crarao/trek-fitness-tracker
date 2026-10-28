@@ -51,6 +51,14 @@ const cases: [string, Parameters<typeof buildProgressMessage>[0]][] = [
       { session_date: '2026-10-28', duration_minutes: 40, weekly_plan_id: null, activity: 'run' }],
     note: '',
   }],
+  ['5. Same as the Progress tab: an extra session not saved against the plan, on a day already done', {
+    client: { full_name: 'Anand Rao', phone: null, weight_kg: 76.5 },
+    companyName: 'New Trekking Company', businessType: 'trek', coachName: 'Anand', plan, weekStart, today: '2026-10-28',
+    sessions: [s('2026-10-26', 'Mon · Lower Body', 7, 7, 60),
+      { session_date: '2026-10-27', duration_minutes: null, weekly_plan_id: null, plan_day: null },
+      s('2026-10-27', 'Tue · Upper Body Push', 7, 7, 60)],
+    note: '',
+  }],
 ]
 
 for (const [title, input] of cases) {
@@ -64,5 +72,5 @@ const one = buildSessionMessage({
   client: { full_name: 'Rohan Mehta', phone: '9876543210' }, companyName: 'Iron Gym', coachName: 'Priya Sharma', today,
   session: s(today, 'Tue · Upper Body Push', 6, 7, 60),
 })
-console.log('=== 5. One session after Mark done')
+console.log('=== 6. One session after Mark done')
 console.log(one.text)
