@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
@@ -13,7 +13,8 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
-import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, weeklyTotals, type ShareClient } from '@/lib/progress-share'
+import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, type ShareClient } from '@/lib/progress-share'
+import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -953,30 +954,12 @@ const handleResetPassword = async () => {
 
   const getChartData = () => {
     if (sessions.length === 0) return null
-    const weekMap: Record<string, { sessions: number, minutes: number }> = {}
-
-    sessions.forEach(session => {
-      const parts = session.session_date.split('-')
-      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-      const weekStart = new Date(date)
-      weekStart.setDate(date.getDate() - date.getDay())
-      const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`
-      if (!weekMap[key]) weekMap[key] = { sessions: 0, minutes: 0 }
-      weekMap[key].sessions += 1
-      weekMap[key].minutes += session.duration_minutes || 0
-    })
-
-    const sortedWeeks = Object.keys(weekMap).sort()
-    const labels = sortedWeeks.map(w => {
-      const parts = w.split('-')
-      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-      return formatDate(date, country, 'dayMonth')
-    })
-
+    // Last 8 Monday–Sunday weeks, empty weeks as 0 (same weeks as the PDF report)
+    const weeks = weeklyTotals(sessions, localDateIso(), 8)
     return {
-      labels,
-      sessionCounts: sortedWeeks.map(w => weekMap[w].sessions),
-      minuteCounts: sortedWeeks.map(w => weekMap[w].minutes)
+      labels: weeks.map(w => formatDate(w.start, country, 'dayMonth')),
+      sessionCounts: weeks.map(w => w.sessions),
+      minuteCounts: weeks.map(w => w.minutes),
     }
   }
 
@@ -1027,7 +1010,7 @@ const handleResetPassword = async () => {
       const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
-        text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8),
+        text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab when sharing this week
       }, `${safeName}-progress-${weekStart}.pdf`)
       showToast('✓ PDF downloaded')
     } catch (e) {

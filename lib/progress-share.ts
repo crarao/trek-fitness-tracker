@@ -126,15 +126,8 @@ export function summarizeWeek(opts: {
   return { sessions, planned, done, missed, minutes, kcal }
 }
 
-// Sessions and minutes per 7-day block, oldest first, the last block starting on weekStart
-export function weeklyTotals(sessions: ShareSession[], weekStart: string, weeks = 8) {
-  return Array.from({ length: weeks }, (_, i) => {
-    const start = addDays(weekStart, -7 * (weeks - 1 - i))
-    const end = addDays(start, 6)
-    const inWeek = sessions.filter(s => s.session_date >= start && s.session_date <= end)
-    return { start, sessions: inWeek.length, minutes: inWeek.reduce((n, s) => n + (s.duration_minutes || 0), 0) }
-  })
-}
+// Chart weeks (Monday–Sunday), shared with the Progress tab: lib/weekly-totals.ts
+export { weeklyTotals } from './weekly-totals'
 
 const signOff = (coachName: string | null | undefined, companyName: string) =>
   `— ${[firstName(coachName), companyName].filter(Boolean).join(', ')}`
