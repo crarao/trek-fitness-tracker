@@ -1,7 +1,7 @@
-# 30 Oct 2026 — Coach logins, primary coach, partner limit (ROADMAP #40) — TO RUN
+# 30 Oct 2026 — Coach logins, primary coach, partner limit (ROADMAP #40) — IN PROGRESS
 
-**Status: not run yet.** Anand runs this in the Supabase SQL editor (Mumbai project `coachboard-mumbai`) before the coach app change.
-Run **Step 0 first** (read-only) and check the results before running Steps 1–5.
+**Status (30 Oct, ~00:37 IST):** Step 0 checked and **Step 1b run** by Anand in Supabase (Mumbai project `coachboard-mumbai`).
+Steps 1–5 still to run, before the coach app change.
 
 Rules agreed 30 Oct:
 - **Owner logins:** the owner (`company_admin`) plus partners (`partner`, same powers). Partners per company are capped by a new
@@ -20,6 +20,7 @@ What it does (additive only; nothing existing is removed):
 
 | Step | Change |
 |---|---|
+| 1b | Allow `role = 'coach'`: replace the `profiles_role_check` constraint (**approved by Anand 30 Oct, run**) |
 | 1 | `companies.partner_limit` (default 2) and `profiles.primary_coach_id`, plus an index |
 | 2 | New rules for the `coach` role on `profiles`, `weekly_plans`, `logged_sessions`, `session_feedback` (one rule per table and action) |
 | 3 | Function `pt_membership_status()`: latest membership plan and dates (no amounts) for PT clients of the caller's gym |
@@ -60,6 +61,37 @@ order by column_name;
 
 **If A shows a role constraint or an enum, or C shows different types: stop and send a screenshot.** A role constraint would need replacing,
 which counts as a removal and needs your explicit OK (CLAUDE.md Rule #1).
+
+**Result 30 Oct:**
+- **A:** `profiles_role_check` = `CHECK (role = ANY (ARRAY['super_admin','company_admin','client','partner']))`. It blocks `coach`, so Step 1b is needed. The other constraint, `profiles_meals_per_day_check`, is unrelated.
+- **A2:** `role` and `client_type` are `text`.
+- **B:** `get_my_role()` is `SELECT role FROM profiles WHERE id = auth.uid() LIMIT 1;`. Fine as is.
+- **C:** `plan_type` text, `start_date` / `end_date` date, `created_at` timestamptz. Step 3 is fine as written.
+
+---
+
+## Step 1b — allow the `coach` role · ✅ RUN 30 Oct
+
+**Approved by Anand in the conversation on 30 Oct ("approved for 1b") and run by him the same night (Success).**
+Postgres can't edit a check constraint in place, so the old rule is dropped and re-added with the same four roles plus `coach`,
+in one transaction. No data touched; every existing row passes the new rule.
+
+```sql
+begin;
+alter table public.profiles drop constraint profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role = any (array['super_admin', 'company_admin', 'client', 'partner', 'coach']));
+commit;
+```
+
+**Undo** (only while no coach logins exist; with Anand's approval):
+```sql
+begin;
+alter table public.profiles drop constraint profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role = any (array['super_admin', 'company_admin', 'client', 'partner']));
+commit;
+```
 
 ---
 
@@ -294,6 +326,9 @@ select has_function_privilege('authenticated', 'public.pt_membership_status()', 
 
 -- d) Every company got partner_limit = 2
 select partner_limit, count(*) from public.companies group by partner_limit;
+
+-- e) The role rule now allows coach (Step 1b)
+select pg_get_constraintdef(oid) from pg_constraint where conname = 'profiles_role_check';
 ```
 
 Then rerun the Security Advisor. Expect no new warnings apart from the expected "signed-in users can execute SECURITY DEFINER function"
@@ -312,4 +347,4 @@ No DROP statements are written here (CLAUDE.md Rule #1). In words, a full undo w
 - the index `profiles_company_primary_coach`
 - the columns `profiles.primary_coach_id` and `companies.partner_limit`, losing the primary coach assignments and any raised limits
 
-Step 4 can be undone without removing anything, using the SQL shown under it.
+Step 4 can be undone without removing anything, using the SQL shown under it. Step 1b's undo is shown under it.
