@@ -13,6 +13,24 @@ export function mondayOf(date: string): string {
   return iso(d)
 }
 
+// Sunday of the week starting `weekStart` (YYYY-MM-DD)
+export function sundayOf(weekStart: string): string {
+  const d = parseDate(weekStart.slice(0, 10))
+  d.setDate(d.getDate() + 6)
+  return iso(d)
+}
+
+// The one rule for "sessions in a week", used by the charts and the progress report
+// (lib/progress-share.ts summarizeWeek): every logged session dated Monday–Sunday counts.
+// session_date is compared as a plain YYYY-MM-DD string, so no UTC conversion can move it a day.
+export function sessionsInWeek<T extends { session_date: string }>(sessions: T[], weekStart: string): T[] {
+  const start = weekStart.slice(0, 10), end = sundayOf(start)
+  return sessions.filter(x => {
+    const d = x.session_date.slice(0, 10)
+    return d >= start && d <= end
+  })
+}
+
 export type WeekTotal = { start: string; sessions: number; minutes: number }
 
 // Oldest first; the last week is the one containing `lastDate`
@@ -25,10 +43,8 @@ export function weeklyTotals(
   return Array.from({ length: weeks }, (_, i) => {
     const s = new Date(last)
     s.setDate(last.getDate() - 7 * (weeks - 1 - i))
-    const e = new Date(s)
-    e.setDate(s.getDate() + 6)
-    const start = iso(s), end = iso(e)
-    const inWeek = sessions.filter(x => x.session_date >= start && x.session_date <= end)
+    const start = iso(s)
+    const inWeek = sessionsInWeek(sessions, start)
     return { start, sessions: inWeek.length, minutes: inWeek.reduce((n, x) => n + (x.duration_minutes || 0), 0) }
   })
 }

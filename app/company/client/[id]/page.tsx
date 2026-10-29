@@ -13,7 +13,7 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
-import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, type ShareClient } from '@/lib/progress-share'
+import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 
@@ -993,13 +993,8 @@ const handleResetPassword = async () => {
   // The week being shared is always Monday–Sunday, like the Progress charts and "Calories since Mon"
   // (decided 28 Oct). Days done of the plan come from the plan covering today (or a day a week ago).
   const shareWeekPlan = () => {
-    const ref = new Date()
-    if (shareWeek === 'last') ref.setDate(ref.getDate() - 7)
-    const refIso = formatIso(ref)
-    const plan = plans
-      .filter(p => p.week_start.slice(0, 10) <= refIso && formatIso(weekEnd(p.week_start)) >= refIso)
-      .sort((a, b) => b.week_start.localeCompare(a.week_start))[0] ?? null
-    return { plan, weekStart: shareWeek === 'this' ? weekStartIso : lastWeekStartIso }
+    const weekStart = shareWeek === 'this' ? weekStartIso : lastWeekStartIso
+    return { plan: planForWeek(plans, weekStart), weekStart }
   }
   const shareMessage = () => {
     const { plan, weekStart } = shareWeekPlan()
@@ -1022,8 +1017,8 @@ const handleResetPassword = async () => {
     try {
       const { plan, weekStart } = shareWeekPlan()
       const week = summarizeWeek({ plan, sessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
-      // Last 4 weeks of plans up to this week (same rule as the Progress tab)
-      const four = recentAdherence(plans.filter(p => p.week_start.slice(0, 10) <= formatIso(weekEnd(weekStart))), sessions, 4)
+      // Last 4 Monday weeks up to this week, counted like the week card (lib/progress-share.ts)
+      const four = recentWeeksAdherence({ plans, sessions, weekStart })
       const { downloadProgressPdf } = await import('@/lib/progress-pdf')
       const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
