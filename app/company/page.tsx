@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
+import { isCovering } from '@/lib/coach-today'
 
 type Membership = {
   id: string
@@ -145,6 +146,8 @@ export default function CompanyAdminPage() {
   const [newCoach, setNewCoach] = useState({ full_name: '', phone: '', email: '', password: '' })
   const [savingCoach, setSavingCoach] = useState(false)
   const [coachMessage, setCoachMessage] = useState('')
+  // Coach activity (#40): the coach tapped to filter the section (null = all coaches)
+  const [activityCoach, setActivityCoach] = useState<string | null>(null)
   const [confirmBox, setConfirmBox] = useState<{ title: string; body: string; action: string; onConfirm: () => void } | null>(null)
   // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
   const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
@@ -313,13 +316,15 @@ export default function CompanyAdminPage() {
     setTraining({ plans: plans || [], sessions })
   }
 
-  // Every session PT clients logged this week (plan or not), plus one query for who logged them
+  // Every session PT clients logged this week (plan or not), plus one query for who logged them.
+  // Goes back at least 7 days (not just to Monday) so Coach activity can spot clients with no session in 7+ days.
   const fetchRecent = async (ptIds: string[]) => {
+    const since = [thisWeekMonday(), localDateIso(-6)].sort()[0]
     const { data, error } = await supabase
       .from('logged_sessions')
       .select('*')
       .in('client_id', ptIds)
-      .gte('session_date', thisWeekMonday())
+      .gte('session_date', since)
       .order('created_at', { ascending: true })
     if (error) { console.error('Recent sessions fetch error:', error); return }
     const sessions = (data || []) as TodaySession[]
@@ -689,6 +694,40 @@ export default function CompanyAdminPage() {
     return first ? `Coach ${first}` : 'Coach'
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
+
+  // Coach activity (#40): per coach today / since Mon, covering, their clients trained by others, needs attention.
+  // Uses data already loaded (PT clients, this week's sessions, memberships, coaches): no query per row.
+  const weekMonday = thisWeekMonday()
+  const weekSessions = (recent?.sessions || []).filter(s => s.session_date >= weekMonday && s.session_date <= todayIso && ptById[s.client_id])
+  const coachActivity = coaches
+    .map(coach => {
+      const mine = weekSessions.filter(s => s.logged_by === coach.id)
+      const todays = mine.filter(s => s.session_date === todayIso)
+      const names = (list: TodaySession[]) => [...new Set(list.map(s => s.client_id))].map(id => ptById[id]).filter(Boolean)
+      const coveringOf = (list: TodaySession[]) => list.filter(s => isCovering(s, ptById[s.client_id])).length
+      // This coach's own clients (primary coach) trained this week by another staff member
+      const byOthers = names(weekSessions.filter(s => {
+        const c = ptById[s.client_id]
+        return c?.primary_coach_id === coach.id && loggerOf(s) !== 'client' && s.logged_by !== coach.id
+      }))
+      return {
+        coach,
+        today: { sessions: todays.length, clients: names(todays), covering: coveringOf(todays) },
+        week: { sessions: mine.length, clients: names(mine), covering: coveringOf(mine) },
+        byOthers,
+      }
+    })
+    .filter(a => !a.coach.archived_at || a.week.sessions > 0)
+  const lastSessionOf: Record<string, string> = {}
+  for (const s of recent?.sessions || []) if (!lastSessionOf[s.client_id] || s.session_date > lastSessionOf[s.client_id]) lastSessionOf[s.client_id] = s.session_date
+  const attentionClients = ptClients.filter(c => !activityCoach || c.primary_coach_id === activityCoach)
+  const idleClients = attentionClients.filter(c => !lastSessionOf[c.id]) // nothing in the last 7 days (recent goes back 7 days)
+  const noPrimaryClients = activityCoach ? [] : ptClients.filter(c => !c.primary_coach_id || !coachById[c.primary_coach_id])
+  const membershipAttention = attentionClients
+    .map(c => ({ c, m: latestMembership(c.memberships) }))
+    .map(x => ({ ...x, left: x.m ? daysUntil(x.m.end_date) : null }))
+    .filter((x): x is { c: Client; m: Membership; left: number } => x.left !== null && x.left <= 7)
+    .sort((a, b) => a.left - b.left)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -1116,6 +1155,119 @@ export default function CompanyAdminPage() {
                     </div>
                   )}
                 </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Coach activity (#40): who trained whom, covering, and PT clients needing attention.
+          Doesn't repeat the Training card (Today / This week / Missed / Per coach). */}
+      {trainModule && ptCount > 0 && coaches.length > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
+              {activityCoach && (
+                <button type="button" onClick={() => setActivityCoach(null)} className="text-xs text-orange-400 hover:text-orange-300 shrink-0">
+                  All coaches
+                </button>
+              )}
+            </div>
+            {!recent ? (
+              <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
+            ) : (
+              <>
+                <ul className="mt-2 divide-y divide-gray-800">
+                  {coachActivity.filter(a => !activityCoach || a.coach.id === activityCoach).map(a => {
+                    const open = activityCoach === a.coach.id
+                    const first = a.coach.full_name.trim().split(/\s+/)[0]
+                    return (
+                      <li key={a.coach.id} className="py-2">
+                        <button type="button" onClick={() => setActivityCoach(open ? null : a.coach.id)} aria-expanded={open}
+                          className="w-full text-left flex items-baseline justify-between gap-3">
+                          <span className={`text-sm truncate ${a.coach.archived_at ? 'text-gray-500' : 'text-white'}`}>{a.coach.full_name}{a.coach.archived_at ? ' (off)' : ''}</span>
+                          <span className="text-xs text-gray-400 shrink-0">
+                            <span className="text-white font-semibold">{a.today.sessions}</span> / {a.week.sessions} sessions
+                            {' · '}{a.today.clients.length} / {a.week.clients.length} clients
+                            {a.week.covering > 0 && <span className="text-sky-300"> · {a.today.covering} / {a.week.covering} covering</span>}
+                          </span>
+                        </button>
+                        {a.byOthers.length > 0 && (
+                          <p className="text-[11px] text-gray-500 mt-0.5">{first}&apos;s clients: {a.byOthers.length} trained by others</p>
+                        )}
+                        {open && (
+                          <div className="mt-2 space-y-1.5">
+                            {([['Today', a.today.clients], ['Since Mon', a.week.clients], [`${first}'s clients trained by others`, a.byOthers]] as const).map(([label, list]) => (
+                              list.length > 0 && (
+                                <div key={label}>
+                                  <p className="text-[11px] text-gray-500 mb-1">{label}</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {list.map(c => (
+                                      <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=sessions')}
+                                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                                        {c.full_name.split(' ')[0]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            ))}
+                            {a.week.sessions === 0 && <p className="text-xs text-gray-500">No sessions logged since Mon.</p>}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {(idleClients.length > 0 || noPrimaryClients.length > 0 || membershipAttention.length > 0) && (
+                  <div className="mt-3 border-t border-gray-800 pt-3 space-y-2.5">
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">Needs attention</p>
+                    {idleClients.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No session in 7+ days</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {idleClients.slice(0, 12).map(c => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-amber-900 bg-amber-950/40 text-amber-200 hover:border-amber-600">
+                              {c.full_name.split(' ')[0]}
+                            </button>
+                          ))}
+                          {idleClients.length > 12 && <span className="text-xs text-gray-500 self-center">+{idleClients.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                    {noPrimaryClients.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No primary coach set</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {noPrimaryClients.slice(0, 12).map(c => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                              {c.full_name.split(' ')[0]}
+                            </button>
+                          ))}
+                          {noPrimaryClients.length > 12 && <span className="text-xs text-gray-500 self-center">+{noPrimaryClients.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                    {membershipAttention.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">Membership ending soon or expired</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {membershipAttention.slice(0, 12).map(({ c, m, left }) => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className={`text-xs px-2.5 py-1 rounded-lg border hover:border-gray-500 ${left < 0 ? 'border-red-900 bg-red-950/30 text-red-200' : 'border-amber-900 bg-amber-950/40 text-amber-200'}`}>
+                              {c.full_name.split(' ')[0]} <span className="opacity-80">{left < 0 ? 'expired' : `ends ${fmtDate(m.end_date, country)}`}</span>
+                            </button>
+                          ))}
+                          {membershipAttention.length > 12 && <span className="text-xs text-gray-500 self-center">+{membershipAttention.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
