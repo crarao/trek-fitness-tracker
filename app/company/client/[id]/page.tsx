@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
+import { weekStatus, orderPlansByWeek, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
@@ -1696,7 +1696,7 @@ const handleResetPassword = async () => {
       </button>
     </div>
     {generatedJson ? (
-      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} />
+      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} startCollapsed />
     ) : (
     <textarea
   value={generatedPlan}
@@ -1790,7 +1790,7 @@ const handleResetPassword = async () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {(showAllPlans ? plans : plans.slice(0, 6)).map(plan => (
+                {(showAllPlans ? orderPlansByWeek(plans) : orderPlansByWeek(plans).slice(0, 6)).map(plan => (
   <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-4 bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
     {editingPlan?.id === plan.id ? (
       // Edit mode

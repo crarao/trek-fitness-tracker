@@ -52,6 +52,19 @@ export function summarizePlan(text: string): PlanSummary {
 }
 
 // Where a plan's week sits relative to today (week_start is a YYYY-MM-DD date)
+// Coach Plans tab order: this week's plan first, then upcoming weeks (soonest first),
+// then past weeks (most recent first). week_start is YYYY-MM-DD, so string compare is date order.
+export function orderPlansByWeek<T extends { week_start: string }>(plans: T[]): T[] {
+  const rank = { current: 0, upcoming: 1, past: 2 } as const
+  return [...plans].sort((a, b) => {
+    const sa = weekStatus(a.week_start), sb = weekStatus(b.week_start)
+    if (sa !== sb) return rank[sa] - rank[sb]
+    const wa = a.week_start.slice(0, 10), wb = b.week_start.slice(0, 10)
+    if (sa === 'upcoming') return wa < wb ? -1 : wa > wb ? 1 : 0
+    return wa > wb ? -1 : wa < wb ? 1 : 0
+  })
+}
+
 export function weekStatus(weekStart: string): 'current' | 'upcoming' | 'past' {
   const start = parseDate(weekStart.slice(0, 10))
   const end = new Date(start)

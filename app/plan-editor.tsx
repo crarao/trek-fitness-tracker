@@ -11,14 +11,15 @@ const inputCls = 'w-full min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 out
 // Day-by-day plan editor: one row per day in the order the plan's week runs.
 // Tap a day to edit it; toggle Workout / Rest; add, edit, move or remove exercise lines.
 export default function PlanEditor({
-  value, onChange, weekStart,
+  value, onChange, weekStart, startCollapsed = false,
 }: {
   value: PlanJson
   onChange: (plan: PlanJson) => void
   weekStart: string   // YYYY-MM-DD, '' if not picked yet (then Mon…Sun)
+  startCollapsed?: boolean // true: every day starts closed (AI drafts); false: first workout day open
 }) {
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
-  const [open, setOpen] = useState<Weekday | null>(() => ordered.find(d => !d.rest)?.day ?? null)
+  const [open, setOpen] = useState<Weekday | null>(() => startCollapsed ? null : (ordered.find(d => !d.rest)?.day ?? null))
 
   // Changing the week start re-orders the days; moving those rows makes phones lose their place and
   // jump up the page. Remember where the page was and put it back right after the re-order.
