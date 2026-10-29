@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
+import { getCaller, STAFF, forbidden, checkCanManageClient } from '@/lib/auth-server'
 import { normalizePlan, planToText, workoutDays } from '@/lib/plan-structure'
 import { recordAiUsage } from '@/lib/ai-usage'
+import { getAiPlanUsage, type AiPlanUsage } from '@/lib/ai-plan-limit'
+import { normalizeCountry, formatDate } from '@/lib/locale'
 
 export const maxDuration = 60
 
@@ -65,24 +67,38 @@ export async function POST(request: Request) {
 
   try {
     const { profile } = await request.json()
+    const clientId: string | undefined = typeof profile?.id === 'string' ? profile.id : undefined
+    if (!clientId) return NextResponse.json({ error: 'Client missing' }, { status: 400 })
 
-    // Staff can only generate for clients in their own gym
-    if (caller.role !== 'super_admin' && profile?.company_id && profile.company_id !== caller.companyId) {
-      return forbidden()
-    }
+    // Staff can only generate for clients in their own gym (checked against the database, not the request)
+    const notAllowed = await checkCanManageClient(caller, clientId)
+    if (notAllowed) return notAllowed
 
-    // Turned off for this company by the super admin (absent before the column exists = allowed).
-    // The company comes from the caller (or the client's row for super admin), not from the request.
-    const companyId = caller.role === 'super_admin' ? profile?.company_id : caller.companyId
+    const admin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SECRET_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    )
+    // The client's gym, read from the database (for super admin this is the only source)
+    const { data: clientRow } = await admin.from('profiles').select('company_id').eq('id', clientId).single()
+    const companyId: string | null = caller.role === 'super_admin' ? clientRow?.company_id ?? null : caller.companyId
+    if (caller.role !== 'super_admin' && clientRow?.company_id !== caller.companyId) return forbidden()
+
+    let usage: AiPlanUsage | null = null
     if (companyId) {
-      const admin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SECRET_KEY!,
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      )
       const { data: company } = await admin.from('companies').select('*').eq('id', companyId).single()
+      // Turned off for this company by the super admin (absent before the column exists = allowed)
       if ((company as { ai_plans_enabled?: boolean | null } | null)?.ai_plans_enabled === false) {
         return NextResponse.json({ error: 'AI plans are turned off for this gym. You can still write or edit plans by hand.' }, { status: 403 })
+      }
+      // #37: cap AI plans per client per month (super admin is not capped, but sees the count)
+      const country = normalizeCountry((company as { country?: string | null } | null)?.country)
+      usage = await getAiPlanUsage(admin, clientId, country)
+      if (usage && usage.used >= usage.limit && caller.role !== 'super_admin') {
+        return NextResponse.json({
+          error: `All ${usage.limit} AI plans for this client are used this month. You can still write or edit plans by hand. More AI plans from ${formatDate(usage.resetsOn, country, 'dayMonth')}.`,
+          aiPlans: usage,
+        }, { status: 429 })
       }
     }
 
@@ -128,18 +144,19 @@ Plain words only, no markdown symbols.`
 
     // Cost of this call, per gym, for the super admin Dashboard (the client's gym)
     await recordAiUsage({
-      companyId: caller.role === 'super_admin' ? profile?.company_id : caller.companyId,
-      userId: caller.userId, clientId: profile?.id, feature: 'plan', model: message.model, usage: message.usage,
+      companyId, userId: caller.userId, clientId, feature: 'plan', model: message.model, usage: message.usage,
     })
+    // This call counts towards the month even if the output below turns out unusable (it was paid for)
+    const aiPlans = usage ? { ...usage, used: usage.used + 1 } : null
 
     // The plan comes back as structured days; the text copy is built from it
     const toolUse = message.content.find(c => c.type === 'tool_use')
     const planJson = toolUse && toolUse.type === 'tool_use' ? normalizePlan(toolUse.input) : null
     if (!planJson || workoutDays(planJson).length === 0) {
       console.error('Plan generation: unusable output', message.stop_reason)
-      return NextResponse.json({ error: 'The AI returned an incomplete plan. Please try again.' }, { status: 502 })
+      return NextResponse.json({ error: 'The AI returned an incomplete plan. Please try again.', aiPlans }, { status: 502 })
     }
-    return NextResponse.json({ plan: planToText(planJson), plan_json: planJson })
+    return NextResponse.json({ plan: planToText(planJson), plan_json: planJson, aiPlans })
 
   } catch (error: any) {
     console.error('Plan generation error:', error)
