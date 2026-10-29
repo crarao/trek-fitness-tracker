@@ -34,7 +34,10 @@ Platform owner (Anand). Manages all companies: create, edit, activate/deactivate
 Coach/org admin scoped to their own company. Creates and manages clients (up to `client_limit`), assigns AI-generated weekly plans (Claude Haiku, business-type-aware), reviews session logs, provides written feedback on sessions. Sees subscription countdown banner when account is near expiry.
 
 ### `partner` → `/company`
-Staff login for a gym (receptionist, branch manager). Same dashboard view as `company_admin`. Added by super_admin per company. Default password = phone number. Future: will be scoped to a branch via `branch_id` when branch filtering ships.
+Staff login for a gym (receptionist, branch manager). Same dashboard view as `company_admin`. Added by super_admin per company, up to `companies.partner_limit` (default 2; only super admin changes it). Default password = phone number. Future: will be scoped to a branch via `branch_id` when branch filtering ships.
+
+### `coach` → `/coach`, `/company/client/[id]` (ROADMAP #40)
+Gym coach. Added by the owner or a partner from the dashboard's Coaches section (no limit, not counted in `client_limit`); turned off with `archived_at` + an auth ban via `/api/set-coach-active`, never deleted. `/coach` is today's training list (who is expected today, done or not; no missed / follow-up prompts). Sees **all PT clients** of the gym plus staff names: opens any PT client, sees plans, sessions, progress and the "Before you start" card, marks done, logs sessions, creates and edits plans (AI cap applies; `generate-plan` and `ai-plan-usage` allow `PLAN_ROLES`). Can't see payments / amounts, revenue, leads or settings, can't add / edit / archive / delete members, change the primary coach, give feedback (reads it) or delete plans. Membership only as plan and dates from `rpc('pt_membership_status')`: **never query `memberships` as a coach**. Every other API route is `STAFF` only and returns 403 to coaches.
 
 ### `client` → `/client`
 End user. Logs workout sessions, views assigned weekly plans, tracks progress via charts (activities/week, minutes/week, day streak), requests AI coaching insights. Feature visibility is controlled by per-company feature flags.
@@ -48,6 +51,7 @@ companies
   ├── name, email, phone, logo_url
   ├── is_active, is_trial, trial_end
   ├── client_limit, pt_limit
+  ├── partner_limit (default 2)       ← owner-level partner logins; super admin only
   ├── feedback_enabled, ai_insights_enabled, session_notes_enabled
   ├── client_module_enabled
   ├── country (IN | US, default IN)   ← drives currency, date format, client login method
@@ -55,10 +59,11 @@ companies
   └── business_type (gym | trek | pilates | yoga | cycling | general)
 
 profiles (one per user, linked to a company)
-  ├── role (super_admin | company_admin | partner | client)
+  ├── role (super_admin | company_admin | partner | client | coach)
   ├── company_id → companies
   ├── client_type (member | pt)       ← PT = personal training client
-  ├── archived_at (timestamptz null)  ← null = active, set = archived
+  ├── archived_at (timestamptz null)  ← null = active, set = archived (for a coach: login turned off)
+  ├── primary_coach_id → profiles     ← PT client's usual coach (soft link, never limits access; owner/partner set it)
   ├── full_name, email, phone
   └── fitness fields: goal, age, gender, height_cm, weight_kg,
       fitness_level, food_preference (Vegetarian | Non-Vegetarian | Eggetarian | Vegan | Jain),
@@ -125,10 +130,13 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Leads / enquiries page | `app/company/leads/page.tsx` |
 | Leads rules (sources, follow-up state, WhatsApp wording, summary) | `lib/leads.ts` |
 | Client app | `app/client/page.tsx` |
+| Coach home (today's training list) | `app/coach/page.tsx` |
+| Coach rules (today's rows, Before you start, covering) | `lib/coach-today.ts` (check: `scripts/check-coach-today.ts`) |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
 | API: delete company | `app/api/delete-company/route.ts` |
 | API: update client | `app/api/update-client/route.ts` |
+| API: turn a coach login off / on | `app/api/set-coach-active/route.ts` |
 | API: AI plan generation | `app/api/generate-plan/route.ts` |
 | API: AI coaching insights | `app/api/ai-insights/route.ts` |
 | API: AI diet chart (staff, reads profile server-side) | `app/api/generate-diet/route.ts` |
@@ -266,6 +274,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - `companies`: members read their own company; super admin all; logged-out (`anon`) may read only `name, slug, logo_url, banner_url, business_type` (column grant). Only the company admin may update their row, and trigger `protect_company_columns` limits that to `logo_url` / `banner_url`.
 - `memberships`, `weekly_plans`, `logged_sessions`, `session_feedback`: staff (company_admin + partner) of the client's gym; clients their own; deletes staff-only.
 - `leads`: staff of the gym read/add/update, super admin reads all, no delete.
+- Coaches (30 Oct, `db/2026-10-30-coach-view.md`): read PT clients and staff of their gym; read/add/update PT clients' `weekly_plans` and `logged_sessions` (insert only with `logged_by` = themselves); read `session_feedback`; no delete anywhere; nothing on `memberships`, `leads`, `ai_usage`. `pt_membership_status()` (security definer) gives coach, owner and partners the latest plan and dates (no amounts) of their gym's PT clients. `protect_profile_columns` also stops clients and coaches changing `client_type`, `archived_at` or `primary_coach_id` on their own row.
 - API routes and `proxy.ts` use the server key, so RLS doesn't affect them. Blocked updates/deletes return 0 rows without an error: use `.select()` after update/delete and check rows when it matters.
 - Full history and undo scripts: `db/2026-10-25-rls-remaining.md`. When adding a table: enable RLS, add policies, GRANT explicitly.
 
@@ -283,7 +292,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## Conventions
 
-**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/company` company_admin + partner; `/client` client) and sends anyone else to their own home. Keep that table in `proxy.ts` up to date when adding sections. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
+**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`, `coach` → `/coach`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/coach` coach; `/company/client` company_admin + partner + coach, listed before `/company` because the first match wins; `/company` incl. `/company/leads` company_admin + partner; `/client` client) and sends anyone else to their own home. A turned-off coach is sent to `/login?off=coach`. Keep that table in `proxy.ts` up to date when adding sections. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
 
 **Styling:** Tailwind CSS 4 utility classes inline. No separate CSS files. No CSS modules.
 
