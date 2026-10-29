@@ -6,8 +6,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { type Country, normalizeCountry, formatDate, localDateIso, phonePlaceholder } from '@/lib/locale'
-import { type Lead, followUpState, isOpen, isGymType, SOURCES, INTERESTS, sourceLabel, interestLabel, normalizePhone } from '@/lib/leads'
+import { type Country, normalizeCountry, formatDate, localDateIso, phonePlaceholder, dialCode } from '@/lib/locale'
+import {
+  type Lead, followUpState, isOpen, isGymType, SOURCES, INTERESTS, LOST_REASONS,
+  sourceLabel, interestLabel, normalizePhone, leadMessage, localDayOf,
+} from '@/lib/leads'
 
 const LEAD_COLUMNS = 'id, company_id, name, phone, source, interest, status, follow_up_date, last_contacted_at, lost_reason, notes, converted_profile_id, created_at, updated_at'
 
@@ -43,6 +46,12 @@ export default function LeadsPage() {
   const [panelError, setPanelError] = useState('')
   const [savingForm, setSavingForm] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  // Status prompts inside the edit panel: trial asks for a follow-up date, lost asks for a reason
+  const [statusPrompt, setStatusPrompt] = useState<'trial' | 'lost' | null>(null)
+  const [trialDate, setTrialDate] = useState('')
+  const [lostChip, setLostChip] = useState('')
+  const [lostText, setLostText] = useState('')
+  const [acting, setActing] = useState(false)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -128,6 +137,7 @@ export default function LeadsPage() {
       follow_up_date: lead.follow_up_date || '', notes: lead.notes || '',
     })
     setPanelError('')
+    setStatusPrompt(null)
     scrollToPanel()
   }
 
@@ -154,6 +164,35 @@ export default function LeadsPage() {
     const row = data[0] as Lead
     setLeads(prev => prev.map(l => (l.id === id ? row : l)))
     return row
+  }
+
+  // Run one immediate save from the action buttons (one at a time)
+  const act = async (changes: Partial<Lead>, toastText: string) => {
+    if (!editing || acting) return null
+    setActing(true)
+    const row = await saveLead(editing.id, changes)
+    setActing(false)
+    if (row) { showToast(toastText); setStatusPrompt(null) }
+    return row
+  }
+
+  const setFollowUp = (date: string) => {
+    if (!date) return
+    act({ follow_up_date: date }, `✓ Follow-up set for ${formatDate(date, country, 'dayMonth')}`)
+  }
+
+  const handleWhatsApp = () => {
+    if (!editing?.phone) return
+    const text = leadMessage(editing, companyName, businessType)
+    // Open first (inside the tap, so phones don't block it), then record the contact
+    window.open(`https://wa.me/${dialCode(country ?? 'IN')}${editing.phone}?text=${encodeURIComponent(text)}`, '_blank')
+    saveLead(editing.id, { last_contacted_at: new Date().toISOString() })
+  }
+
+  const lastContactedText = (lead: Lead) => {
+    if (!lead.last_contacted_at) return ''
+    const day = localDayOf(lead.last_contacted_at)
+    return day === todayIso ? 'today' : formatDate(day, country, 'dayMonth')
   }
 
   const handleSaveForm = async () => {
@@ -249,7 +288,112 @@ export default function LeadsPage() {
                 className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
             </div>
 
-            {/* LEAD ACTIONS */}
+            {editing && (
+              <div className="mb-5 pb-5 border-b border-gray-800 space-y-4">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className={`font-medium px-2 py-0.5 rounded-full ${STATUS_STYLE[editing.status].cls}`}>{STATUS_STYLE[editing.status].label}</span>
+                  {editing.last_contacted_at && <span className="text-gray-400">Last contacted: {lastContactedText(editing)}</span>}
+                  {editing.status === 'lost' && editing.lost_reason && <span className="text-gray-500">· {editing.lost_reason}</span>}
+                </div>
+
+                {/* WhatsApp follow-up (not for members who already joined) */}
+                {editing.status !== 'joined' && (
+                  <div>
+                    <button type="button" onClick={handleWhatsApp} disabled={!editing.phone}
+                      className="w-full sm:w-auto text-sm px-4 py-2.5 rounded-lg border border-green-700 text-green-400 hover:bg-green-900/30 transition font-medium disabled:opacity-40 disabled:hover:bg-transparent">
+                      WhatsApp
+                    </button>
+                    {!editing.phone && <p className="text-xs text-gray-500 mt-1">No phone number</p>}
+                  </div>
+                )}
+
+                {/* Next follow-up: each choice saves straight away */}
+                {isOpen(editing) && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1.5">
+                      Next follow-up{editing.follow_up_date ? <>: <span className="text-gray-300">{formatDate(editing.follow_up_date, country, 'weekday')}</span></> : ''}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {([['+1 day', 1], ['+3 days', 3], ['+1 week', 7]] as const).map(([label, n]) => (
+                        <button key={label} type="button" disabled={acting} onClick={() => setFollowUp(localDateIso(n))}
+                          className={chipCls(editing.follow_up_date === localDateIso(n))}>
+                          {label}
+                        </button>
+                      ))}
+                      <input type="date" value={editing.follow_up_date || ''} disabled={acting}
+                        onChange={e => setFollowUp(e.target.value)}
+                        className="bg-gray-800 text-white rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-xs" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Status */}
+                <div className="flex flex-wrap gap-2">
+                  {editing.status === 'new' && (
+                    <button type="button" onClick={() => { setStatusPrompt('trial'); setTrialDate(localDateIso(2)) }}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-purple-800 text-purple-300 hover:bg-purple-900/30 transition font-medium">
+                      Mark as trial
+                    </button>
+                  )}
+                  {isOpen(editing) && (
+                    <button type="button" onClick={() => { setStatusPrompt('lost'); setLostChip(''); setLostText('') }}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:bg-gray-800 transition font-medium">
+                      Mark as lost
+                    </button>
+                  )}
+                  {editing.status === 'lost' && (
+                    <button type="button" disabled={acting} onClick={() => act({ status: 'new' }, '✓ Re-opened')}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-blue-800 text-blue-300 hover:bg-blue-900/30 transition font-medium">
+                      Re-open
+                    </button>
+                  )}
+                  {/* CONVERT TO MEMBER */}
+                </div>
+
+                {statusPrompt === 'trial' && (
+                  <div className="bg-gray-800/60 rounded-xl p-3 space-y-2">
+                    <label className="text-xs text-gray-400 block">Follow up after the trial on</label>
+                    <input type="date" value={trialDate} onChange={e => setTrialDate(e.target.value)} className={INPUT} />
+                    {trialDate && <p className="text-xs text-gray-400">{formatDate(trialDate, country, 'weekday')}</p>}
+                    <div className="flex gap-2">
+                      <button type="button" disabled={acting}
+                        onClick={() => act({ status: 'trial', follow_up_date: trialDate || null }, '✓ Marked as trial')}
+                        className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2 rounded-lg transition disabled:opacity-50 text-sm">
+                        Mark as trial
+                      </button>
+                      <button type="button" onClick={() => setStatusPrompt(null)}
+                        className="px-4 py-2 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {statusPrompt === 'lost' && (
+                  <div className="bg-gray-800/60 rounded-xl p-3 space-y-2">
+                    <p className="text-xs text-gray-400">Why was it lost?</p>
+                    <div className="flex flex-wrap gap-2">
+                      {LOST_REASONS.map(r => (
+                        <button key={r} type="button" onClick={() => setLostChip(r)} className={chipCls(lostChip === r)}>{r}</button>
+                      ))}
+                    </div>
+                    <input type="text" placeholder="Details (optional)" value={lostText}
+                      onChange={e => setLostText(e.target.value)} className={INPUT} />
+                    <div className="flex gap-2">
+                      <button type="button" disabled={acting || (!lostChip && !lostText.trim())}
+                        onClick={() => act({
+                          status: 'lost',
+                          lost_reason: [lostChip, lostText.trim()].filter(Boolean).join(': '),
+                          follow_up_date: null,
+                        }, 'Marked as lost')}
+                        className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2 rounded-lg transition disabled:opacity-50 text-sm">
+                        Mark as lost
+                      </button>
+                      <button type="button" onClick={() => setStatusPrompt(null)}
+                        className="px-4 py-2 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-3">
               <input type="text" placeholder="Name" value={form.name}
