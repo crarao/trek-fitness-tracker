@@ -286,7 +286,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 **Delete cascade order:** session_feedback → logged_sessions → weekly_plans → memberships → profiles → auth user. Always in this order to avoid FK violations.
 
-**Hosting region & offline cache:** `vercel.json` pins server functions (API routes, `proxy.ts`) to Tokyo `hnd1`, next to the Supabase project. `public/sw.js` caches only content-hashed static files and icons; pages and data always come from the network. Bump the `CACHE` name in `sw.js` when its caching rules change.
+**Hosting region & offline cache:** `vercel.json` pins server functions (API routes, `proxy.ts`) to Mumbai `bom1`, next to the Supabase project (moved from Tokyo `hnd1`, ROADMAP #48). `public/sw.js` caches only content-hashed static files and icons; pages and data always come from the network. Bump the `CACHE` name in `sw.js` when its caching rules change.
 
 **Environment variables:**
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — browser client
