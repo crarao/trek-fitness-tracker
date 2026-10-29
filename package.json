@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.85.0",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.3",
+    "@vercel/speed-insights": "^2.0.0",
     "autoprefixer": "^10.4.27",
     "canvas": "^3.2.3",
     "chart.js": "^4.5.1",
