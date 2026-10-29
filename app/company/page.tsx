@@ -148,6 +148,7 @@ export default function CompanyAdminPage() {
   const [coachMessage, setCoachMessage] = useState('')
   // Coach activity (#40): the coach tapped to filter the section (null = all coaches)
   const [activityCoach, setActivityCoach] = useState<string | null>(null)
+  const [showActivity, setShowActivity] = useState(false) // Coach activity: collapsed to a one-line summary by default
   // Training card is collapsed by default (Coach assignments sits above it); the coach row opened in Coach assignments
   const [showTraining, setShowTraining] = useState(false)
   const [assignCoach, setAssignCoach] = useState<string | null>(null)
@@ -1240,14 +1241,30 @@ export default function CompanyAdminPage() {
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
-              {activityCoach && (
+              <button type="button" onClick={() => setShowActivity(!showActivity)} aria-expanded={showActivity}
+                className="flex-1 min-w-0 flex items-baseline justify-between gap-3 text-left">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
+                <span className="flex items-baseline gap-3 shrink-0">
+                  {!showActivity && recent && (() => {
+                    const coachSessionsToday = coachActivity.reduce((n, a) => n + a.today.sessions, 0)
+                    const attention = new Set([...idleClients, ...noPrimaryClients, ...membershipAttention.map(x => x.c)].map(c => c.id)).size
+                    return (
+                      <span className="text-xs text-gray-500">
+                        <span className="font-semibold text-white">{coachSessionsToday}</span> logged today
+                        {attention > 0 && <> · <span className="font-semibold text-amber-400">{attention}</span> need attention</>}
+                      </span>
+                    )
+                  })()}
+                  <span className={`text-gray-500 text-sm transition-transform inline-block ${showActivity ? 'rotate-180' : ''}`}>▾</span>
+                </span>
+              </button>
+              {showActivity && activityCoach && (
                 <button type="button" onClick={() => setActivityCoach(null)} className="text-xs text-orange-400 hover:text-orange-300 shrink-0">
                   All coaches
                 </button>
               )}
             </div>
-            {!recent ? (
+            {!showActivity ? null : !recent ? (
               <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
             ) : (
               <>
@@ -1652,7 +1669,7 @@ export default function CompanyAdminPage() {
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
                               {client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
-                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.split(' ')[0]}</span>
+                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
                               )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
                               {activeFilter !== 'archived' && m && (
