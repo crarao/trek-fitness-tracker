@@ -19,7 +19,7 @@ export const AI_COST_ALERT_INR = 500
 
 // #37: AI plan generations allowed per client per calendar month (hand-written plans and edits are unlimited).
 // Counted from ai_usage rows with feature 'plan'. Could become per gym later.
-export const AI_PLANS_PER_CLIENT_PER_MONTH = 5
+export const AI_PLANS_PER_CLIENT_PER_MONTH = 6
 
 export function aiCostUsd(model: string, inputTokens: number, outputTokens: number): number {
   const p = AI_PRICES_USD_PER_MILLION[model] ?? FALLBACK
