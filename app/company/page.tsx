@@ -9,8 +9,8 @@ import { activityText } from '@/lib/activities'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso } from '@/lib/locale'
-import { isOpen, sourceLabel, type LeadStatus } from '@/lib/leads'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
+import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 
 type Membership = {
   id: string
@@ -129,6 +129,8 @@ export default function CompanyAdminPage() {
   const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
   // Today's sessions (#41): PT clients' sessions since this week's Monday, and the names of staff who logged them
   const [recent, setRecent] = useState<{ sessions: TodaySession[]; names: Record<string, string> } | null>(null)
+  // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
+  const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
 
   useEffect(() => { initialize() }, [])
 
@@ -162,6 +164,7 @@ export default function CompanyAdminPage() {
     setCompanyId(profile.company_id)
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
+    fetchLeadStats(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId)
 
@@ -208,6 +211,22 @@ export default function CompanyAdminPage() {
     setFromLead({ id: lead.id, name: lead.name, source: lead.source })
     setMessage('')
     setShowForm(true)
+  }
+
+  // One light query, in parallel with the member list: open leads, plus leads updated this month or added this week
+  const fetchLeadStats = async (cId: string) => {
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+    const weekStart = parseDate(thisWeekMonday())
+    const { data, error } = await supabase
+      .from('leads')
+      .select('id, status, follow_up_date, created_at, updated_at')
+      .eq('company_id', cId)
+      .or(`status.in.(new,trial),updated_at.gte."${monthStart.toISOString()}",created_at.gte."${weekStart.toISOString()}"`)
+    if (error) { console.error('Leads summary fetch error:', error); return }
+    const rows = (data || []) as Pick<Lead, 'status' | 'follow_up_date' | 'created_at' | 'updated_at'>[]
+    setLeadStats({ summary: leadSummary(rows, localDateIso()), rows: rows.length })
   }
 
   const fetchClients = async (cId: string) => {
@@ -458,7 +477,7 @@ export default function CompanyAdminPage() {
         .select('id')
       if (leadError) console.error('Lead update error:', leadError)
       if (leadError || !updated?.length) showToast("Member added, but the enquiry wasn't updated", 'error')
-      else showToast('Member added ✓ · enquiry marked Joined')
+      else { showToast('Member added ✓ · enquiry marked Joined'); fetchLeadStats(companyId!) }
       setFromLead(null)
     } else {
       showToast('Member added ✓')
@@ -832,6 +851,38 @@ export default function CompanyAdminPage() {
           </div>
         </div>
       )}
+
+      {/* Leads (#52): follow-ups due, new this week, this month's joined / lost */}
+      <div className="px-4 sm:px-8 pt-3">
+        {!leadStats ? (
+          <div className="h-12 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" aria-label="Loading" />
+        ) : leadStats.rows === 0 ? (
+          <button type="button" data-nav onClick={() => router.push('/company/leads')}
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Track enquiries <span className="text-white font-medium">→ Leads</span>
+          </button>
+        ) : (() => {
+          const s = leadStats.summary
+          const due = s.dueToday + s.overdue
+          return (
+            <button type="button" data-nav onClick={() => router.push('/company/leads')}
+              className={`w-full text-left bg-gray-900 border rounded-2xl p-4 hover:border-gray-600 transition ${s.overdue ? 'border-red-900/50' : 'border-gray-800'}`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Leads</p>
+                <span className="text-gray-500 text-sm">→</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400">
+                <p><span className={`text-lg font-bold ${s.overdue ? 'text-red-400' : due ? 'text-amber-400' : 'text-white'}`}>{due}</span> follow-up{due === 1 ? '' : 's'} due</p>
+                <p><span className="text-lg font-bold text-white">{s.newThisWeek}</span> new this week</p>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                This month: <span className="text-green-400 font-semibold">{s.joinedThisMonth}</span> joined · <span className="text-gray-300 font-semibold">{s.lostThisMonth}</span> lost
+                {s.conversionPct !== null ? ` · ${s.conversionPct}%` : ''}
+              </p>
+            </button>
+          )
+        })()}
+      </div>
 
       {/* Training — PT clients (Train module, #44): Today (trained, due) and This week (plan weeks: %, missed, no plan, per coach) */}
       {trainModule && ptCount > 0 && (
