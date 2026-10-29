@@ -1,7 +1,8 @@
-# 30 Oct 2026 — Coach logins, primary coach, partner limit (ROADMAP #40) — IN PROGRESS
+# 30 Oct 2026 — Coach logins, primary coach, partner limit (ROADMAP #40) — ALREADY RUN
 
-**Status (30 Oct, ~00:37 IST):** Step 0 checked and **Step 1b run** by Anand in Supabase (Mumbai project `coachboard-mumbai`).
-Steps 1–5 still to run, before the coach app change.
+**Status: all steps run by Anand on 30 Oct 2026 (~00:40 IST) in Supabase (Mumbai project `coachboard-mumbai`), before the coach app change.**
+Checks confirmed: 8 `Coaches …` rules; all 7 companies have `partner_limit = 2`; logged-out users can't call `pt_membership_status()`.
+This file records what was run; there is nothing left to run.
 
 Rules agreed 30 Oct:
 - **Owner logins:** the owner (`company_admin`) plus partners (`partner`, same powers). Partners per company are capped by a new
