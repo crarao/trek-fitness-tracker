@@ -148,6 +148,8 @@ export default function ClientDetailPage() {
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiError, setAiError] = useState('')
+  // #37: AI plans used this month for this client (null = not loaded / couldn't be counted)
+  const [aiPlans, setAiPlans] = useState<{ used: number; limit: number; resetsOn: string } | null>(null)
   const [aiElapsed, setAiElapsed] = useState(0)
   const aiAbort = useRef<AbortController | null>(null)
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
@@ -238,6 +240,17 @@ export default function ClientDetailPage() {
   const [makingPdf, setMakingPdf] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // #37: load "3 of 5 AI plans used this month" (only shown when AI plans are on for the company)
+  useEffect(() => {
+    if (!clientId) return
+    let cancelled = false
+    fetch(`/api/ai-plan-usage?clientId=${encodeURIComponent(String(clientId))}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled) setAiPlans(d?.aiPlans ?? null) })
+      .catch(() => { /* no count shown; the server still enforces the cap */ })
+    return () => { cancelled = true }
+  }, [clientId])
 
   // Logged-in staff member's name, for the WhatsApp sign-off
   useEffect(() => {
@@ -741,14 +754,17 @@ const handleGeneratePlan = async () => {
       })
     })
 
-    let data: { plan?: string; plan_json?: unknown; error?: string } = {}
+    let data: { plan?: string; plan_json?: unknown; error?: string; aiPlans?: { used: number; limit: number; resetsOn: string } | null } = {}
     try { data = await response.json() } catch { /* non-JSON, e.g. server timeout page */ }
+    if (data.aiPlans) setAiPlans(data.aiPlans)
 
     if (response.ok && data.plan) {
       setGeneratedPlan(data.plan)
       setGeneratedJson(data.plan_json ? planJsonOf({ plan_json: data.plan_json }) : null)
       setAiPlanMeta(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
       setShowGeneratedPlan(true)
+    } else if (response.status === 429) {
+      setAiError(data.error || 'All AI plans for this client are used this month. You can still write a plan by hand.')
     } else if (response.status === 504) {
       setAiError('The AI took too long to respond. Please try again.')
     } else {
@@ -964,6 +980,8 @@ const handleResetPassword = async () => {
   }
 
   // null until the client/company row has loaded, so dates don't flash the wrong format
+  // #37: this client's AI plans for the month are used up (the server refuses a 6th as well)
+  const aiPlansUsedUp = !!aiPlans && aiPlans.used >= aiPlans.limit
   const country: Country | null = client ? normalizeCountry((client as { companies?: { country?: string | null } }).companies?.country) : null
   const chartData = getChartData()
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
@@ -1457,7 +1475,7 @@ const handleResetPassword = async () => {
   {(client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
   <button
     onClick={handleGeneratePlan}
-    disabled={generatingPlan}
+    disabled={generatingPlan || aiPlansUsedUp}
     className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
     {generatingPlan ? '⏳ Creating…' : '✨ Create plan with AI'}
   </button>
@@ -1481,6 +1499,13 @@ const handleResetPassword = async () => {
                 </div>
               </div>
               <p className="text-xs text-gray-500 mt-2">Create a weekly plan, review it, then pick the week to assign it to the client.</p>
+              {aiPlans && (client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
+                <p className={`text-xs mt-1 ${aiPlansUsedUp ? 'text-amber-400' : 'text-purple-300/80'}`}>
+                  {aiPlansUsedUp
+                    ? `All ${aiPlans.limit} AI plans used this month · more from ${formatDate(aiPlans.resetsOn, country, 'dayMonth')}. Writing a plan by hand still works.`
+                    : `${Math.min(aiPlans.used, aiPlans.limit)} of ${aiPlans.limit} AI plans used this month`}
+                </p>
+              )}
             </div>
 {generatingPlan && (
   <div ref={aiWorkingRef} className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4">
@@ -1510,10 +1535,12 @@ const handleResetPassword = async () => {
 {aiError && !generatingPlan && (
   <div className="bg-red-950 border border-red-900 rounded-2xl px-5 py-4 mb-4 flex items-start gap-3">
     <p className="flex-1 text-sm text-red-300">{aiError}</p>
+    {!aiPlansUsedUp && (
     <button onClick={handleGeneratePlan}
       className="text-xs text-white bg-red-800 hover:bg-red-700 px-3 py-1.5 rounded-lg transition">
       Try again
     </button>
+    )}
     <button onClick={() => setAiError('')}
       className="text-xs text-red-400 hover:text-white">
       ✕
