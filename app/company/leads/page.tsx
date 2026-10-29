@@ -6,13 +6,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { type Lead, followUpState, isOpen, sourceLabel, interestLabel, normalizePhone } from '@/lib/leads'
+import { type Country, normalizeCountry, formatDate, localDateIso, phonePlaceholder } from '@/lib/locale'
+import { type Lead, followUpState, isOpen, isGymType, SOURCES, INTERESTS, sourceLabel, interestLabel, normalizePhone } from '@/lib/leads'
 
 const LEAD_COLUMNS = 'id, company_id, name, phone, source, interest, status, follow_up_date, last_contacted_at, lost_reason, notes, converted_profile_id, created_at, updated_at'
 
 type Member = { id: string; full_name: string; phone: string | null }
 type Filter = 'due' | 'new' | 'trial' | 'open' | 'closed'
+type LeadForm = { name: string; phone: string; source: string; interest: string; follow_up_date: string; notes: string }
+
+const INPUT = 'w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600'
+const chipCls = (on: boolean) =>
+  `text-xs px-2.5 py-1.5 rounded-lg border transition font-medium ${on ? 'bg-white text-gray-900 border-white' : 'border-gray-700 text-gray-400 hover:bg-gray-800'}`
 
 const STATUS_STYLE: Record<Lead['status'], { label: string; cls: string }> = {
   new:    { label: 'New',    cls: 'bg-blue-900/50 text-blue-300' },
@@ -32,6 +37,12 @@ export default function LeadsPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [filter, setFilter] = useState<Filter>('due')
   const [searchQuery, setSearchQuery] = useState('')
+  // Inline add / edit panel (no modal): null = closed, '' = adding, else the lead being edited
+  const [panelId, setPanelId] = useState<string | null>(null)
+  const [form, setForm] = useState<LeadForm>({ name: '', phone: '', source: '', interest: 'membership', follow_up_date: '', notes: '' })
+  const [panelError, setPanelError] = useState('')
+  const [savingForm, setSavingForm] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -101,9 +112,84 @@ export default function LeadsPage() {
   const visible = byFilter[filter].filter(l =>
     !q || l.name.toLowerCase().includes(q) || (!!qDigits && (l.phone || '').includes(qDigits)))
 
+  const scrollToPanel = () => setTimeout(() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+
+  const openAdd = () => {
+    setPanelId('')
+    setForm({ name: '', phone: '', source: SOURCES(businessType)[0].key, interest: 'membership', follow_up_date: localDateIso(1), notes: '' })
+    setPanelError('')
+    scrollToPanel()
+  }
+
   const openLead = (lead: Lead) => {
-    // Task 3: opens the edit panel
-    void lead
+    setPanelId(lead.id)
+    setForm({
+      name: lead.name, phone: lead.phone || '', source: lead.source || '', interest: lead.interest || '',
+      follow_up_date: lead.follow_up_date || '', notes: lead.notes || '',
+    })
+    setPanelError('')
+    scrollToPanel()
+  }
+
+  const closePanel = () => { setPanelId(null); setPanelError('') }
+
+  const editing = panelId ? leads.find(l => l.id === panelId) || null : null
+  const phoneRequired = isGymType(businessType)
+
+  // Duplicate check on the normalised phone: an existing member, or another open lead. Saving is still allowed.
+  const formPhone = normalizePhone(form.phone, country ?? 'IN')
+  const dupMember = formPhone ? members.find(m => normalizePhone(m.phone, country ?? 'IN') === formPhone) : undefined
+  const dupLead = formPhone
+    ? openLeads.find(l => l.id !== panelId && normalizePhone(l.phone, country ?? 'IN') === formPhone)
+    : undefined
+
+  // Every update checks a row came back: RLS blocks return 0 rows without an error
+  const saveLead = async (id: string, changes: Partial<Lead>): Promise<Lead | null> => {
+    const { data, error } = await supabase.from('leads').update(changes).eq('id', id).select(LEAD_COLUMNS)
+    if (error || !data?.length) {
+      if (error) console.error('Lead update error:', error)
+      showToast("Couldn't save", 'error')
+      return null
+    }
+    const row = data[0] as Lead
+    setLeads(prev => prev.map(l => (l.id === id ? row : l)))
+    return row
+  }
+
+  const handleSaveForm = async () => {
+    const name = form.name.trim()
+    if (!name) { setPanelError('Enter a name'); return }
+    if (phoneRequired && !formPhone) { setPanelError('Enter a phone number'); return }
+    setSavingForm(true)
+    setPanelError('')
+    const fields = {
+      name,
+      phone: formPhone || null,
+      source: form.source || null,
+      interest: form.interest || null,
+      notes: form.notes.trim() || null,
+    }
+    if (editing) {
+      const row = await saveLead(editing.id, fields)
+      setSavingForm(false)
+      if (row) showToast('✓ Enquiry saved')
+      return
+    }
+    // created_by is filled by the database default (auth.uid())
+    const { data, error } = await supabase
+      .from('leads')
+      .insert({ company_id: companyId, ...fields, follow_up_date: form.follow_up_date || null })
+      .select(LEAD_COLUMNS)
+      .single()
+    setSavingForm(false)
+    if (error || !data) {
+      if (error) console.error('Lead insert error:', error)
+      setPanelError("Couldn't save the enquiry" + (error ? `: ${error.message}` : ''))
+      return
+    }
+    setLeads(prev => [data as Lead, ...prev])
+    closePanel()
+    showToast('✓ Enquiry added')
   }
 
   const followUpText = (lead: Lead) => {
@@ -146,14 +232,93 @@ export default function LeadsPage() {
               {companyName && <p className="text-xs text-gray-500 truncate">{companyName}</p>}
             </div>
           </div>
-          <button onClick={() => { /* Task 3: add panel */ }}
+          <button onClick={openAdd}
             className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium shrink-0">
             + Add enquiry
           </button>
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 max-w-3xl mx-auto">
+      <div className="px-4 sm:px-8 py-5 max-w-3xl mx-auto space-y-4">
+        {/* Add / edit panel */}
+        {panelId !== null && (
+          <div ref={panelRef} className="bg-gray-900 border border-gray-700 rounded-2xl p-5 scroll-mt-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-white">{editing ? editing.name : 'New enquiry'}</h3>
+              <button onClick={closePanel} aria-label="Close"
+                className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
+            </div>
+
+            {/* LEAD ACTIONS */}
+
+            <div className="space-y-3">
+              <input type="text" placeholder="Name" value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })} className={INPUT} />
+              <div>
+                <input type="tel" placeholder={`${phonePlaceholder(country ?? 'IN')}${phoneRequired ? '' : ' (optional)'}`} value={form.phone}
+                  onChange={e => setForm({ ...form, phone: e.target.value })} className={INPUT} />
+                {dupMember && (
+                  <p className="text-xs text-amber-400 mt-1.5">
+                    Already a member: {dupMember.full_name}{' '}
+                    <button type="button" data-nav onClick={() => router.push(`/company/client/${dupMember.id}`)}
+                      className="underline text-amber-300 hover:text-amber-200">Open</button>
+                  </p>
+                )}
+                {!dupMember && dupLead && (
+                  <button type="button" onClick={() => openLead(dupLead)}
+                    className="text-xs text-amber-400 mt-1.5 underline hover:text-amber-300 text-left">
+                    Already a lead: {dupLead.name}
+                  </button>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1.5">Source</p>
+                <div className="flex flex-wrap gap-2">
+                  {SOURCES(businessType).map(o => (
+                    <button key={o.key} type="button" onClick={() => setForm({ ...form, source: o.key })} className={chipCls(form.source === o.key)}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1.5">Interested in</p>
+                <div className="flex flex-wrap gap-2">
+                  {INTERESTS.map(o => (
+                    <button key={o.key} type="button" onClick={() => setForm({ ...form, interest: o.key })} className={chipCls(form.interest === o.key)}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {!editing && (
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Follow-up date</label>
+                  <input type="date" value={form.follow_up_date}
+                    onChange={e => setForm({ ...form, follow_up_date: e.target.value })} className={INPUT} />
+                  {form.follow_up_date && (
+                    <p className="text-xs text-gray-400 mt-1">Follow up: {formatDate(form.follow_up_date, country, 'weekday')}</p>
+                  )}
+                </div>
+              )}
+              <textarea placeholder="Notes (optional)" rows={2} value={form.notes}
+                onChange={e => setForm({ ...form, notes: e.target.value })} className={`${INPUT} resize-none`} />
+            </div>
+
+            {panelError && <p className="text-sm text-red-400 mt-3">{panelError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button onClick={handleSaveForm} disabled={savingForm}
+                className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
+                {savingForm ? 'Saving...' : editing ? 'Save changes' : 'Add enquiry'}
+              </button>
+              <button onClick={closePanel}
+                className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
           {/* Filter chips + search */}
           <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
