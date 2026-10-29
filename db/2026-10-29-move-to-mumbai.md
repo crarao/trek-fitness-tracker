@@ -5,9 +5,9 @@
 `https://nptxjfvkqjuekgkspemu.supabase.co` (ref `nptxjfvkqjuekgkspemu`). Empty until Part C.
 
 Nothing in this file deletes anything (CLAUDE.md Rule #1). The live app keeps using Tokyo until
-Part E (the Vercel switch), so Parts A–B can be done at any time without users noticing; Parts C and E are done together on move day (see Part D).
+Part E (the Vercel switch), so Parts A–B and the dry run in Part C can be done at any time without users noticing (see Part D).
 
-Method: Supabase's own guide, "Backup and Restore using the CLI"
+Method: based on Supabase's guide "Backup and Restore using the CLI", using `pg_dump`/`psql` directly (no Docker)
 (supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
 It copies roles, tables, RLS rules, functions, triggers, login accounts (`auth.users`, passwords
 kept) and all data. The app keeps no files in Supabase Storage (logos and banners are links saved
@@ -17,21 +17,15 @@ in `companies`), which A3 confirms.
 
 ## Part A — Get the computer ready (once, ~20 min)
 
-**A1. Install two tools on Windows**
-1. **Docker Desktop** — docker.com/products/docker-desktop. Install, start it, wait until it says
-   "Engine running". The Supabase CLI uses it to make the copy.
-2. **PostgreSQL 17 command-line tools** (for `psql`) — postgresql.org/download/windows → EDB
-   installer. In the installer, tick **only "Command Line Tools"** (no server needed).
-   Then add `C:\Program Files\PostgreSQL\17\bin` to PATH (Start → "Edit the system environment
-   variables" → Environment Variables → Path → New).
-
-Check, in a **new** PowerShell window:
+**A1. Install the PostgreSQL 17 command-line tools** (gives `pg_dump` and `psql`)
+postgresql.org/download/windows → EDB installer → 17.x, Windows x86-64. Tick **only "Command
+Line Tools"**. Add `C:\Program Files\PostgreSQL\17\bin` to Path. Check in a **new** PowerShell:
 ```powershell
-docker --version
+pg_dump --version
 psql --version
-npx supabase --version
 ```
-All three print a version. (`npx supabase` downloads the CLI the first time.)
+Both print 17.x. **No Docker needed** (29 Oct: Docker Desktop won't install on Anand's Windows
+version, so this runbook uses `pg_dump` directly instead of `supabase db dump`).
 
 **A2. Same Postgres version on both projects** — run in **each** project's SQL Editor:
 ```sql
@@ -51,6 +45,13 @@ select count(*) as vault_secrets from vault.secrets;
 select pubname from pg_publication;
 -- 5. Event triggers (rls_auto_enable)
 select evtname, evtenabled from pg_event_trigger;
+-- 7. Triggers on Supabase's own tables (auth/storage) that the app added — expected none
+select event_object_schema, event_object_table, trigger_name from information_schema.triggers
+where event_object_schema in ('auth', 'storage');
+-- 8. Custom login roles (expected none)
+select rolname from pg_roles where rolcanlogin and rolname not like 'pg\_%' and rolname not in
+  ('postgres','authenticator','supabase_admin','supabase_auth_admin','supabase_storage_admin',
+   'supabase_replication_admin','supabase_read_only_user','pgbouncer','supabase_etl_admin','dashboard_user','cli_login_postgres');
 -- 6. Row counts to compare after the copy
 select 'companies' t, count(*) from public.companies union all
 select 'profiles', count(*) from public.profiles union all
@@ -62,7 +63,7 @@ select 'ai_usage', count(*) from public.ai_usage union all
 select 'contact_requests', count(*) from public.contact_requests union all
 select 'auth.users', count(*) from auth.users;
 ```
-Send screenshots of all six. Keep result 6 — it is the "before" picture.
+Send screenshots of all eight. Keep result 6 — it is the "before" picture.
 
 **A4. Copy Tokyo's Auth settings by hand into a note** (the dump does not copy them).
 Tokyo dashboard → **Authentication**:
@@ -104,36 +105,41 @@ These files contain your data and passwords: keep the folder private and don't u
 **C1. Extensions** — in Mumbai → Database → **Extensions**, switch on any extension from A3-1
 that Mumbai doesn't already have on (ignore the ones already on by default).
 
-**C2. Make the copy from Tokyo** (Docker Desktop must be running):
+**C2. Make the copy from Tokyo** (read-only on Tokyo; three files):
 ```powershell
-npx supabase db dump --db-url $OLD -f roles.sql --role-only
-npx supabase db dump --db-url $OLD -f schema.sql
-npx supabase db dump --db-url $OLD -f data.sql --use-copy --data-only -x "storage.buckets_vectors" -x "storage.vector_indexes"
+pg_dump $OLD --schema-only --schema=public --no-owner --quote-all-identifiers -f schema.sql
+pg_dump $OLD --data-only --schema=public --quote-all-identifiers -f data_public.sql
+pg_dump $OLD --data-only --table=auth.users --table=auth.identities --quote-all-identifiers -f data_auth.sql
 dir
 ```
-Three files appear. `data.sql` is the biggest (a few MB at most).
+- `schema.sql` = tables, RLS rules, functions, triggers, grants. **No user data.** Send it to
+  Claude: it checks it and removes lines Mumbai would refuse (e.g. `FOR ROLE supabase_admin`),
+  and sends back `schema_fixed.sql`.
+- `data_public.sql`, `data_auth.sql` = the real data (names, phones, login password hashes).
+  **Never send or upload these.** Delete them after the move is confirmed.
+- Logins: `auth.users` + `auth.identities` carry email/phone logins and passwords. Sessions are
+  not copied, so everyone logs in once more.
 
-**C3. Load it into Mumbai** — one command, all or nothing (any error rolls everything back):
+**C3. Load it into Mumbai — dry run first (changes nothing):**
 ```powershell
-psql --single-transaction --variable ON_ERROR_STOP=1 `
-  --file roles.sql `
-  --file schema.sql `
-  --command "SET session_replication_role = replica" `
-  --file data.sql `
-  --dbname $NEW
+psql -d $NEW -v ON_ERROR_STOP=1 -c "begin" -f schema_fixed.sql -c "set session_replication_role = replica" -f data_auth.sql -f data_public.sql -c "rollback"
 ```
-Ends without `ERROR` → done. If it stops with an error, send the last ~20 lines. Known fixes from
-Supabase's guide:
-- error about `supabase_admin` ownership → in `schema.sql`, put `-- ` in front of lines
-  `ALTER ... OWNER TO "supabase_admin"`, save, run C3 again;
-- error about `cli_login_postgres` → in `roles.sql`, put `-- ` in front of the line
-  `GRANT "postgres" TO "cli_login_postgres"`, run C3 again.
-(Because it is all-or-nothing, a failed run leaves Mumbai empty, so running again is safe.)
+It ends with `ROLLBACK` and no `ERROR` → everything would load. Errors → send the last ~20 lines
+(they show structure, not data). Because it ends with rollback, it can be repeated any number of
+times, even days before move day.
+
+**C3b. Real load (move day):** same command with `commit` instead of `rollback`:
+```powershell
+psql -d $NEW -v ON_ERROR_STOP=1 -c "begin" -f schema_fixed.sql -c "set session_replication_role = replica" -f data_auth.sql -f data_public.sql -c "commit"
+```
+(`session_replication_role = replica` stops triggers firing while old rows are loaded, as in
+Supabase's own guide.)
 
 **C4. Check Mumbai** — in the **Mumbai** SQL Editor:
 - Run A3-6 (row counts): must match Tokyo's numbers exactly.
-- Run A3-5: if `rls_auto_enable` isn't listed, Database → Settings (or the project's security
-  settings) → turn on **Automatic RLS**.
+- Run A3-5: the `rls_auto_enable` event trigger is not copied (only its function). It only
+  auto-enables RLS on future new tables; we enable RLS by hand on every new table anyway
+  (CLAUDE.md), so it can stay off. Don't turn it on from the dashboard (the function already exists).
 - Security Advisor and Performance Advisor → Refresh: should look like Tokyo's today
   (3 security warnings; "Multiple Permissive Policies" only).
 
@@ -147,16 +153,13 @@ Don't add data during this test: anything changed in Mumbai here stays there.
 
 ---
 
-## Part D — Why Part C is done once, on move day
+## Part D — Timing
 
-The copy can only be loaded into an **empty** project. Emptying Mumbai after a rehearsal would
-be a deletion (Rule #1), and the free plan can't run a third project. So:
-
-- Do Parts A and B **any time** (no effect on anything).
-- Do Part C and Part E **together on move day**, in a quiet slot (late evening, ~1 hour).
-  During that hour nobody should add or change data in the app; tell the trial coaches.
-- If C3 fails, nothing is loaded (all-or-nothing): fix and re-run. If something looks wrong after
-  Part E, use the way back; Tokyo has everything up to the copy.
+- Parts A, B, C2 and the **dry run C3** can be done any time: nothing in Tokyo or Mumbai changes.
+- On move day (quiet evening, ~1 hour, tell the trial coaches): make fresh files (C2 again, so
+  they include today's data), dry run, real load (C3b), check (C4–C5), then Part E straight away.
+- After C3b Mumbai holds data, so a second real load would need it emptied (a deletion, Rule #1).
+  The dry run is what makes that unnecessary.
 
 ---
 
