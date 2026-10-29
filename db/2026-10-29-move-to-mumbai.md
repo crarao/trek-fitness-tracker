@@ -1,6 +1,6 @@
 # 29 Oct 2026 — Move the database from Tokyo to Mumbai (ROADMAP #48)
 
-**Old:** `trek-fitness-tracker`, Tokyo (`ap-northeast-1`) — stays untouched as the backup.
+**Old:** `trek-fitness-tracker`, Tokyo (`ap-northeast-1`), ref `rzndxzhmgxkxihnwqnoy` — stays untouched as the backup.
 **New:** `coachboard-mumbai`, Mumbai (`ap-south-1`), created 29 Oct, project URL
 `https://nptxjfvkqjuekgkspemu.supabase.co` (ref `nptxjfvkqjuekgkspemu`). Empty until Part C.
 
@@ -168,12 +168,13 @@ Don't add data during this test: anything changed in Mumbai here stays there.
    select name, logo_url, banner_url from public.companies
    where logo_url like '%supabase.co/storage%' or banner_url like '%supabase.co/storage%';
    ```
-   then (replace `<TOKYO-REF>` with the Tokyo project's ref from its URL):
+   then (Tokyo's ref is `rzndxzhmgxkxihnwqnoy`; checked 29 Oct: only Coach Rich's `logo_url` points
+   at Tokyo storage, `banner_url` is empty, so the banner file is copied but not used):
    ```sql
    update public.companies
-   set logo_url = replace(logo_url, '<TOKYO-REF>.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co'),
-       banner_url = replace(banner_url, '<TOKYO-REF>.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co')
-   where logo_url like '%<TOKYO-REF>.supabase.co%' or banner_url like '%<TOKYO-REF>.supabase.co%'
+   set logo_url = replace(logo_url, 'rzndxzhmgxkxihnwqnoy.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co'),
+       banner_url = replace(banner_url, 'rzndxzhmgxkxihnwqnoy.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co')
+   where logo_url like '%rzndxzhmgxkxihnwqnoy.supabase.co%' or banner_url like '%rzndxzhmgxkxihnwqnoy.supabase.co%'
    returning name, logo_url, banner_url;
    ```
    The returned links should open the images. (Until this runs, the logo still loads from
