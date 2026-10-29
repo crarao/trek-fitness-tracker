@@ -89,6 +89,16 @@ session_feedback
   ├── session_id → logged_sessions
   ├── star_rating (nullable)
   └── admin_feedback
+
+leads (enquiries, #52; never deleted: they end as joined or lost)
+  ├── company_id → companies
+  ├── name, phone, source (walk_in | instagram | referral | website | whatsapp | other)
+  ├── interest (membership | pt | trial | other)
+  ├── status (new | trial | joined | lost)
+  ├── follow_up_date (date), last_contacted_at, lost_reason, notes
+  ├── converted_profile_id → profiles (set by "Convert to member")
+  ├── created_by → profiles (defaults to auth.uid())
+  └── created_at, updated_at (trigger keeps updated_at current)
 ```
 
 **Membership history is preserved.** Every renewal inserts a new `memberships` row. `Correct Current` updates the latest row (for typos only). Latest membership = `ORDER BY start_date DESC LIMIT 1`.
@@ -112,6 +122,8 @@ session_feedback
 | Super admin UI | `app/admin/page.tsx` |
 | Company admin dashboard | `app/company/page.tsx` |
 | Client detail (coach view) | `app/company/client/[id]/page.tsx` |
+| Leads / enquiries page | `app/company/leads/page.tsx` |
+| Leads rules (sources, follow-up state, WhatsApp wording, summary) | `lib/leads.ts` |
 | Client app | `app/client/page.tsx` |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
@@ -253,6 +265,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - `profiles`: everyone reads/updates their own row; coach + partners read their gym and update clients in it; super admin all. Trigger `protect_profile_columns`: only super admin / server may change `role` or `company_id`; clients can't change `client_type` or `archived_at`.
 - `companies`: members read their own company; super admin all; logged-out (`anon`) may read only `name, slug, logo_url, banner_url, business_type` (column grant). Only the company admin may update their row, and trigger `protect_company_columns` limits that to `logo_url` / `banner_url`.
 - `memberships`, `weekly_plans`, `logged_sessions`, `session_feedback`: staff (company_admin + partner) of the client's gym; clients their own; deletes staff-only.
+- `leads`: staff of the gym read/add/update, super admin reads all, no delete.
 - API routes and `proxy.ts` use the server key, so RLS doesn't affect them. Blocked updates/deletes return 0 rows without an error: use `.select()` after update/delete and check rows when it matters.
 - Full history and undo scripts: `db/2026-10-25-rls-remaining.md`. When adding a table: enable RLS, add policies, GRANT explicitly.
 
