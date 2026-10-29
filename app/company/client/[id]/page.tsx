@@ -43,7 +43,11 @@ type ClientProfile = {
   diet_plan: string | null
   client_type: string | null
   archived_at: string | null
+  primary_coach_id?: string | null   // usual coach (#40); a soft link, never limits who can train the client
 }
+
+// Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
+type Staff = { id: string; full_name: string; role: string; archived_at: string | null }
 
 
 type Membership = {
@@ -236,6 +240,8 @@ export default function ClientDetailPage() {
   const [shareText, setShareText] = useState('')
   const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
   const [coachName, setCoachName] = useState('')        // logged-in staff user, for the sign-off
+  const [staff, setStaff] = useState<Staff[]>([])
+  const [savingPrimaryCoach, setSavingPrimaryCoach] = useState(false)
   const sharePanelRef = useRef<HTMLDivElement | null>(null)
   const [makingPdf, setMakingPdf] = useState(false)
 
@@ -252,13 +258,20 @@ export default function ClientDetailPage() {
     return () => { cancelled = true }
   }, [clientId])
 
-  // Logged-in staff member's name, for the WhatsApp sign-off
+  // Logged-in staff member's name (WhatsApp sign-off), and the gym's staff (owner, partners, coaches)
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+      const { data } = await supabase.from('profiles').select('full_name, company_id').eq('id', user.id).single()
       setCoachName(data?.full_name || '')
+      if (!data?.company_id) return
+      const { data: staffRows } = await supabase.from('profiles')
+        .select('id, full_name, role, archived_at')
+        .eq('company_id', data.company_id)
+        .in('role', ['company_admin', 'partner', 'coach'])
+        .order('full_name')
+      setStaff((staffRows || []) as Staff[])
     })()
   }, [])
 
@@ -961,6 +974,21 @@ const handleResetPassword = async () => {
     if (!confirm(`Archive ${client?.full_name}? They will be hidden from the dashboard but all data is kept.`)) return
     await supabase.from('profiles').update({ archived_at: new Date().toISOString() }).eq('id', clientId)
     router.push('/company')
+  }
+
+  // Primary coach (owner and partners only; saved through update-client, which checks the coach)
+  const handleSavePrimaryCoach = async (coachId: string) => {
+    setSavingPrimaryCoach(true)
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: clientId, primary_coach_id: coachId || null })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    setSavingPrimaryCoach(false)
+    if (!response.ok || result.error) { showToast("Couldn't save: " + (result.error || response.status), 'error'); return }
+    showToast(coachId ? `Primary coach: ${staff.find(x => x.id === coachId)?.full_name || ''} ✓` : 'No primary coach ✓')
+    loadData(['client'])
   }
 
   const handleUnarchiveClient = async () => {
@@ -2354,10 +2382,27 @@ const handleResetPassword = async () => {
           {/* Trainer + Diet Plan */}
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
-            <div>
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
-              <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
-            </div>
+            {client?.client_type === 'pt' ? (
+              <div>
+                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Primary coach</label>
+                <select id="primary-coach" value={client.primary_coach_id || ''} disabled={savingPrimaryCoach}
+                  onChange={e => handleSavePrimaryCoach(e.target.value)}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-50">
+                  <option value="">No primary coach</option>
+                  {staff.filter(x => x.role === 'coach' && (!x.archived_at || x.id === client.primary_coach_id)).map(x => (
+                    <option key={x.id} value={x.id}>{x.full_name}{x.archived_at ? ' (login off)' : ''}</option>
+                  ))}
+                </select>
+                {client.trainer_name && (
+                  <p className="text-xs text-gray-500 mt-1.5">Trainer (old field): <span className="text-gray-300">{client.trainer_name}</span></p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
+                <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
+              </div>
+            )}
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
               <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>

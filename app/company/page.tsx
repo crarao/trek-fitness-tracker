@@ -111,7 +111,7 @@ export default function CompanyAdminPage() {
     full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
-    client_type: 'member'
+    client_type: 'member', primary_coach_id: ''
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -532,7 +532,8 @@ export default function CompanyAdminPage() {
         phone: newClient.phone,
         trainer_name: newClient.trainer_name,
         diet_plan: newClient.diet_plan,
-        client_type: newClient.client_type
+        client_type: newClient.client_type,
+        primary_coach_id: newClient.client_type === 'pt' && newClient.primary_coach_id ? newClient.primary_coach_id : null
       })
     })
 
@@ -574,7 +575,7 @@ export default function CompanyAdminPage() {
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
-      client_type: 'member'
+      client_type: 'member', primary_coach_id: ''
     })
     setShowForm(false)
     setSaving(false)
@@ -1425,6 +1426,9 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
+                              {client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
+                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.split(' ')[0]}</span>
+                              )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
                               {activeFilter !== 'archived' && m && (
                                 <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
@@ -1615,6 +1619,18 @@ export default function CompanyAdminPage() {
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
                 </label>
+                {newClient.client_type === 'pt' && activeCoaches.length > 0 && (
+                  <div className="col-span-2">
+                    <label className="text-xs text-gray-500 mb-1 block">Primary coach</label>
+                    <select
+                      value={newClient.primary_coach_id}
+                      onChange={e => setNewClient({ ...newClient, primary_coach_id: e.target.value })}
+                      className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      <option value="">No primary coach</option>
+                      {activeCoaches.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
               {message && (
                 <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>
