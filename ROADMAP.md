@@ -3,7 +3,7 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 28 Oct 2026_
+_Last updated: 29 Oct 2026_
 
 ---
 
@@ -38,6 +38,13 @@ _Last updated: 28 Oct 2026_
 
 ## P2 — Speed (phone app feels slow)
 
+_From the 27 Oct speed review. The Tokyo region item from that review is already done (#13, `vercel.json`)._
+
+- [ ] **#48 Decide: move Supabase to Mumbai (`ap-south-1`) + Vercel `bom1`** — all users are in India, and every query today crosses to Tokyo. Moving means a new Supabase project and a data migration: cheap now with few customers, hard later. Decide before onboarding more customers. If moved, `vercel.json` changes from `hnd1` to `bom1`.
+- [ ] **#49 Server-side data fetching for owner home and client View** — pages are client-rendered (JS loads, auth check, then Supabase queries). Move the first data fetch into Next.js server components so pages arrive filled in. One page at a time, owner home first. Measure with #51 before and after.
+- [ ] **#50 Database health review** — run Supabase Performance + Security Advisors (Anand, at a computer) and turn the findings into a `db/` file. Wrap helper calls in RLS policies as `(select public.get_my_company_id())` / `(select public.get_my_role())` so they run once per query, not per row. Add indexes on `company_id`, `client_id`, `weekly_plan_id` where missing. Note: the free tier pauses when idle and has small compute (slow first load).
+- [ ] **#51 Measure speed before and after** — turn on Vercel Speed Insights; record baseline load times for owner home and client View on the phone (Lighthouse mobile + Chrome remote debugging), so each change above can be proven.
+
 
 ## P3 — Product upgrade (replaces 22 Oct Task 8, compact plan cards)
 
@@ -49,7 +56,7 @@ _Last updated: 28 Oct 2026_
 
 ## P4 — Next features
 
-- [ ] **#37 Cap AI plans at 5 per PT client per month** — asked by Anand 25 Oct to contain AI costs. Count AI plan generations per client per calendar month from `ai_usage` (each row now records the member as `client_id`, SQL in `db/2026-10-26-ai-usage-client.md`) and refuse a 6th on the server with a clear message; the coach sees "3 of 5 AI plans used this month" by the Create plan with AI button; hand-written plans and edits stay unlimited. The 5 sits in `lib/ai-pricing.ts` (optionally per gym later). Ready to build: the `ai_usage` work it needed (PRs #40, #41) is merged and its SQL run.
+- [x] **#37 Cap AI plans at 5 per PT client per month** — asked by Anand 25 Oct to contain AI costs. Counted per client per calendar month (company's local month: India time / US Eastern) from `ai_usage` rows with feature `plan` (`lib/ai-plan-limit.ts`); the server refuses a 6th with a clear message ("more AI plans from 1 Nov"); the coach sees "3 of 5 AI plans used this month" under the plan buttons, and at the cap the AI button is disabled. A call counts even if the AI output was unusable (it was paid for). Super admin isn't capped. The plan route now checks the client against the database instead of trusting the request. Hand-written plans and edits stay unlimited. The 5 is `AI_PLANS_PER_CLIENT_PER_MONTH` in `lib/ai-pricing.ts`. No SQL (PR_NUM)
 
 - [ ] **#18 Diet chart** — generic version shipped (#19): AI diet chart from food preference (incl. Jain / Vegan), meals per day, goal, weight/height; India vs US foods by company country; coach reviews and saves to the diet plan. **Still to add:** region / cuisine and allergies / foods to avoid fields (allergies after the remaining RLS rules in #1).
 - [ ] **#19 SMS reminders** — MSG91 + DLT registration (takes 5–7 days, start the paperwork early). US: Twilio.
@@ -62,6 +69,11 @@ _Last updated: 28 Oct 2026_
 - [ ] **#43 Weekly progress report on WhatsApp** — decided 26 Oct: any coach (owner or partner) taps "Share week" on the client's page (Progress tab) → WhatsApp opens with a pre-filled summary (same pattern as membership reminders, no new service): days trained vs planned with the days, exercises done per day ("6 of 7"), minutes, estimated calories, last 4 weeks %, next week's plan headings if assigned, and a coach note typed before sharing (the only coach text that goes to the client in In-gym PT mode, #42). No SQL. Later, if gyms like it: a read-only report link page, then automatic weekly sending with SMS reminders (#19). → First version shipped as #46 (28 Oct); still open from this item: last 4 weeks % and next week's plan headings in the message.
 - [x] **#46 Coach shares progress on WhatsApp** — task file 28 Oct: client page → Sessions or Progress → "📤 Share progress": This week / Last week (last week by default Mon–Tue), optional coach note, editable preview (Reset text), "To: name · +91 98xxx xx432", Send on WhatsApp (wa.me, same as membership reminders) or Copy text, or ⬇ Download PDF (one A4 page: the week's numbers, the message as edited, sessions and minutes charts for the last 8 weeks; the coach sends it however they like; `lib/progress-pdf.ts`, no new package). The Progress charts on the coach page and the client's screen now use the same weeks as the PDF: Monday–Sunday, last 8 weeks, empty weeks as 0 (were Sunday–Saturday with empty weeks skipped; `lib/weekly-totals.ts`, decided by Anand 28 Oct). The shared week is Monday–Sunday too (This week / Last week), so minutes and calories match "Calories since Mon" even when a plan starts on another day; days done still come from the plan. Message: sessions done of planned, one line per session ("Tue · Upper Body Push · 6/7 exercises · 60 min"), missed days already passed, minutes + calorie estimate, note, coach sign-off; nudge when nothing was logged (🥋 for martial arts). Goes to `guardian_phone` when that column exists and is filled. After "Mark done for <client>": "Send to <client> on WhatsApp" with a one-session message. Rules in `lib/progress-share.ts`; sample output from `scripts/check-progress-share.ts`. No SQL (#50)
 - [ ] **#47 Read-only progress link for clients without a login** — a token on the client, a server route that shows a no-login progress page with charts, and the link included in the WhatsApp message (#46). Needs a new column and must wait until RLS is fully closed.
+
+- [ ] **#52 Leads / enquiry tracking (gyms and coaches)** — from the 26 Oct gym conversation; chosen 28 Oct as one of the next two builds. Today only confirmed members are tracked. Add enquiries: name, phone, source (walk-in, Instagram, referral), interest, follow-up date, status (New → Trial → Joined / Lost). "Convert to member" carries details into the Add Member form. Follow-up reminders via WhatsApp (same pattern as renewal Remind). Owner dashboard shows open leads and follow-ups due today. Needs one new table (SQL file for Anand). Scope to confirm with a gym before building.
+- [ ] **#53 Students & parents for dojos / academies** — task file 26 Oct (`coachboard-dojo-students-oct26.md`), not built yet: business type `martial_arts` with Student wording (`lib/labels.ts`), parent / guardian name, phone and relation on a student (SQL: three `profiles` columns, file `db/2026-10-26-guardian.md` still to write), reminders and progress shares go to the parent with parent wording, siblings can share a parent's phone (generated login when the student has no phone). Later, after a dojo confirms: batches / class times, belt level and grading history, one-off fees (grading, uniform, tournament), sibling discount.
+- [ ] **#54 Wearable calories (Fitbit / Pixel) via Google Health API — research only** — the old Fitbit Web API turns off on 2 Nov 2026; the replacement Google Health API has Restricted scopes that need Google's privacy/security review plus our own Google Cloud OAuth credentials. Open Wearables (open source) already integrates it. Health Connect / Apple Health need a native app, so not possible from the PWA. Cheap fallback if a gym asks: optional "Calories from watch" field on the session form that overrides the `lib/calories.ts` estimate. Needs clear client consent wording for health data.
+- [ ] **#55 Black-box audit of the live app with REA — research only** — run REA (Reverse Engineer Anything, MCP for Claude Code) against our own live site only, with test logins: AI routes return 401/403 when they should; a client login can't read another company's data (RLS); number of Supabase calls on client View; service worker `coachboard-v2` caches no logged-in HTML; API responses returning columns the UI doesn't show. Findings only, no code or data changes. Never on competitor apps.
 
 ## Later (after #1 and a consent flow)
 
