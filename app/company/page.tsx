@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
+import { isCovering } from '@/lib/coach-today'
 
 type Membership = {
   id: string
@@ -29,6 +30,16 @@ type Client = {
   created_at: string
   client_type: string | null
   memberships: Membership[]
+  archived_at: string | null
+  primary_coach_id?: string | null
+}
+
+// Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
+type Coach = {
+  id: string
+  full_name: string
+  phone: string | null
+  email: string | null
   archived_at: string | null
 }
 
@@ -101,7 +112,7 @@ export default function CompanyAdminPage() {
     full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
-    client_type: 'member'
+    client_type: 'member', primary_coach_id: ''
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -129,6 +140,23 @@ export default function CompanyAdminPage() {
   const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
   // Today's sessions (#41): PT clients' sessions since this week's Monday, and the names of staff who logged them
   const [recent, setRecent] = useState<{ sessions: TodaySession[]; names: Record<string, string> } | null>(null)
+  // Coach logins (#40): every coach of the gym, Off ones included (names stay on history)
+  const [coaches, setCoaches] = useState<Coach[]>([])
+  const [showCoaches, setShowCoaches] = useState(false)
+  const [newCoach, setNewCoach] = useState({ full_name: '', phone: '', email: '', password: '' })
+  // Coach being renamed / given a new phone (one at a time)
+  const [editCoach, setEditCoach] = useState<{ id: string; full_name: string; phone: string; phoneLogin: boolean } | null>(null)
+  const [savingEditCoach, setSavingEditCoach] = useState(false)
+  const [editCoachError, setEditCoachError] = useState('')
+  const [savingCoach, setSavingCoach] = useState(false)
+  const [coachMessage, setCoachMessage] = useState('')
+  // Coach activity (#40): the coach tapped to filter the section (null = all coaches)
+  const [activityCoach, setActivityCoach] = useState<string | null>(null)
+  const [showActivity, setShowActivity] = useState(false) // Coach activity: collapsed to a one-line summary by default
+  // Training card is collapsed by default (Coach assignments sits above it); the coach row opened in Coach assignments
+  const [showTraining, setShowTraining] = useState(false)
+  const [assignCoach, setAssignCoach] = useState<string | null>(null)
+  const [confirmBox, setConfirmBox] = useState<{ title: string; body: string; action: string; onConfirm: () => void } | null>(null)
   // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
   const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
 
@@ -165,6 +193,7 @@ export default function CompanyAdminPage() {
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
     fetchLeadStats(profile.company_id)
+    fetchCoaches(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId)
 
@@ -295,13 +324,15 @@ export default function CompanyAdminPage() {
     setTraining({ plans: plans || [], sessions })
   }
 
-  // Every session PT clients logged this week (plan or not), plus one query for who logged them
+  // Every session PT clients logged this week (plan or not), plus one query for who logged them.
+  // Goes back at least 7 days (not just to Monday) so Coach activity can spot clients with no session in 7+ days.
   const fetchRecent = async (ptIds: string[]) => {
+    const since = [thisWeekMonday(), localDateIso(-6)].sort()[0]
     const { data, error } = await supabase
       .from('logged_sessions')
       .select('*')
       .in('client_id', ptIds)
-      .gte('session_date', thisWeekMonday())
+      .gte('session_date', since)
       .order('created_at', { ascending: true })
     if (error) { console.error('Recent sessions fetch error:', error); return }
     const sessions = (data || []) as TodaySession[]
@@ -312,6 +343,99 @@ export default function CompanyAdminPage() {
       names = Object.fromEntries((staff || []).map(p => [p.id, p.full_name || '']))
     }
     setRecent({ sessions, names })
+  }
+
+  const fetchCoaches = async (cId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, email, archived_at')
+      .eq('company_id', cId)
+      .eq('role', 'coach')
+      .order('full_name')
+    if (error) { console.error('Coaches fetch error:', error); return }
+    setCoaches((data || []) as Coach[])
+  }
+
+  // Same login rule as members (lib/locale.ts): India phone ({phone}@getcoachboard.in, password = phone, like partners),
+  // US email + the password the owner sets
+  const handleAddCoach = async () => {
+    if (!companyId) return
+    const name = newCoach.full_name.trim()
+    const phone = newCoach.phone.trim()
+    const method = loginMethod(country ?? 'IN')
+    let email = '', password = ''
+    if (!name) { setCoachMessage('Error: Enter the coach\'s name'); return }
+    if (method === 'email') {
+      email = newCoach.email.trim().toLowerCase()
+      password = newCoach.password
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setCoachMessage('Error: Enter a valid email: US coaches log in with email'); return }
+      if (password.length < 6) { setCoachMessage('Error: Password must be at least 6 characters'); return }
+    } else {
+      if (!/^\d{10}$/.test(phone)) { setCoachMessage('Error: Enter a valid 10-digit phone number'); return }
+      email = `${phone}@getcoachboard.in`
+      password = phone
+    }
+    setSavingCoach(true)
+    setCoachMessage('')
+    const response = await fetch('/api/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, full_name: name, company_id: companyId, role: 'coach', phone: phone || null })
+    })
+    const result = await response.json()
+    setSavingCoach(false)
+    if (result.error) { setCoachMessage('Error: ' + result.error); return }
+    setNewCoach({ full_name: '', phone: '', email: '', password: '' })
+    setCoachMessage(method === 'email'
+      ? `Coach added. They log in with ${email} and the password you set.`
+      : 'Coach added. Default password = phone number.')
+    showToast('Coach added ✓')
+    fetchCoaches(companyId)
+  }
+
+  const setCoachActive = async (coach: Coach, active: boolean) => {
+    const response = await fetch('/api/set-coach-active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coachId: coach.id, active })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    if (!response.ok || result.error) { showToast('Could not save: ' + (result.error || response.status), 'error'); return }
+    showToast(active ? `${coach.full_name}'s login is on ✓` : `${coach.full_name}'s login is off`)
+    if (companyId) fetchCoaches(companyId)
+  }
+
+  const handleSaveCoach = async () => {
+    if (!editCoach) return
+    const name = editCoach.full_name.trim()
+    const phone = editCoach.phone.trim()
+    if (!name) { setEditCoachError('Enter the coach\'s name'); return }
+    if (editCoach.phoneLogin && !/^\d{10}$/.test(phone)) { setEditCoachError('Enter a valid 10-digit phone number: they log in with it'); return }
+    setSavingEditCoach(true)
+    setEditCoachError('')
+    const response = await fetch('/api/update-coach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coachId: editCoach.id, full_name: name, phone })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    setSavingEditCoach(false)
+    if (!response.ok || result.error) { setEditCoachError("Couldn't save: " + (result.error || response.status)); return }
+    const old = coachById[editCoach.id]
+    const phoneChanged = editCoach.phoneLogin && old && (old.phone || '') !== phone
+    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : 'Coach saved ✓')
+    setEditCoach(null)
+    if (companyId) fetchCoaches(companyId)
+  }
+
+  const handleToggleCoach = (coach: Coach) => {
+    if (coach.archived_at) { setCoachActive(coach, true); return }
+    setConfirmBox({
+      title: `Turn off ${coach.full_name}'s login?`,
+      body: 'They can no longer log in. Their past sessions keep showing their name. You can turn the login on again any time.',
+      action: 'Turn off',
+      onConfirm: () => setCoachActive(coach, false),
+    })
   }
 
   const fetchArchived = async (cId: string, knownMemberships?: unknown[]) => {
@@ -444,7 +568,8 @@ export default function CompanyAdminPage() {
         phone: newClient.phone,
         trainer_name: newClient.trainer_name,
         diet_plan: newClient.diet_plan,
-        client_type: newClient.client_type
+        client_type: newClient.client_type,
+        primary_coach_id: newClient.client_type === 'pt' && newClient.primary_coach_id ? newClient.primary_coach_id : null
       })
     })
 
@@ -486,7 +611,7 @@ export default function CompanyAdminPage() {
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
-      client_type: 'member'
+      client_type: 'member', primary_coach_id: ''
     })
     setShowForm(false)
     setSaving(false)
@@ -578,6 +703,7 @@ export default function CompanyAdminPage() {
   const todayIso = localDateIso()
   const ptById = Object.fromEntries(ptClients.map(c => [c.id, c]))
   const trainedToday = (recent?.sessions || []).filter(s => s.session_date === todayIso && ptById[s.client_id])
+  const trainedTodayIds = new Set(trainedToday.map(s => s.client_id))
   const dueToday: { c: Client; label: string }[] = []
   const missedWeek: { c: Client; days: string[] }[] = []
   if (training) {
@@ -592,12 +718,56 @@ export default function CompanyAdminPage() {
   }
   const byLogger = Object.entries(sessionsByLogger(recent?.sessions || [], thisWeekMonday(), todayIso))
     .sort(([a, x], [b, y]) => (a === 'client' ? 1 : 0) - (b === 'client' ? 1 : 0) || y.today - x.today || y.week - x.week)
+  const coachById = Object.fromEntries(coaches.map(c => [c.id, c]))
+  const activeCoaches = coaches.filter(c => !c.archived_at)
   const loggerName = (id: string) => {
     if (id === 'client') return 'Clients themselves'
-    const first = (recent?.names[id] || '').trim().split(/\s+/)[0]
+    // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
+    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
     return first ? `Coach ${first}` : 'Coach'
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
+
+  // Coach activity (#40): per coach today / since Mon, covering, their clients trained by others, needs attention.
+  // Uses data already loaded (PT clients, this week's sessions, memberships, coaches): no query per row.
+  const weekMonday = thisWeekMonday()
+  const weekSessions = (recent?.sessions || []).filter(s => s.session_date >= weekMonday && s.session_date <= todayIso && ptById[s.client_id])
+  const coachActivity = coaches
+    .map(coach => {
+      const mine = weekSessions.filter(s => s.logged_by === coach.id)
+      const todays = mine.filter(s => s.session_date === todayIso)
+      const names = (list: TodaySession[]) => [...new Set(list.map(s => s.client_id))].map(id => ptById[id]).filter(Boolean)
+      const coveringOf = (list: TodaySession[]) => list.filter(s => isCovering(s, ptById[s.client_id])).length
+      // This coach's own clients (primary coach) trained this week by another staff member
+      const byOthers = names(weekSessions.filter(s => {
+        const c = ptById[s.client_id]
+        return c?.primary_coach_id === coach.id && loggerOf(s) !== 'client' && s.logged_by !== coach.id
+      }))
+      return {
+        coach,
+        today: { sessions: todays.length, clients: names(todays), covering: coveringOf(todays) },
+        week: { sessions: mine.length, clients: names(mine), covering: coveringOf(mine) },
+        byOthers,
+      }
+    })
+    .filter(a => !a.coach.archived_at || a.week.sessions > 0)
+  const lastSessionOf: Record<string, string> = {}
+  for (const s of recent?.sessions || []) if (!lastSessionOf[s.client_id] || s.session_date > lastSessionOf[s.client_id]) lastSessionOf[s.client_id] = s.session_date
+  const attentionClients = ptClients.filter(c => !activityCoach || c.primary_coach_id === activityCoach)
+  const idleClients = attentionClients.filter(c => !lastSessionOf[c.id]) // nothing in the last 7 days (recent goes back 7 days)
+  const noPrimaryClients = activityCoach ? [] : ptClients.filter(c => !c.primary_coach_id || !coachById[c.primary_coach_id])
+  const membershipAttention = attentionClients
+    .map(c => ({ c, m: latestMembership(c.memberships) }))
+    .map(x => ({ ...x, left: x.m ? daysUntil(x.m.end_date) : null }))
+    .filter((x): x is { c: Client; m: Membership; left: number } => x.left !== null && x.left <= 7)
+    .sort((a, b) => a.left - b.left)
+  // Coach assignments: PT clients per primary coach (Off coaches shown only while they still have clients)
+  const assignments = coaches
+    .map(coach => ({ coach, clients: ptClients.filter(c => c.primary_coach_id === coach.id) }))
+    .filter(a => !a.coach.archived_at || a.clients.length > 0)
+    .sort((a, b) => b.clients.length - a.clients.length || a.coach.full_name.localeCompare(b.coach.full_name))
+  const unassigned = ptClients.filter(c => !c.primary_coach_id || !coachById[c.primary_coach_id])
+  const maxAssigned = Math.max(1, ...assignments.map(a => a.clients.length), unassigned.length)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -626,6 +796,25 @@ export default function CompanyAdminPage() {
           <div role="status"
             className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
             {toast.text}
+          </div>
+        </div>
+      )}
+
+      {confirmBox && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-5" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6">
+            <p className="text-lg font-semibold text-white">{confirmBox.title}</p>
+            <p className="text-sm text-gray-400 mt-2">{confirmBox.body}</p>
+            <div className="flex gap-2 mt-6">
+              <button autoFocus onClick={() => setConfirmBox(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { const run = confirmBox.onConfirm; setConfirmBox(null); run() }}
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2.5 rounded-xl transition">
+                {confirmBox.action}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -885,16 +1074,77 @@ export default function CompanyAdminPage() {
       </div>
 
       {/* Training — PT clients (Train module, #44): Today (trained, due) and This week (plan weeks: %, missed, no plan, per coach) */}
-      {trainModule && ptCount > 0 && (
+      {/* Coach assignments (#40): how many PT clients each coach is primary coach for, and who has none */}
+      {trainModule && ptCount > 0 && coaches.length > 0 && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
-              {fourWeeks && (
-                <p className="text-xs text-gray-500 shrink-0">Last 4 weeks <span className={`font-semibold ${pctColor(pct(fourWeeks))}`}>{pct(fourWeeks)}%</span></p>
-              )}
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach assignments <span className="normal-case text-gray-600">(PT clients by primary coach)</span></p>
+              <p className="text-xs text-gray-500 shrink-0">{ptCount - unassigned.length} of {ptCount} assigned</p>
             </div>
-            {!training || !recent ? (
+            <ul className="mt-2 divide-y divide-gray-800">
+              {[...assignments.map(a => ({ id: a.coach.id, name: a.coach.full_name, off: !!a.coach.archived_at, clients: a.clients })),
+                ...(unassigned.length ? [{ id: 'none', name: 'No primary coach', off: false, clients: unassigned }] : [])].map(row => {
+                const open = assignCoach === row.id
+                const trainedToday = row.clients.filter(c => trainedTodayIds.has(c.id)).length
+                return (
+                  <li key={row.id} className="py-2">
+                    <button type="button" onClick={() => setAssignCoach(open ? null : row.id)} aria-expanded={open} disabled={!row.clients.length}
+                      className="w-full text-left">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className={`text-sm truncate ${row.id === 'none' ? 'text-amber-300' : row.off ? 'text-gray-500' : 'text-white'}`}>
+                          {row.name}{row.off ? ' (login off)' : ''}
+                        </span>
+                        <span className="text-xs text-gray-400 shrink-0">
+                          <span className="text-lg font-bold text-white">{row.clients.length}</span> client{row.clients.length === 1 ? '' : 's'}
+                          {row.clients.length > 0 && <span className="text-gray-500"> · {trainedToday} trained today</span>}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                        <div className={`h-full rounded-full ${row.id === 'none' ? 'bg-amber-500' : row.off ? 'bg-gray-600' : 'bg-purple-500'}`}
+                          style={{ width: `${Math.round((row.clients.length / maxAssigned) * 100)}%` }} />
+                      </div>
+                    </button>
+                    {open && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {row.clients.map(c => (
+                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                            {trainedTodayIds.has(c.id) ? '✓ ' : ''}{c.full_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="text-[11px] text-gray-600 mt-2">Set the primary coach on Add Member or the client&apos;s Profile tab. Any coach can still train any client.</p>
+          </div>
+        </div>
+      )}
+
+      {trainModule && ptCount > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
+            {/* Collapsed by default: a one-line summary; tap for Today / This week */}
+            <button type="button" onClick={() => setShowTraining(!showTraining)} aria-expanded={showTraining}
+              className="w-full flex items-baseline justify-between gap-3 text-left">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
+              <span className="flex items-baseline gap-3 shrink-0">
+                {!showTraining && recent && (
+                  <span className="text-xs text-gray-500">
+                    <span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained today
+                    {weekTotals.planned > 0 && <> · <span className={`font-semibold ${pctColor(pct(weekTotals))}`}>{pct(weekTotals)}%</span> this week</>}
+                  </span>
+                )}
+                {showTraining && fourWeeks && (
+                  <span className="text-xs text-gray-500">Last 4 weeks <span className={`font-semibold ${pctColor(pct(fourWeeks))}`}>{pct(fourWeeks)}%</span></span>
+                )}
+                <span className={`text-gray-500 text-sm transition-transform inline-block ${showTraining ? 'rotate-180' : ''}`}>▾</span>
+              </span>
+            </button>
+            {!showTraining ? null : !training || !recent ? (
               <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
             ) : (
               <>
@@ -1007,6 +1257,250 @@ export default function CompanyAdminPage() {
                   )}
                 </div>
               </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Coach activity (#40): who trained whom, covering, and PT clients needing attention.
+          Doesn't repeat the Training card (Today / This week / Missed / Per coach). */}
+      {trainModule && ptCount > 0 && coaches.length > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <button type="button" onClick={() => setShowActivity(!showActivity)} aria-expanded={showActivity}
+                className="flex-1 min-w-0 flex items-baseline justify-between gap-3 text-left">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
+                <span className="flex items-baseline gap-3 shrink-0">
+                  {!showActivity && recent && (() => {
+                    const coachSessionsToday = coachActivity.reduce((n, a) => n + a.today.sessions, 0)
+                    const attention = new Set([...idleClients, ...noPrimaryClients, ...membershipAttention.map(x => x.c)].map(c => c.id)).size
+                    return (
+                      <span className="text-xs text-gray-500">
+                        <span className="font-semibold text-white">{coachSessionsToday}</span> logged today
+                        {attention > 0 && <> · <span className="font-semibold text-amber-400">{attention}</span> need attention</>}
+                      </span>
+                    )
+                  })()}
+                  <span className={`text-gray-500 text-sm transition-transform inline-block ${showActivity ? 'rotate-180' : ''}`}>▾</span>
+                </span>
+              </button>
+              {showActivity && activityCoach && (
+                <button type="button" onClick={() => setActivityCoach(null)} className="text-xs text-orange-400 hover:text-orange-300 shrink-0">
+                  All coaches
+                </button>
+              )}
+            </div>
+            {!showActivity ? null : !recent ? (
+              <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
+            ) : (
+              <>
+                <ul className="mt-2 divide-y divide-gray-800">
+                  {coachActivity.filter(a => !activityCoach || a.coach.id === activityCoach).map(a => {
+                    const open = activityCoach === a.coach.id
+                    const first = a.coach.full_name.trim().split(/\s+/)[0]
+                    return (
+                      <li key={a.coach.id} className="py-2">
+                        <button type="button" onClick={() => setActivityCoach(open ? null : a.coach.id)} aria-expanded={open}
+                          className="w-full text-left flex items-baseline justify-between gap-3">
+                          <span className={`text-sm truncate ${a.coach.archived_at ? 'text-gray-500' : 'text-white'}`}>{a.coach.full_name}{a.coach.archived_at ? ' (off)' : ''}</span>
+                          <span className="text-xs text-gray-400 shrink-0">
+                            <span className="text-white font-semibold">{a.today.sessions}</span> / {a.week.sessions} sessions
+                            {' · '}{a.today.clients.length} / {a.week.clients.length} clients
+                            {a.week.covering > 0 && <span className="text-sky-300"> · {a.today.covering} / {a.week.covering} covering</span>}
+                          </span>
+                        </button>
+                        {a.byOthers.length > 0 && (
+                          <p className="text-[11px] text-gray-500 mt-0.5">{first}&apos;s clients: {a.byOthers.length} trained by others</p>
+                        )}
+                        {open && (
+                          <div className="mt-2 space-y-1.5">
+                            {([['Today', a.today.clients], ['Since Mon', a.week.clients], [`${first}'s clients trained by others`, a.byOthers]] as const).map(([label, list]) => (
+                              list.length > 0 && (
+                                <div key={label}>
+                                  <p className="text-[11px] text-gray-500 mb-1">{label}</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {list.map(c => (
+                                      <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=sessions')}
+                                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                                        {c.full_name.split(' ')[0]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            ))}
+                            {a.week.sessions === 0 && <p className="text-xs text-gray-500">No sessions logged since Mon.</p>}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {(idleClients.length > 0 || noPrimaryClients.length > 0 || membershipAttention.length > 0) && (
+                  <div className="mt-3 border-t border-gray-800 pt-3 space-y-2.5">
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">Needs attention</p>
+                    {idleClients.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No session in 7+ days</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {idleClients.slice(0, 12).map(c => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-amber-900 bg-amber-950/40 text-amber-200 hover:border-amber-600">
+                              {c.full_name.split(' ')[0]}
+                            </button>
+                          ))}
+                          {idleClients.length > 12 && <span className="text-xs text-gray-500 self-center">+{idleClients.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                    {noPrimaryClients.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No primary coach set</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {noPrimaryClients.slice(0, 12).map(c => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                              {c.full_name.split(' ')[0]}
+                            </button>
+                          ))}
+                          {noPrimaryClients.length > 12 && <span className="text-xs text-gray-500 self-center">+{noPrimaryClients.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                    {membershipAttention.length > 0 && (
+                      <div>
+                        <p className="text-[11px] text-gray-500 mb-1.5">Membership ending soon or expired</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {membershipAttention.slice(0, 12).map(({ c, m, left }) => (
+                            <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                              className={`text-xs px-2.5 py-1 rounded-lg border hover:border-gray-500 ${left < 0 ? 'border-red-900 bg-red-950/30 text-red-200' : 'border-amber-900 bg-amber-950/40 text-amber-200'}`}>
+                              {c.full_name.split(' ')[0]} <span className="opacity-80">{left < 0 ? 'expired' : `ends ${fmtDate(m.end_date, country)}`}</span>
+                            </button>
+                          ))}
+                          {membershipAttention.length > 12 && <span className="text-xs text-gray-500 self-center">+{membershipAttention.length - 12} more</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted */}
+      {trainModule && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
+              className="w-full flex items-center justify-between text-left">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Coaches <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
+              <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+            {showCoaches && (
+              <div className="mt-3">
+                <p className="text-xs text-gray-500 mb-3">Coaches see PT clients and plans only: no payments, leads or settings.</p>
+                {coaches.length === 0 ? (
+                  <p className="text-sm text-gray-400 mb-3">No coaches yet.</p>
+                ) : (
+                  <ul className="space-y-2 mb-3">
+                    {coaches.map(c => {
+                      const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
+                      // India coaches log in with their phone ({phone}@getcoachboard.in); US coaches with email
+                      const phoneLogin = !c.email || c.email.endsWith('@getcoachboard.in')
+                      if (editCoach?.id === c.id) return (
+                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="text" placeholder="Coach name" aria-label="Coach name"
+                              value={editCoach.full_name}
+                              onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                            <input type="tel" placeholder={phoneLogin ? 'Phone (10 digits)' : 'Phone (optional)'} aria-label="Phone"
+                              value={editCoach.phone}
+                              onChange={e => setEditCoach({ ...editCoach, phone: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                          </div>
+                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && (
+                            <p className="text-[11px] text-amber-300">They log in with their phone: the new number becomes their login. Their password doesn&apos;t change.</p>
+                          )}
+                          {editCoachError && <p className="text-xs text-red-400">{editCoachError}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={handleSaveCoach} disabled={savingEditCoach}
+                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
+                              {savingEditCoach ? 'Saving...' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setEditCoach(null)}
+                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
+                              Cancel
+                            </button>
+                          </div>
+                        </li>
+                      )
+                      return (
+                        <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {c.email && !c.email.endsWith('@getcoachboard.in') ? c.email : c.phone}
+                              {!c.archived_at && ` · ${today} session${today === 1 ? '' : 's'} today`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button type="button" onClick={() => { setEditCoachError(''); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
+                              className="text-xs text-orange-400 hover:text-orange-300 transition">
+                              Edit
+                            </button>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
+                              {c.archived_at ? 'Off' : 'Active'}
+                            </span>
+                            <button type="button" onClick={() => handleToggleCoach(c)}
+                              className={`text-xs transition ${c.archived_at ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300'}`}>
+                              {c.archived_at ? 'Turn on' : 'Turn off'}
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input type="text" placeholder="Coach name"
+                    value={newCoach.full_name}
+                    onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
+                    className={`${loginMethod(country ?? 'IN') === 'email' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                  {loginMethod(country ?? 'IN') === 'email' && (
+                    <>
+                      <input type="email" placeholder="Email (used to log in)" autoComplete="off"
+                        value={newCoach.email}
+                        onChange={e => setNewCoach({ ...newCoach, email: e.target.value })}
+                        className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                        value={newCoach.password}
+                        onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
+                        className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    </>
+                  )}
+                  <input type="tel" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Phone (optional)' : 'Phone (10 digits)'}
+                    value={newCoach.phone}
+                    onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
+                    className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                </div>
+                {coachMessage && (
+                  <p className={`text-xs mb-2 ${coachMessage.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{coachMessage}</p>
+                )}
+                <button type="button" onClick={handleAddCoach} disabled={savingCoach}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
+                  {savingCoach ? 'Adding...' : '+ Add coach'}
+                </button>
+                <p className="text-xs text-gray-600 mt-1.5">
+                  {loginMethod(country ?? 'IN') === 'email'
+                    ? 'Coaches log in with their email and the password you set.'
+                    : 'Coaches log in with their phone. Default password is their phone number.'}
+                </p>
+              </div>
             )}
           </div>
         </div>
@@ -1235,6 +1729,9 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
+                              {client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
+                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
+                              )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
                               {activeFilter !== 'archived' && m && (
                                 <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
@@ -1425,6 +1922,18 @@ export default function CompanyAdminPage() {
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
                 </label>
+                {newClient.client_type === 'pt' && activeCoaches.length > 0 && (
+                  <div className="col-span-2">
+                    <label className="text-xs text-gray-500 mb-1 block">Primary coach</label>
+                    <select
+                      value={newClient.primary_coach_id}
+                      onChange={e => setNewClient({ ...newClient, primary_coach_id: e.target.value })}
+                      className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      <option value="">No primary coach</option>
+                      {activeCoaches.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
               {message && (
                 <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>

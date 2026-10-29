@@ -18,7 +18,7 @@ export default function DashboardPage() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, archived_at')
         .eq('id', user.id)
         .single()
 
@@ -29,6 +29,7 @@ export default function DashboardPage() {
 
       if (profile.role === 'super_admin') router.push('/admin')
       else if (profile.role === 'company_admin' || profile.role === 'partner') router.push('/company')
+      else if (profile.role === 'coach') router.push(profile.archived_at ? '/login?off=coach' : '/coach')
       else router.push('/client')
     }
 

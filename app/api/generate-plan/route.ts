@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCaller, STAFF, forbidden, checkCanManageClient } from '@/lib/auth-server'
+import { getCaller, PLAN_ROLES, forbidden, checkCanManageClient } from '@/lib/auth-server'
 import { normalizePlan, planToText, workoutDays } from '@/lib/plan-structure'
 import { recordAiUsage } from '@/lib/ai-usage'
 import { getAiPlanUsage, type AiPlanUsage } from '@/lib/ai-plan-limit'
@@ -61,8 +61,8 @@ const coachingStyles: Record<string, string> = {
 }
 
 export async function POST(request: Request) {
-  // Only gym staff (or super admin) can generate plans — protects Anthropic credits
-  const { caller, error: authError } = await getCaller(STAFF)
+  // Only gym staff, coaches (PT clients only) or super admin can generate plans — protects Anthropic credits
+  const { caller, error: authError } = await getCaller(PLAN_ROLES)
   if (authError) return authError
 
   try {

@@ -39,7 +39,7 @@ const labelCls = 'text-[11px] text-gray-500 uppercase tracking-wider block mb-1.
 
 export default function SessionForm({
   mode, value, onChange, heading, idPrefix, country, notesEnabled, notesLabel = 'Notes for your coach (optional)', plans = [],
-  error, saving, submitLabel, onSubmit, onCancel,
+  error, saving, submitLabel, onSubmit, onCancel, feelingEnabled = true,
 }: {
   mode: 'log' | 'day'
   value: SessionDraft
@@ -55,6 +55,7 @@ export default function SessionForm({
   submitLabel: string
   onSubmit: () => void
   onCancel?: () => void
+  feelingEnabled?: boolean   // "How did it feel?" is saved as feedback, which a coach login can't give
 }) {
   const set = (patch: Partial<SessionDraft>) => onChange({ ...value, ...patch })
   const chosen = ACTIVITIES.find(a => a.key === value.activity)
@@ -102,7 +103,7 @@ export default function SessionForm({
         <p className="text-[11px] text-gray-500 -mt-2">{formatDate(value.session_date, country, 'weekday')}</p>
       )}
 
-      <div>
+      {feelingEnabled && <div>
         <p className={labelCls}>How did it feel?</p>
         <div className="flex gap-1.5">
           {FEELINGS.map(f => (
@@ -114,7 +115,7 @@ export default function SessionForm({
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {notesEnabled && (
         <div>
