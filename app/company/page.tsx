@@ -144,6 +144,10 @@ export default function CompanyAdminPage() {
   const [coaches, setCoaches] = useState<Coach[]>([])
   const [showCoaches, setShowCoaches] = useState(false)
   const [newCoach, setNewCoach] = useState({ full_name: '', phone: '', email: '', password: '' })
+  // Coach being renamed / given a new phone (one at a time)
+  const [editCoach, setEditCoach] = useState<{ id: string; full_name: string; phone: string; phoneLogin: boolean } | null>(null)
+  const [savingEditCoach, setSavingEditCoach] = useState(false)
+  const [editCoachError, setEditCoachError] = useState('')
   const [savingCoach, setSavingCoach] = useState(false)
   const [coachMessage, setCoachMessage] = useState('')
   // Coach activity (#40): the coach tapped to filter the section (null = all coaches)
@@ -398,6 +402,29 @@ export default function CompanyAdminPage() {
     const result = await response.json().catch(() => ({ error: 'Network error' }))
     if (!response.ok || result.error) { showToast('Could not save: ' + (result.error || response.status), 'error'); return }
     showToast(active ? `${coach.full_name}'s login is on ✓` : `${coach.full_name}'s login is off`)
+    if (companyId) fetchCoaches(companyId)
+  }
+
+  const handleSaveCoach = async () => {
+    if (!editCoach) return
+    const name = editCoach.full_name.trim()
+    const phone = editCoach.phone.trim()
+    if (!name) { setEditCoachError('Enter the coach\'s name'); return }
+    if (editCoach.phoneLogin && !/^\d{10}$/.test(phone)) { setEditCoachError('Enter a valid 10-digit phone number: they log in with it'); return }
+    setSavingEditCoach(true)
+    setEditCoachError('')
+    const response = await fetch('/api/update-coach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coachId: editCoach.id, full_name: name, phone })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    setSavingEditCoach(false)
+    if (!response.ok || result.error) { setEditCoachError("Couldn't save: " + (result.error || response.status)); return }
+    const old = coachById[editCoach.id]
+    const phoneChanged = editCoach.phoneLogin && old && (old.phone || '') !== phone
+    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : 'Coach saved ✓')
+    setEditCoach(null)
     if (companyId) fetchCoaches(companyId)
   }
 
@@ -1382,6 +1409,36 @@ export default function CompanyAdminPage() {
                   <ul className="space-y-2 mb-3">
                     {coaches.map(c => {
                       const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
+                      // India coaches log in with their phone ({phone}@getcoachboard.in); US coaches with email
+                      const phoneLogin = !c.email || c.email.endsWith('@getcoachboard.in')
+                      if (editCoach?.id === c.id) return (
+                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="text" placeholder="Coach name" aria-label="Coach name"
+                              value={editCoach.full_name}
+                              onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                            <input type="tel" placeholder={phoneLogin ? 'Phone (10 digits)' : 'Phone (optional)'} aria-label="Phone"
+                              value={editCoach.phone}
+                              onChange={e => setEditCoach({ ...editCoach, phone: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                          </div>
+                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && (
+                            <p className="text-[11px] text-amber-300">They log in with their phone: the new number becomes their login. Their password doesn&apos;t change.</p>
+                          )}
+                          {editCoachError && <p className="text-xs text-red-400">{editCoachError}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={handleSaveCoach} disabled={savingEditCoach}
+                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
+                              {savingEditCoach ? 'Saving...' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setEditCoach(null)}
+                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
+                              Cancel
+                            </button>
+                          </div>
+                        </li>
+                      )
                       return (
                         <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
                           <div className="min-w-0">
@@ -1392,6 +1449,10 @@ export default function CompanyAdminPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            <button type="button" onClick={() => { setEditCoachError(''); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
+                              className="text-xs text-orange-400 hover:text-orange-300 transition">
+                              Edit
+                            </button>
                             <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
                               {c.archived_at ? 'Off' : 'Active'}
                             </span>

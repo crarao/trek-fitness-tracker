@@ -137,6 +137,7 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | API: delete company | `app/api/delete-company/route.ts` |
 | API: update client | `app/api/update-client/route.ts` |
 | API: turn a coach login off / on | `app/api/set-coach-active/route.ts` |
+| API: rename a coach / change their phone (phone login follows) | `app/api/update-coach/route.ts` |
 | API: AI plan generation | `app/api/generate-plan/route.ts` |
 | API: AI coaching insights | `app/api/ai-insights/route.ts` |
 | API: AI diet chart (staff, reads profile server-side) | `app/api/generate-diet/route.ts` |
