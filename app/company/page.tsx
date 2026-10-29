@@ -9,7 +9,8 @@ import { activityText } from '@/lib/activities'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso } from '@/lib/locale'
+import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
+import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 
 type Membership = {
   id: string
@@ -102,6 +103,8 @@ export default function CompanyAdminPage() {
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member'
   })
+  // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
+  const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showSettings, setShowSettings] = useState(false)
@@ -126,6 +129,8 @@ export default function CompanyAdminPage() {
   const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
   // Today's sessions (#41): PT clients' sessions since this week's Monday, and the names of staff who logged them
   const [recent, setRecent] = useState<{ sessions: TodaySession[]; names: Record<string, string> } | null>(null)
+  // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
+  const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
 
   useEffect(() => { initialize() }, [])
 
@@ -159,6 +164,9 @@ export default function CompanyAdminPage() {
     setCompanyId(profile.company_id)
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
+    fetchLeadStats(profile.company_id)
+    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
+    if (fromLeadId) openFromLead(fromLeadId)
 
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
@@ -180,6 +188,45 @@ export default function CompanyAdminPage() {
       is_active: company?.is_active as boolean,
       is_trial: company?.is_trial ?? true
     })
+  }
+
+  // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
+  const openFromLead = async (leadId: string) => {
+    const { data: lead, error } = await supabase
+      .from('leads')
+      .select('id, name, phone, source, interest, status')
+      .eq('id', leadId)
+      .maybeSingle()
+    router.replace('/company')
+    if (error || !lead || !isOpen({ status: lead.status as LeadStatus })) {
+      if (error) console.error('Lead fetch error:', error)
+      return
+    }
+    setNewClient(prev => ({
+      ...prev,
+      full_name: lead.name || '',
+      phone: lead.phone || '',
+      client_type: lead.interest === 'pt' ? 'pt' : 'member',
+    }))
+    setFromLead({ id: lead.id, name: lead.name, source: lead.source })
+    setMessage('')
+    setShowForm(true)
+  }
+
+  // One light query, in parallel with the member list: open leads, plus leads updated this month or added this week
+  const fetchLeadStats = async (cId: string) => {
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+    const weekStart = parseDate(thisWeekMonday())
+    const { data, error } = await supabase
+      .from('leads')
+      .select('id, status, follow_up_date, created_at, updated_at')
+      .eq('company_id', cId)
+      .or(`status.in.(new,trial),updated_at.gte."${monthStart.toISOString()}",created_at.gte."${weekStart.toISOString()}"`)
+    if (error) { console.error('Leads summary fetch error:', error); return }
+    const rows = (data || []) as Pick<Lead, 'status' | 'follow_up_date' | 'created_at' | 'updated_at'>[]
+    setLeadStats({ summary: leadSummary(rows, localDateIso()), rows: rows.length })
   }
 
   const fetchClients = async (cId: string) => {
@@ -421,7 +468,20 @@ export default function CompanyAdminPage() {
     }
 
     setMessage('Member created successfully!')
-    showToast('Member added ✓')
+    if (fromLead) {
+      // Mark the enquiry Joined; the member is kept even if this fails
+      const { data: updated, error: leadError } = await supabase
+        .from('leads')
+        .update({ status: 'joined', converted_profile_id: result.userId, follow_up_date: null })
+        .eq('id', fromLead.id)
+        .select('id')
+      if (leadError) console.error('Lead update error:', leadError)
+      if (leadError || !updated?.length) showToast("Member added, but the enquiry wasn't updated", 'error')
+      else { showToast('Member added ✓ · enquiry marked Joined'); fetchLeadStats(companyId!) }
+      setFromLead(null)
+    } else {
+      showToast('Member added ✓')
+    }
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
@@ -603,7 +663,7 @@ export default function CompanyAdminPage() {
               Logout
             </button>
             <button
-              onClick={() => setShowForm(!showForm)}
+              onClick={() => { setShowForm(!showForm); setFromLead(null) }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
               + Add Member
             </button>
@@ -791,6 +851,38 @@ export default function CompanyAdminPage() {
           </div>
         </div>
       )}
+
+      {/* Leads (#52): follow-ups due, new this week, this month's joined / lost */}
+      <div className="px-4 sm:px-8 pt-3">
+        {!leadStats ? (
+          <div className="h-12 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" aria-label="Loading" />
+        ) : leadStats.rows === 0 ? (
+          <button type="button" data-nav onClick={() => router.push('/company/leads')}
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Track enquiries <span className="text-white font-medium">→ Leads</span>
+          </button>
+        ) : (() => {
+          const s = leadStats.summary
+          const due = s.dueToday + s.overdue
+          return (
+            <button type="button" data-nav onClick={() => router.push('/company/leads')}
+              className={`w-full text-left bg-gray-900 border rounded-2xl p-4 hover:border-gray-600 transition ${s.overdue ? 'border-red-900/50' : 'border-gray-800'}`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Leads</p>
+                <span className="text-gray-500 text-sm">→</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400">
+                <p><span className={`text-lg font-bold ${s.overdue ? 'text-red-400' : due ? 'text-amber-400' : 'text-white'}`}>{due}</span> follow-up{due === 1 ? '' : 's'} due</p>
+                <p><span className="text-lg font-bold text-white">{s.newThisWeek}</span> new this week</p>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                This month: <span className="text-green-400 font-semibold">{s.joinedThisMonth}</span> joined · <span className="text-gray-300 font-semibold">{s.lostThisMonth}</span> lost
+                {s.conversionPct !== null ? ` · ${s.conversionPct}%` : ''}
+              </p>
+            </button>
+          )
+        })()}
+      </div>
 
       {/* Training — PT clients (Train module, #44): Today (trained, due) and This week (plan weeks: %, missed, no plan, per coach) */}
       {trainModule && ptCount > 0 && (
@@ -1241,9 +1333,14 @@ export default function CompanyAdminPage() {
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-white">New Member</h3>
-                <button onClick={() => { setShowForm(false); setMessage('') }}
+                <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
               </div>
+              {fromLead && (
+                <p className="mb-3 text-xs text-green-300 bg-green-950/40 border border-green-900 rounded-lg px-3 py-2">
+                  From enquiry: {fromLead.name}{fromLead.source ? ` · ${sourceLabel(fromLead.source)}` : ''}
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <input type="text" placeholder="Full name"
                   value={newClient.full_name}
@@ -1337,7 +1434,7 @@ export default function CompanyAdminPage() {
                   className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
                   {saving ? 'Creating...' : 'Create Member'}
                 </button>
-                <button onClick={() => { setShowForm(false); setMessage('') }}
+                <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">
                   Cancel
                 </button>
