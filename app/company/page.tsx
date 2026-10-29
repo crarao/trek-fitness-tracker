@@ -148,6 +148,9 @@ export default function CompanyAdminPage() {
   const [coachMessage, setCoachMessage] = useState('')
   // Coach activity (#40): the coach tapped to filter the section (null = all coaches)
   const [activityCoach, setActivityCoach] = useState<string | null>(null)
+  // Training card is collapsed by default (Coach assignments sits above it); the coach row opened in Coach assignments
+  const [showTraining, setShowTraining] = useState(false)
+  const [assignCoach, setAssignCoach] = useState<string | null>(null)
   const [confirmBox, setConfirmBox] = useState<{ title: string; body: string; action: string; onConfirm: () => void } | null>(null)
   // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
   const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
@@ -672,6 +675,7 @@ export default function CompanyAdminPage() {
   const todayIso = localDateIso()
   const ptById = Object.fromEntries(ptClients.map(c => [c.id, c]))
   const trainedToday = (recent?.sessions || []).filter(s => s.session_date === todayIso && ptById[s.client_id])
+  const trainedTodayIds = new Set(trainedToday.map(s => s.client_id))
   const dueToday: { c: Client; label: string }[] = []
   const missedWeek: { c: Client; days: string[] }[] = []
   if (training) {
@@ -690,7 +694,8 @@ export default function CompanyAdminPage() {
   const activeCoaches = coaches.filter(c => !c.archived_at)
   const loggerName = (id: string) => {
     if (id === 'client') return 'Clients themselves'
-    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().split(/\s+/)[0]
+    // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
+    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
     return first ? `Coach ${first}` : 'Coach'
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
@@ -728,6 +733,13 @@ export default function CompanyAdminPage() {
     .map(x => ({ ...x, left: x.m ? daysUntil(x.m.end_date) : null }))
     .filter((x): x is { c: Client; m: Membership; left: number } => x.left !== null && x.left <= 7)
     .sort((a, b) => a.left - b.left)
+  // Coach assignments: PT clients per primary coach (Off coaches shown only while they still have clients)
+  const assignments = coaches
+    .map(coach => ({ coach, clients: ptClients.filter(c => c.primary_coach_id === coach.id) }))
+    .filter(a => !a.coach.archived_at || a.clients.length > 0)
+    .sort((a, b) => b.clients.length - a.clients.length || a.coach.full_name.localeCompare(b.coach.full_name))
+  const unassigned = ptClients.filter(c => !c.primary_coach_id || !coachById[c.primary_coach_id])
+  const maxAssigned = Math.max(1, ...assignments.map(a => a.clients.length), unassigned.length)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
@@ -1034,16 +1046,77 @@ export default function CompanyAdminPage() {
       </div>
 
       {/* Training — PT clients (Train module, #44): Today (trained, due) and This week (plan weeks: %, missed, no plan, per coach) */}
-      {trainModule && ptCount > 0 && (
+      {/* Coach assignments (#40): how many PT clients each coach is primary coach for, and who has none */}
+      {trainModule && ptCount > 0 && coaches.length > 0 && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
-              {fourWeeks && (
-                <p className="text-xs text-gray-500 shrink-0">Last 4 weeks <span className={`font-semibold ${pctColor(pct(fourWeeks))}`}>{pct(fourWeeks)}%</span></p>
-              )}
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach assignments <span className="normal-case text-gray-600">(PT clients by primary coach)</span></p>
+              <p className="text-xs text-gray-500 shrink-0">{ptCount - unassigned.length} of {ptCount} assigned</p>
             </div>
-            {!training || !recent ? (
+            <ul className="mt-2 divide-y divide-gray-800">
+              {[...assignments.map(a => ({ id: a.coach.id, name: a.coach.full_name, off: !!a.coach.archived_at, clients: a.clients })),
+                ...(unassigned.length ? [{ id: 'none', name: 'No primary coach', off: false, clients: unassigned }] : [])].map(row => {
+                const open = assignCoach === row.id
+                const trainedToday = row.clients.filter(c => trainedTodayIds.has(c.id)).length
+                return (
+                  <li key={row.id} className="py-2">
+                    <button type="button" onClick={() => setAssignCoach(open ? null : row.id)} aria-expanded={open} disabled={!row.clients.length}
+                      className="w-full text-left">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className={`text-sm truncate ${row.id === 'none' ? 'text-amber-300' : row.off ? 'text-gray-500' : 'text-white'}`}>
+                          {row.name}{row.off ? ' (login off)' : ''}
+                        </span>
+                        <span className="text-xs text-gray-400 shrink-0">
+                          <span className="text-lg font-bold text-white">{row.clients.length}</span> client{row.clients.length === 1 ? '' : 's'}
+                          {row.clients.length > 0 && <span className="text-gray-500"> · {trainedToday} trained today</span>}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                        <div className={`h-full rounded-full ${row.id === 'none' ? 'bg-amber-500' : row.off ? 'bg-gray-600' : 'bg-purple-500'}`}
+                          style={{ width: `${Math.round((row.clients.length / maxAssigned) * 100)}%` }} />
+                      </div>
+                    </button>
+                    {open && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {row.clients.map(c => (
+                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
+                            className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-200 hover:border-gray-500">
+                            {trainedTodayIds.has(c.id) ? '✓ ' : ''}{c.full_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="text-[11px] text-gray-600 mt-2">Set the primary coach on Add Member or the client&apos;s Profile tab. Any coach can still train any client.</p>
+          </div>
+        </div>
+      )}
+
+      {trainModule && ptCount > 0 && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
+            {/* Collapsed by default: a one-line summary; tap for Today / This week */}
+            <button type="button" onClick={() => setShowTraining(!showTraining)} aria-expanded={showTraining}
+              className="w-full flex items-baseline justify-between gap-3 text-left">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
+              <span className="flex items-baseline gap-3 shrink-0">
+                {!showTraining && recent && (
+                  <span className="text-xs text-gray-500">
+                    <span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained today
+                    {weekTotals.planned > 0 && <> · <span className={`font-semibold ${pctColor(pct(weekTotals))}`}>{pct(weekTotals)}%</span> this week</>}
+                  </span>
+                )}
+                {showTraining && fourWeeks && (
+                  <span className="text-xs text-gray-500">Last 4 weeks <span className={`font-semibold ${pctColor(pct(fourWeeks))}`}>{pct(fourWeeks)}%</span></span>
+                )}
+                <span className={`text-gray-500 text-sm transition-transform inline-block ${showTraining ? 'rotate-180' : ''}`}>▾</span>
+              </span>
+            </button>
+            {!showTraining ? null : !training || !recent ? (
               <div className="mt-3 h-10 rounded-lg bg-gray-800 animate-pulse" aria-label="Loading" />
             ) : (
               <>

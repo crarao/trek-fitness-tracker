@@ -38,7 +38,8 @@ export type TodayRow = {
   lastSessionDate: string | null
 }
 
-const firstName = (name: string | null | undefined) => (name || '').trim().split(/\s+/)[0] || ''
+// First name; a name saved as "Coach Ravi" gives "Ravi" (so labels don't read "Coach Coach")
+const firstName = (name: string | null | undefined) => (name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0] || ''
 
 // "Coach Ravi" for a staff logger, "client" when the client logged it themselves
 export function loggedByLabel(s: CoachSession, names: Record<string, string>): string {

@@ -472,7 +472,8 @@ export default function ClientDetailPage() {
   // " (covering)" when the coach who logged it isn't the client's primary coach
   const loggedByText = (s: Session) => {
     if (!s.logged_by || s.logged_by === clientId) return 'by client'
-    const first = (staffNames[s.logged_by] || staff.find(x => x.id === s.logged_by)?.full_name || '').trim().split(/\s+/)[0]
+    // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
+    const first = (staffNames[s.logged_by] || staff.find(x => x.id === s.logged_by)?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
     const covering = isCovering(s.logged_by, { id: clientId, primary_coach_id: client?.primary_coach_id })
     return (first ? `by Coach ${first}` : 'by coach') + (covering ? ' (covering)' : '')
   }
