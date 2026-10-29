@@ -9,9 +9,14 @@ Part E (the Vercel switch), so Parts A–B and the dry run in Part C can be done
 
 Method: based on Supabase's guide "Backup and Restore using the CLI", using `pg_dump`/`psql` directly (no Docker)
 (supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
-It copies roles, tables, RLS rules, functions, triggers, login accounts (`auth.users`, passwords
-kept) and all data. The app keeps no files in Supabase Storage (logos and banners are links saved
-in `companies`), which A3 confirms.
+It copies tables, RLS rules, functions, triggers, login accounts (`auth.users`, passwords
+kept) and all data. **Not** stored files: Tokyo has 1 public bucket `branding` with 2 files
+(Coach Rich's banner and logo, uploaded 19 Oct, ~350 KB), moved by hand in C7.
+
+**A3 results (29 Oct):** Tokyo PostgreSQL 17.6, Mumbai 17.11 (OK). Extensions: only Supabase
+defaults (pg_stat_statements, pgcrypto, plpgsql, supabase_vault, uuid-ossp), nothing to enable.
+Vault secrets 0. Triggers on auth/storage: only Supabase's own storage triggers. Tools on
+Anand's PC: pg_dump / psql 17.11 (no Docker).
 
 ---
 
@@ -151,13 +156,36 @@ URLs, email settings).
 partner and client at `localhost:3000`. Put Tokyo's values back afterwards.
 Don't add data during this test: anything changed in Mumbai here stays there.
 
+**C7. Move the 2 branding files (~10 min)**
+1. Tokyo → **Storage** → bucket `branding` → folder `Coach Rich` → download
+   `coach_rich_banner.jpg` and `coach_rich_logo.png` (⋯ → Download).
+2. Mumbai → **Storage** → **New bucket** → name `branding` (exactly), **Public bucket ON** → Create.
+3. In it, create folder `Coach Rich` (same spelling and space) and upload both files.
+4. Open one file in Mumbai (⋯ → Get URL) and check it shows in the browser.
+5. Point Coach Rich's company at the Mumbai copies (edits two columns in place, nothing deleted).
+   In the **Mumbai** SQL Editor, check first:
+   ```sql
+   select name, logo_url, banner_url from public.companies
+   where logo_url like '%supabase.co/storage%' or banner_url like '%supabase.co/storage%';
+   ```
+   then (replace `<TOKYO-REF>` with the Tokyo project's ref from its URL):
+   ```sql
+   update public.companies
+   set logo_url = replace(logo_url, '<TOKYO-REF>.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co'),
+       banner_url = replace(banner_url, '<TOKYO-REF>.supabase.co', 'nptxjfvkqjuekgkspemu.supabase.co')
+   where logo_url like '%<TOKYO-REF>.supabase.co%' or banner_url like '%<TOKYO-REF>.supabase.co%'
+   returning name, logo_url, banner_url;
+   ```
+   The returned links should open the images. (Until this runs, the logo still loads from
+   Tokyo, so it keeps working as long as Tokyo isn't paused.)
+
 ---
 
 ## Part D — Timing
 
 - Parts A, B, C2 and the **dry run C3** can be done any time: nothing in Tokyo or Mumbai changes.
 - On move day (quiet evening, ~1 hour, tell the trial coaches): make fresh files (C2 again, so
-  they include today's data), dry run, real load (C3b), check (C4–C5), then Part E straight away.
+  they include today's data), dry run, real load (C3b), check (C4–C5), branding files (C7), then Part E straight away.
 - After C3b Mumbai holds data, so a second real load would need it emptied (a deletion, Rule #1).
   The dry run is what makes that unnecessary.
 
