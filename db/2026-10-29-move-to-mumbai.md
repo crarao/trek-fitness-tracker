@@ -20,6 +20,14 @@ Anand's PC: pg_dump / psql 17.11 (no Docker).
 
 ---
 
+**DONE 29 Oct 2026, ~23:00 IST.** Fresh dumps → dry run (ROLLBACK) → real load (COMMIT) → row
+counts identical in both projects (companies 9, profiles 38, memberships 29, weekly_plans 15,
+logged_sessions 31, session_feedback 20, ai_usage 13, contact_requests 2, auth.users 60,
+auth.identities 60) → Auth settings copied → Vercel env vars → PR #53 (`bom1`) → login works.
+**Lesson:** the first deploy said "Invalid API key": the publishable key in Vercel was wrong.
+`NEXT_PUBLIC_*` values are built into the pages, so after fixing a Vercel variable, **Redeploy
+without build cache**.
+
 **Status 29 Oct (evening):** Parts A–B done on Anand's PC (pg_dump/psql 17.11, Session pooler:
 Tokyo `aws-1-ap-northeast-1`, Mumbai `aws-0-ap-south-1`; Direct addresses don't work on his
 internet, no IPv6). **Dry run C3 passed**: schema, 60 logins + 60 identities, 10 tables loaded,
