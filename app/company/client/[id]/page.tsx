@@ -15,6 +15,7 @@ import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
+import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -242,6 +243,23 @@ export default function ClientDetailPage() {
   const [coachName, setCoachName] = useState('')        // logged-in staff user, for the sign-off
   const [staff, setStaff] = useState<Staff[]>([])
   const [savingPrimaryCoach, setSavingPrimaryCoach] = useState(false)
+  // Who is looking (#40). A coach never queries memberships (no access) and gets no member admin controls.
+  const [viewerId, setViewerId] = useState<string | null>(null)
+  const [isCoach, setIsCoach] = useState(false)
+  const viewerPromise = useRef<Promise<{ id: string; full_name: string; role: string; company_id: string | null } | null> | null>(null)
+  const getViewer = () => {
+    viewerPromise.current ??= (async () => {
+      // getSession reads the saved login locally (the proxy already verified it with Supabase)
+      const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user
+      if (!user) return null
+      const { data } = await supabase.from('profiles').select('full_name, role, company_id').eq('id', user.id).single()
+      return { id: user.id, full_name: data?.full_name || '', role: data?.role || '', company_id: data?.company_id ?? null }
+    })()
+    return viewerPromise.current
+  }
+  // "Before you start" card: collapsed or open, remembered per viewer on this device
+  const [bysOpen, setBysOpen] = useState(true)
   const sharePanelRef = useRef<HTMLDivElement | null>(null)
   const [makingPdf, setMakingPdf] = useState(false)
 
@@ -258,14 +276,16 @@ export default function ClientDetailPage() {
     return () => { cancelled = true }
   }, [clientId])
 
-  // Logged-in staff member's name (WhatsApp sign-off), and the gym's staff (owner, partners, coaches)
+  // Logged-in staff member's name (WhatsApp sign-off), their role, and the gym's staff (owner, partners, coaches)
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data } = await supabase.from('profiles').select('full_name, company_id').eq('id', user.id).single()
-      setCoachName(data?.full_name || '')
-      if (!data?.company_id) return
+      const data = await getViewer()
+      if (!data) return
+      setCoachName(data.full_name)
+      setViewerId(data.id)
+      setIsCoach(data.role === 'coach')
+      try { if (localStorage.getItem(`bys-collapsed:${data.id}`) === '1') setBysOpen(false) } catch { /* storage unavailable */ }
+      if (!data.company_id) return
       const { data: staffRows } = await supabase.from('profiles')
         .select('id, full_name, role, archived_at')
         .eq('company_id', data.company_id)
@@ -383,6 +403,17 @@ export default function ClientDetailPage() {
         if (clientData?.company_id) setCompanyId(clientData.company_id)
       })(),
       want('memberships') && (async () => {
+        // Coaches: plan and dates only, from pt_membership_status() (no amounts, no history)
+        if ((await getViewer())?.role === 'coach') {
+          const { data: status, error: statusError } = await supabase.rpc('pt_membership_status')
+          if (statusError) console.error('Membership status error:', statusError)
+          const row = ((status || []) as { profile_id: string; plan_type: string | null; start_date: string | null; end_date: string | null }[])
+            .find(m => m.profile_id === clientId)
+          setMemberships(row?.start_date && row.end_date
+            ? [{ id: 'status', plan_type: row.plan_type || '', amount_paid: 0, start_date: row.start_date, end_date: row.end_date }]
+            : [])
+          return
+        }
         const { data: membershipsData } = await supabase
           .from('memberships')
           .select('id, plan_type, amount_paid, start_date, end_date, created_at')
@@ -438,10 +469,23 @@ export default function ClientDetailPage() {
 
   const clientFirstName = (client?.full_name || '').trim().split(/\s+/)[0] || 'client'
   // "by Coach Priya" when staff logged it for the client, "by client" when the client logged it
+  // " (covering)" when the coach who logged it isn't the client's primary coach
   const loggedByText = (s: Session) => {
     if (!s.logged_by || s.logged_by === clientId) return 'by client'
-    const first = (staffNames[s.logged_by] || '').trim().split(/\s+/)[0]
-    return first ? `by Coach ${first}` : 'by coach'
+    const first = (staffNames[s.logged_by] || staff.find(x => x.id === s.logged_by)?.full_name || '').trim().split(/\s+/)[0]
+    const covering = isCovering(s.logged_by, { id: clientId, primary_coach_id: client?.primary_coach_id })
+    return (first ? `by Coach ${first}` : 'by coach') + (covering ? ' (covering)' : '')
+  }
+  const staffFirstName = (id: string | null | undefined) => (staff.find(x => x.id === id)?.full_name || '').trim().split(/\s+/)[0]
+  // Shown near Mark done when a coach trains someone else's client (or a client with no primary coach)
+  const coveringBadge = () => {
+    if (!isCoach || !viewerId || !isCovering(viewerId, { id: clientId, primary_coach_id: client?.primary_coach_id })) return null
+    const primary = staffFirstName(client?.primary_coach_id)
+    return (
+      <p className="text-[11px] text-gray-500 mb-2">
+        {client?.primary_coach_id ? `Covering for ${primary || 'their coach'}` : 'No primary coach'}
+      </p>
+    )
   }
   // Done-day notes on plan cards ("45 min · ~265 kcal") plus who logged the day's latest session
   const doneNotesWithWho = (planId: string) => {
@@ -496,7 +540,7 @@ export default function ClientDetailPage() {
       setMarkError('Could not save: ' + (error?.message || 'please try again'))
       return
     }
-    if (markForm.star_rating > 0) {
+    if (markForm.star_rating > 0 && !isCoach) {
       await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
     }
     setSavingMark(false)
@@ -627,14 +671,19 @@ const handleUpdatePlan = async () => {
   }
   // Structured: save the days; text edit of a plan that had days: clear them so the text shows
   const withJson = cleaned ? { ...base, plan_json: cleaned } : editingPlan.plan_json ? { ...base, plan_json: null } : base
-  let { error } = await supabase.from('weekly_plans').update(withJson).eq('id', editingPlan.id)
+  // .select() so an update blocked by database rules (0 rows, no error) isn't reported as saved
+  let { data: updated, error } = await supabase.from('weekly_plans').update(withJson).eq('id', editingPlan.id).select('id')
   // If the plan_json column hasn't been added in Supabase yet, save the text alone
   if (error && /plan_json/i.test(error.message)) {
-    ;({ error } = await supabase.from('weekly_plans').update(base).eq('id', editingPlan.id))
+    ;({ data: updated, error } = await supabase.from('weekly_plans').update(base).eq('id', editingPlan.id).select('id'))
   }
   setSaving(false)
   if (error) {
     setPlanError('Could not save changes: ' + error.message)
+    return
+  }
+  if (!updated?.length) {
+    setPlanError("Couldn't save: not allowed for this login")
     return
   }
   const editedId = editingPlan.id
@@ -1160,10 +1209,12 @@ const handleResetPassword = async () => {
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <button data-nav onClick={() => router.push('/company')}
+          <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')}
             className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
             ← Back
           </button>
+          {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
+          {!isCoach && (<>
           <button
             onClick={() => setShowResetPassword(!showResetPassword)}
             className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
@@ -1208,6 +1259,7 @@ const handleResetPassword = async () => {
             className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
             {deletingClient ? 'Deleting...' : 'Delete'}
           </button>
+          </>)}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
               <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
@@ -1232,7 +1284,7 @@ const handleResetPassword = async () => {
       </div>
 
       {/* Edit Client Panel */}
-      {showEditClient && (
+      {showEditClient && !isCoach && (
         <div className="bg-gray-900 border-b border-gray-800 px-6 py-5">
           <div className="max-w-2xl mx-auto space-y-4">
 
@@ -1348,7 +1400,7 @@ const handleResetPassword = async () => {
         </div>
       )}
 
-{showResetPassword && (
+{showResetPassword && !isCoach && (
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
     <div className="max-w-2xl mx-auto space-y-3">
       <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Reset Client Password</p>
@@ -1436,6 +1488,68 @@ const handleResetPassword = async () => {
           </>
         )}
       </div>
+
+      {/* Before you start (#40): what any staff member should know before training this PT client */}
+      {client?.client_type === 'pt' && (() => {
+        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+        const primary = client.primary_coach_id ? staff.find(x => x.id === client.primary_coach_id)?.full_name : null
+        const toggle = () => {
+          const next = !bysOpen
+          setBysOpen(next)
+          try { if (viewerId) localStorage.setItem(`bys-collapsed:${viewerId}`, next ? '0' : '1') } catch { /* storage unavailable */ }
+        }
+        return (
+          <div className="max-w-2xl mx-auto px-6 mt-3">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+              <button type="button" onClick={toggle} aria-expanded={bysOpen} className="w-full flex items-center justify-between text-left gap-3">
+                <span className="text-xs text-gray-500 uppercase tracking-wider">Before you start</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  {!bysOpen && b.medical && <span className="text-[11px] text-amber-400 truncate">⚠ {b.medical}</span>}
+                  <span className={`text-gray-500 text-sm transition-transform inline-block ${bysOpen ? 'rotate-180' : ''}`}>▾</span>
+                </span>
+              </button>
+              {bysOpen && (
+                <div className="mt-3 space-y-2.5 text-sm">
+                  <p className="text-gray-400">
+                    Primary coach: <span className="text-white">{client.primary_coach_id ? (client.primary_coach_id === viewerId ? 'You' : primary || 'Coach') : 'No primary coach'}</span>
+                  </p>
+                  {b.goal && <p className="text-gray-400">Goal: <span className="text-white">{b.goal}</span></p>}
+                  {b.medical && (
+                    <p className="text-amber-300 bg-amber-950/40 border border-amber-900 rounded-lg px-3 py-2">⚠ Medical / injuries: {b.medical}</p>
+                  )}
+                  <p className="text-gray-400">
+                    {b.daysSinceLast === null ? 'No sessions yet'
+                      : b.daysSinceLast === 0 ? 'Last trained today'
+                      : `Last trained ${b.daysSinceLast} day${b.daysSinceLast === 1 ? '' : 's'} ago`}
+                  </p>
+                  {b.lastTwo.length > 0 && (
+                    <ul className="divide-y divide-gray-800 border-t border-gray-800">
+                      {b.lastTwo.map((x, i) => (
+                        <li key={i} className="py-2">
+                          <p className="text-xs text-white">
+                            {formatDate(x.date, country, 'weekday')}
+                            {x.day ? <span className="text-gray-400"> · {x.day}</span> : null}
+                            {x.exercises ? <span className="text-gray-400"> · {x.exercises}</span> : null}
+                            {x.minutes ? <span className="text-gray-400"> · {x.minutes} min</span> : null}
+                            <span className="text-gray-500"> · by {x.by}{x.covering ? ' (covering)' : ''}</span>
+                          </p>
+                          {x.notes && <p className="text-xs text-gray-400 mt-0.5">{x.notes}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {b.totalSessions > 0 && (client as any)?.companies?.client_module_enabled && (
+                    <button type="button" onClick={() => setActiveTab('sessions')}
+                      className="text-xs text-orange-400 hover:text-orange-300">
+                      See all {b.totalSessions} session{b.totalSessions === 1 ? '' : 's'} →
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Tabs — PT members only, requires client module */}
       {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
@@ -1773,7 +1887,9 @@ const handleResetPassword = async () => {
           })() : null
           if (markKey === key) return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
+              {coveringBadge()}
               <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
+                feelingEnabled={!isCoach}
                 country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
                 notesLabel="Notes (optional)"
                 error={markError} saving={savingMark} submitLabel={`Done ✓ for ${clientFirstName}`}
@@ -1809,6 +1925,7 @@ const handleResetPassword = async () => {
           return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
               {sent}
+              {coveringBadge()}
               <button type="button" onClick={() => openMarkForm(key)}
                 className="w-full bg-green-600 hover:bg-green-500 text-white font-semibold py-3 rounded-xl text-sm">
                 Mark done for {clientFirstName}
@@ -1866,13 +1983,13 @@ const handleResetPassword = async () => {
               className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 rounded-lg transition">
               ✏️
             </button>
-            <button
+            {!isCoach && <button
               onClick={e => { e.stopPropagation(); handleDeletePlan(plan.id) }}
               disabled={deletingPlanId === plan.id}
               aria-label={`Delete plan for week of ${formatWeekStart(plan.week_start)}`}
               className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 rounded-lg transition disabled:opacity-50">
               {deletingPlanId === plan.id ? '…' : '🗑'}
-            </button>
+            </button>}
           </div>
         </div>
         {open && (
@@ -1958,7 +2075,14 @@ const handleResetPassword = async () => {
                     {session.notes && (
                       <p className="text-xs text-gray-400 mb-3 bg-gray-800 rounded-lg px-3 py-2">{session.notes}</p>
                     )}
-                    {(client as any)?.companies?.feedback_enabled !== false && (
+                    {/* Coaches read feedback but can't give it */}
+                    {(client as any)?.companies?.feedback_enabled !== false && isCoach && fb?.admin_feedback && (
+                      <div className="border-t border-gray-800 pt-3">
+                        <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">Feedback</p>
+                        <p className="text-xs text-gray-300 whitespace-pre-wrap">{fb.admin_feedback}</p>
+                      </div>
+                    )}
+                    {(client as any)?.companies?.feedback_enabled !== false && !isCoach && (
                     <div className="border-t border-gray-800 pt-3">
                       <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Your feedback</label>
                       <textarea
@@ -2064,7 +2188,7 @@ const handleResetPassword = async () => {
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-bold ${color}`}>{Math.abs(days)} {days < 0 ? 'days overdue' : 'days left'}</p>
-                      <p className="text-xs text-gray-500">{formatMoney(Number(m.amount_paid), currency)}</p>
+                      {!isCoach && <p className="text-xs text-gray-500">{formatMoney(Number(m.amount_paid), currency)}</p>}
                     </div>
                   </div>
                   <div className="w-full bg-gray-700 rounded-full h-1.5">
@@ -2073,7 +2197,7 @@ const handleResetPassword = async () => {
                 </div>
               )
             })()}
-            {memberships.length > 1 && (
+            {memberships.length > 1 && !isCoach && (
               <div className="border-t border-gray-800 pt-3 space-y-2">
                 <p className="text-xs text-gray-600 uppercase tracking-wider">History</p>
                 {memberships.slice(1).map(m => (
@@ -2094,7 +2218,7 @@ const handleResetPassword = async () => {
       {/* Card header with Edit button */}
       <div className="flex justify-between items-center">
         <h2 className="font-semibold text-white">Client Fitness Profile</h2>
-        <button
+        {!isCoach && <button
           onClick={() => {
             if (editingClientProfile) {
               setEditingClientProfile(false)
@@ -2120,10 +2244,10 @@ const handleResetPassword = async () => {
           }}
           className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
           {editingClientProfile ? 'Cancel' : 'Edit'}
-        </button>
+        </button>}
       </div>
 
-      {editingClientProfile ? (
+      {editingClientProfile && !isCoach ? (
         <div className="space-y-4">
           {/* Goal */}
           <div>
@@ -2385,6 +2509,9 @@ const handleResetPassword = async () => {
             {client?.client_type === 'pt' ? (
               <div>
                 <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Primary coach</label>
+                {isCoach ? (
+                  <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || 'Coach') : 'No primary coach'}</p>
+                ) : (
                 <select id="primary-coach" value={client.primary_coach_id || ''} disabled={savingPrimaryCoach}
                   onChange={e => handleSavePrimaryCoach(e.target.value)}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-50">
@@ -2393,6 +2520,7 @@ const handleResetPassword = async () => {
                     <option key={x.id} value={x.id}>{x.full_name}{x.archived_at ? ' (login off)' : ''}</option>
                   ))}
                 </select>
+                )}
                 {client.trainer_name && (
                   <p className="text-xs text-gray-500 mt-1.5">Trainer (old field): <span className="text-gray-300">{client.trainer_name}</span></p>
                 )}
@@ -2409,7 +2537,7 @@ const handleResetPassword = async () => {
             </div>
 
             {/* AI diet chart (super admin can turn it off per gym; typed diet plans still work) */}
-            {(client as { companies?: { ai_diet_enabled?: boolean | null } } | null)?.companies?.ai_diet_enabled !== false && !dietDraft && !dietGenerating && (
+            {!isCoach && (client as { companies?: { ai_diet_enabled?: boolean | null } } | null)?.companies?.ai_diet_enabled !== false && !dietDraft && !dietGenerating && (
               <div className="space-y-2">
                 {(!client?.food_preference || !client?.weight_kg) && (
                   <p className="text-xs text-yellow-300">

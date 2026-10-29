@@ -129,7 +129,7 @@ export function sortRows(rows: TodayRow[]): TodayRow[] {
 export type BeforeYouStart = {
   goal: string | null
   medical: string | null
-  lastTwo: { date: string; day: string | null; exercises: string | null; minutes: number | null; notes: string | null; by: string }[]
+  lastTwo: { date: string; day: string | null; exercises: string | null; minutes: number | null; notes: string | null; by: string; covering: boolean }[]
   totalSessions: number
   daysSinceLast: number | null
 }
@@ -153,6 +153,7 @@ export function beforeYouStart(
       minutes: s.duration_minutes ?? null,
       notes: s.notes?.trim() || null,
       by: loggedByLabel(s, staffNames),
+      covering: isCovering(s, client),
     })),
     totalSessions: mine.length,
     daysSinceLast: last ? Math.round((parseDate(today).getTime() - parseDate(last).getTime()) / 86400000) : null,
