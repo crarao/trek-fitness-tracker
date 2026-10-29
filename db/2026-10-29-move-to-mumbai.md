@@ -20,6 +20,12 @@ Anand's PC: pg_dump / psql 17.11 (no Docker).
 
 ---
 
+**Status 29 Oct (evening):** Parts A–B done on Anand's PC (pg_dump/psql 17.11, Session pooler:
+Tokyo `aws-1-ap-northeast-1`, Mumbai `aws-0-ap-south-1`; Direct addresses don't work on his
+internet, no IPv6). **Dry run C3 passed**: schema, 60 logins + 60 identities, 10 tables loaded,
+ended in ROLLBACK with no errors. Remaining: move day = fresh C2 data files, C3b (commit), C4–C7, Part E.
+Tokyo database password was reset 29 Oct and shown once in chat: reset it again after the move.
+
 ## Part A — Get the computer ready (once, ~20 min)
 
 **A1. Install the PostgreSQL 17 command-line tools** (gives `pg_dump` and `psql`)
@@ -84,7 +90,7 @@ Screenshots are fine.
 
 In **each** project: top bar **Connect** → **Session pooler** → copy the URI. It looks like
 `postgresql://postgres.<ref>:[YOUR-PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres`.
-Use the Session pooler (works on any home internet; the "Direct" one needs IPv6).
+Use the Session pooler (works on any home internet; the "Direct" one needs IPv6). Leave the password out of the address (`postgresql://postgres.<ref>@<host>:5432/postgres`); psql/pg_dump then ask for it, which avoids quoting problems.
 
 - Put each project's database password in place of `[YOUR-PASSWORD]`.
   Forgot Tokyo's? Tokyo → Project Settings → Database → **Reset database password** (safe: the app
@@ -117,9 +123,18 @@ pg_dump $OLD --data-only --schema=public --quote-all-identifiers -f data_public.
 pg_dump $OLD --data-only --table=auth.users --table=auth.identities --quote-all-identifiers -f data_auth.sql
 dir
 ```
-- `schema.sql` = tables, RLS rules, functions, triggers, grants. **No user data.** Send it to
-  Claude: it checks it and removes lines Mumbai would refuse (e.g. `FOR ROLE supabase_admin`),
-  and sends back `schema_fixed.sql`.
+- `schema.sql` = tables, RLS rules, functions, triggers, grants. **No user data.**
+- Make `schema_fixed.sql` from it (comments out 16 lines Mumbai would refuse or doesn't need:
+  `CREATE SCHEMA "public"` + its comment, 12 × `ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin"`,
+  and the duplicate indexes `memberships_company_id` / `memberships_profile_id`, which repeat the
+  older `*_idx` ones). In PowerShell, one line at a time:
+  ```powershell
+  $lines = Get-Content schema.sql -Encoding UTF8
+  $out = foreach ($l in $lines) { $t = $l.Trim(); if ($t -eq 'CREATE SCHEMA "public";' -or $t.StartsWith('COMMENT ON SCHEMA "public"') -or $t.StartsWith('ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin"') -or $t.StartsWith('CREATE INDEX "memberships_company_id" ON') -or $t.StartsWith('CREATE INDEX "memberships_profile_id" ON')) { "-- [off for Mumbai] $l" } else { $l } }
+  [IO.File]::WriteAllLines("$PWD\schema_fixed.sql", [string[]]$out, (New-Object Text.UTF8Encoding $false))
+  (Select-String -Path schema_fixed.sql -Pattern 'off for Mumbai').Count
+  ```
+  The last line must print 16.
 - `data_public.sql`, `data_auth.sql` = the real data (names, phones, login password hashes).
   **Never send or upload these.** Delete them after the move is confirmed.
 - Logins: `auth.users` + `auth.identities` carry email/phone logins and passwords. Sessions are
