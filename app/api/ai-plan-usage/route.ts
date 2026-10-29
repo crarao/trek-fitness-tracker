@@ -2,12 +2,12 @@
 // GET /api/ai-plan-usage?clientId=<uuid> → { aiPlans: { used, limit, resetsOn } | null }
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getCaller, STAFF, checkCanManageClient } from '@/lib/auth-server'
+import { getCaller, PLAN_ROLES, checkCanManageClient } from '@/lib/auth-server'
 import { getAiPlanUsage } from '@/lib/ai-plan-limit'
 import { normalizeCountry } from '@/lib/locale'
 
 export async function GET(request: NextRequest) {
-  const { caller, error: authError } = await getCaller(STAFF)
+  const { caller, error: authError } = await getCaller(PLAN_ROLES)
   if (authError) return authError
 
   const clientId = request.nextUrl.searchParams.get('clientId')

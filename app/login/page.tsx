@@ -22,6 +22,8 @@ const defaultTaglines: Record<string, string> = {
   general: 'Achieve Your Goals.'
 }
 
+const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
+
 type CompanyBranding = {
   name: string
   logo_url: string | null
@@ -33,6 +35,7 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const companySlug = searchParams.get('company')
+  const coachOff = searchParams.get('off') === 'coach'
 
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -40,6 +43,14 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [branding, setBranding] = useState<CompanyBranding | null>(null)
+
+  // Sent here by proxy.ts because this coach login was turned off: end the open session
+  useEffect(() => {
+    if (coachOff) {
+      supabase.auth.signOut()
+      setError(COACH_OFF_MESSAGE)
+    }
+  }, [coachOff])
 
   useEffect(() => {
     if (companySlug) {
@@ -84,14 +95,15 @@ const fetchBranding = async (slug: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(identifier), password })
 
     if (error) {
-      setError(error.message)
+      // A turned-off coach is banned in Supabase Auth (set-coach-active)
+      setError(/banned/i.test(error.message) ? COACH_OFF_MESSAGE : error.message)
       setLoading(false)
       return
     }
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role, archived_at')
       .eq('id', data.user.id)
       .single()
 
@@ -103,6 +115,15 @@ const fetchBranding = async (slug: string) => {
 
     if (profile.role === 'super_admin') router.push('/admin')
     else if (profile.role === 'company_admin' || profile.role === 'partner') router.push('/company')
+    else if (profile.role === 'coach') {
+      if (profile.archived_at) {
+        await supabase.auth.signOut()
+        setError(COACH_OFF_MESSAGE)
+        setLoading(false)
+        return
+      }
+      router.push('/coach')
+    }
     else router.push('/client')
   }
 
