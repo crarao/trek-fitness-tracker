@@ -347,7 +347,12 @@ export default function LeadsPage() {
                       Re-open
                     </button>
                   )}
-                  {/* CONVERT TO MEMBER */}
+                  {isOpen(editing) && (
+                    <button type="button" data-nav onClick={() => router.push(`/company?fromLead=${editing.id}`)}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-green-700 text-green-400 hover:bg-green-900/30 transition font-medium">
+                      Convert to member
+                    </button>
+                  )}
                 </div>
 
                 {statusPrompt === 'trial' && (

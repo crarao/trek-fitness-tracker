@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso } from '@/lib/locale'
+import { isOpen, sourceLabel, type LeadStatus } from '@/lib/leads'
 
 type Membership = {
   id: string
@@ -102,6 +103,8 @@ export default function CompanyAdminPage() {
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member'
   })
+  // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
+  const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [showSettings, setShowSettings] = useState(false)
@@ -159,6 +162,8 @@ export default function CompanyAdminPage() {
     setCompanyId(profile.company_id)
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
+    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
+    if (fromLeadId) openFromLead(fromLeadId)
 
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
@@ -180,6 +185,29 @@ export default function CompanyAdminPage() {
       is_active: company?.is_active as boolean,
       is_trial: company?.is_trial ?? true
     })
+  }
+
+  // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
+  const openFromLead = async (leadId: string) => {
+    const { data: lead, error } = await supabase
+      .from('leads')
+      .select('id, name, phone, source, interest, status')
+      .eq('id', leadId)
+      .maybeSingle()
+    router.replace('/company')
+    if (error || !lead || !isOpen({ status: lead.status as LeadStatus })) {
+      if (error) console.error('Lead fetch error:', error)
+      return
+    }
+    setNewClient(prev => ({
+      ...prev,
+      full_name: lead.name || '',
+      phone: lead.phone || '',
+      client_type: lead.interest === 'pt' ? 'pt' : 'member',
+    }))
+    setFromLead({ id: lead.id, name: lead.name, source: lead.source })
+    setMessage('')
+    setShowForm(true)
   }
 
   const fetchClients = async (cId: string) => {
@@ -421,7 +449,20 @@ export default function CompanyAdminPage() {
     }
 
     setMessage('Member created successfully!')
-    showToast('Member added ✓')
+    if (fromLead) {
+      // Mark the enquiry Joined; the member is kept even if this fails
+      const { data: updated, error: leadError } = await supabase
+        .from('leads')
+        .update({ status: 'joined', converted_profile_id: result.userId, follow_up_date: null })
+        .eq('id', fromLead.id)
+        .select('id')
+      if (leadError) console.error('Lead update error:', leadError)
+      if (leadError || !updated?.length) showToast("Member added, but the enquiry wasn't updated", 'error')
+      else showToast('Member added ✓ · enquiry marked Joined')
+      setFromLead(null)
+    } else {
+      showToast('Member added ✓')
+    }
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
@@ -603,7 +644,7 @@ export default function CompanyAdminPage() {
               Logout
             </button>
             <button
-              onClick={() => setShowForm(!showForm)}
+              onClick={() => { setShowForm(!showForm); setFromLead(null) }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
               + Add Member
             </button>
@@ -1241,9 +1282,14 @@ export default function CompanyAdminPage() {
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-white">New Member</h3>
-                <button onClick={() => { setShowForm(false); setMessage('') }}
+                <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
               </div>
+              {fromLead && (
+                <p className="mb-3 text-xs text-green-300 bg-green-950/40 border border-green-900 rounded-lg px-3 py-2">
+                  From enquiry: {fromLead.name}{fromLead.source ? ` · ${sourceLabel(fromLead.source)}` : ''}
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <input type="text" placeholder="Full name"
                   value={newClient.full_name}
@@ -1337,7 +1383,7 @@ export default function CompanyAdminPage() {
                   className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
                   {saving ? 'Creating...' : 'Create Member'}
                 </button>
-                <button onClick={() => { setShowForm(false); setMessage('') }}
+                <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">
                   Cancel
                 </button>
