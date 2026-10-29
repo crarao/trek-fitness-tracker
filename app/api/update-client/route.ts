@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { getCaller, STAFF, checkCanManageClient } from '@/lib/auth-server'
+import { getCaller, STAFF, checkCanManageClient, checkPrimaryCoach } from '@/lib/auth-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -9,7 +9,8 @@ export async function POST(request: Request) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
 
-  const { user_id, full_name, phone } = await request.json()
+  const body = await request.json()
+  const { user_id, full_name, phone } = body
   if (!user_id) return NextResponse.json({ error: 'user_id required' }, { status: 400 })
 
   // Only staff of the client's own gym (or super admin)
@@ -18,16 +19,29 @@ export async function POST(request: Request) {
   const notAllowed = await checkCanManageClient(caller, user_id)
   if (notAllowed) return notAllowed
 
-  // Update profile row
-  const { error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .update({
-      full_name: full_name || null,
-      phone: phone || null
-    })
-    .eq('id', user_id)
+  // Fields sent in this request only: the Profile tab saves the primary coach on its own
+  const updates: Record<string, string | null> = {}
+  if ('full_name' in body || 'phone' in body) {
+    updates.full_name = full_name || null
+    updates.phone = phone || null
+  }
+  // Primary coach: owner/partner/super admin only (coaches get 403 above); null or an active coach of the client's gym
+  if ('primary_coach_id' in body) {
+    const { data: target } = await supabaseAdmin.from('profiles').select('company_id').eq('id', user_id).single()
+    const badCoach = await checkPrimaryCoach(target?.company_id ?? null, body.primary_coach_id)
+    if (badCoach) return badCoach
+    updates.primary_coach_id = body.primary_coach_id || null
+  }
 
-  if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
+  // Update profile row
+  if (Object.keys(updates).length) {
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .update(updates)
+      .eq('id', user_id)
+
+    if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
+  }
 
   // If phone changed and account is phone-based, update auth email to match
   if (phone && /^\d{10}$/.test(phone.trim())) {

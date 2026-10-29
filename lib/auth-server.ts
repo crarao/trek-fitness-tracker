@@ -100,3 +100,21 @@ export async function checkCanManageClient(caller: Caller, targetUserId: string)
   }
   return null
 }
+
+// Primary coach (profiles.primary_coach_id) must be null or an active coach of the client's gym.
+// Returns null if fine, or an error response.
+export async function checkPrimaryCoach(companyId: string | null, coachId: unknown): Promise<NextResponse | null> {
+  if (coachId === null || coachId === undefined || coachId === '') return null
+  if (typeof coachId !== 'string' || !companyId) {
+    return NextResponse.json({ error: 'Primary coach must be an active coach of this gym' }, { status: 400 })
+  }
+  const { data: coach } = await adminClient()
+    .from('profiles')
+    .select('role, company_id, archived_at')
+    .eq('id', coachId)
+    .single()
+  if (!coach || coach.role !== 'coach' || coach.company_id !== companyId || coach.archived_at) {
+    return NextResponse.json({ error: 'Primary coach must be an active coach of this gym' }, { status: 400 })
+  }
+  return null
+}

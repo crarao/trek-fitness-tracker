@@ -30,6 +30,16 @@ type Client = {
   client_type: string | null
   memberships: Membership[]
   archived_at: string | null
+  primary_coach_id?: string | null
+}
+
+// Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
+type Coach = {
+  id: string
+  full_name: string
+  phone: string | null
+  email: string | null
+  archived_at: string | null
 }
 
 const AVATAR_COLORS = [
@@ -129,6 +139,13 @@ export default function CompanyAdminPage() {
   const [training, setTraining] = useState<{ plans: (AdherencePlan & { client_id: string })[]; sessions: AdherenceSession[] } | null>(null)
   // Today's sessions (#41): PT clients' sessions since this week's Monday, and the names of staff who logged them
   const [recent, setRecent] = useState<{ sessions: TodaySession[]; names: Record<string, string> } | null>(null)
+  // Coach logins (#40): every coach of the gym, Off ones included (names stay on history)
+  const [coaches, setCoaches] = useState<Coach[]>([])
+  const [showCoaches, setShowCoaches] = useState(false)
+  const [newCoach, setNewCoach] = useState({ full_name: '', phone: '', email: '', password: '' })
+  const [savingCoach, setSavingCoach] = useState(false)
+  const [coachMessage, setCoachMessage] = useState('')
+  const [confirmBox, setConfirmBox] = useState<{ title: string; body: string; action: string; onConfirm: () => void } | null>(null)
   // Leads card (#52): numbers from open leads + leads touched this month / added this week; rows = 0 → slim "Track enquiries" card
   const [leadStats, setLeadStats] = useState<{ summary: LeadSummary; rows: number } | null>(null)
 
@@ -165,6 +182,7 @@ export default function CompanyAdminPage() {
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
     fetchLeadStats(profile.company_id)
+    fetchCoaches(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId)
 
@@ -312,6 +330,76 @@ export default function CompanyAdminPage() {
       names = Object.fromEntries((staff || []).map(p => [p.id, p.full_name || '']))
     }
     setRecent({ sessions, names })
+  }
+
+  const fetchCoaches = async (cId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, email, archived_at')
+      .eq('company_id', cId)
+      .eq('role', 'coach')
+      .order('full_name')
+    if (error) { console.error('Coaches fetch error:', error); return }
+    setCoaches((data || []) as Coach[])
+  }
+
+  // Same login rule as members (lib/locale.ts): India phone ({phone}@getcoachboard.in, password = phone, like partners),
+  // US email + the password the owner sets
+  const handleAddCoach = async () => {
+    if (!companyId) return
+    const name = newCoach.full_name.trim()
+    const phone = newCoach.phone.trim()
+    const method = loginMethod(country ?? 'IN')
+    let email = '', password = ''
+    if (!name) { setCoachMessage('Error: Enter the coach\'s name'); return }
+    if (method === 'email') {
+      email = newCoach.email.trim().toLowerCase()
+      password = newCoach.password
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setCoachMessage('Error: Enter a valid email: US coaches log in with email'); return }
+      if (password.length < 6) { setCoachMessage('Error: Password must be at least 6 characters'); return }
+    } else {
+      if (!/^\d{10}$/.test(phone)) { setCoachMessage('Error: Enter a valid 10-digit phone number'); return }
+      email = `${phone}@getcoachboard.in`
+      password = phone
+    }
+    setSavingCoach(true)
+    setCoachMessage('')
+    const response = await fetch('/api/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, full_name: name, company_id: companyId, role: 'coach', phone: phone || null })
+    })
+    const result = await response.json()
+    setSavingCoach(false)
+    if (result.error) { setCoachMessage('Error: ' + result.error); return }
+    setNewCoach({ full_name: '', phone: '', email: '', password: '' })
+    setCoachMessage(method === 'email'
+      ? `Coach added. They log in with ${email} and the password you set.`
+      : 'Coach added. Default password = phone number.')
+    showToast('Coach added ✓')
+    fetchCoaches(companyId)
+  }
+
+  const setCoachActive = async (coach: Coach, active: boolean) => {
+    const response = await fetch('/api/set-coach-active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coachId: coach.id, active })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    if (!response.ok || result.error) { showToast('Could not save: ' + (result.error || response.status), 'error'); return }
+    showToast(active ? `${coach.full_name}'s login is on ✓` : `${coach.full_name}'s login is off`)
+    if (companyId) fetchCoaches(companyId)
+  }
+
+  const handleToggleCoach = (coach: Coach) => {
+    if (coach.archived_at) { setCoachActive(coach, true); return }
+    setConfirmBox({
+      title: `Turn off ${coach.full_name}'s login?`,
+      body: 'They can no longer log in. Their past sessions keep showing their name. You can turn the login on again any time.',
+      action: 'Turn off',
+      onConfirm: () => setCoachActive(coach, false),
+    })
   }
 
   const fetchArchived = async (cId: string, knownMemberships?: unknown[]) => {
@@ -592,9 +680,11 @@ export default function CompanyAdminPage() {
   }
   const byLogger = Object.entries(sessionsByLogger(recent?.sessions || [], thisWeekMonday(), todayIso))
     .sort(([a, x], [b, y]) => (a === 'client' ? 1 : 0) - (b === 'client' ? 1 : 0) || y.today - x.today || y.week - x.week)
+  const coachById = Object.fromEntries(coaches.map(c => [c.id, c]))
+  const activeCoaches = coaches.filter(c => !c.archived_at)
   const loggerName = (id: string) => {
     if (id === 'client') return 'Clients themselves'
-    const first = (recent?.names[id] || '').trim().split(/\s+/)[0]
+    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().split(/\s+/)[0]
     return first ? `Coach ${first}` : 'Coach'
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
@@ -626,6 +716,25 @@ export default function CompanyAdminPage() {
           <div role="status"
             className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
             {toast.text}
+          </div>
+        </div>
+      )}
+
+      {confirmBox && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-5" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6">
+            <p className="text-lg font-semibold text-white">{confirmBox.title}</p>
+            <p className="text-sm text-gray-400 mt-2">{confirmBox.body}</p>
+            <div className="flex gap-2 mt-6">
+              <button autoFocus onClick={() => setConfirmBox(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { const run = confirmBox.onConfirm; setConfirmBox(null); run() }}
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2.5 rounded-xl transition">
+                {confirmBox.action}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1007,6 +1116,87 @@ export default function CompanyAdminPage() {
                   )}
                 </div>
               </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted */}
+      {trainModule && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
+              className="w-full flex items-center justify-between text-left">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Coaches <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
+              <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+            {showCoaches && (
+              <div className="mt-3">
+                <p className="text-xs text-gray-500 mb-3">Coaches see PT clients and plans only: no payments, leads or settings.</p>
+                {coaches.length === 0 ? (
+                  <p className="text-sm text-gray-400 mb-3">No coaches yet.</p>
+                ) : (
+                  <ul className="space-y-2 mb-3">
+                    {coaches.map(c => {
+                      const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
+                      return (
+                        <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {c.email && !c.email.endsWith('@getcoachboard.in') ? c.email : c.phone}
+                              {!c.archived_at && ` · ${today} session${today === 1 ? '' : 's'} today`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
+                              {c.archived_at ? 'Off' : 'Active'}
+                            </span>
+                            <button type="button" onClick={() => handleToggleCoach(c)}
+                              className={`text-xs transition ${c.archived_at ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300'}`}>
+                              {c.archived_at ? 'Turn on' : 'Turn off'}
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input type="text" placeholder="Coach name"
+                    value={newCoach.full_name}
+                    onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
+                    className={`${loginMethod(country ?? 'IN') === 'email' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                  {loginMethod(country ?? 'IN') === 'email' && (
+                    <>
+                      <input type="email" placeholder="Email (used to log in)" autoComplete="off"
+                        value={newCoach.email}
+                        onChange={e => setNewCoach({ ...newCoach, email: e.target.value })}
+                        className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                        value={newCoach.password}
+                        onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
+                        className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    </>
+                  )}
+                  <input type="tel" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Phone (optional)' : 'Phone (10 digits)'}
+                    value={newCoach.phone}
+                    onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
+                    className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                </div>
+                {coachMessage && (
+                  <p className={`text-xs mb-2 ${coachMessage.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{coachMessage}</p>
+                )}
+                <button type="button" onClick={handleAddCoach} disabled={savingCoach}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
+                  {savingCoach ? 'Adding...' : '+ Add coach'}
+                </button>
+                <p className="text-xs text-gray-600 mt-1.5">
+                  {loginMethod(country ?? 'IN') === 'email'
+                    ? 'Coaches log in with their email and the password you set.'
+                    : 'Coaches log in with their phone. Default password is their phone number.'}
+                </p>
+              </div>
             )}
           </div>
         </div>
