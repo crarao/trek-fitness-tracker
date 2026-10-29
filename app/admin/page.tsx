@@ -26,6 +26,7 @@ type Company = {
   notes: string | null
   client_module_enabled: boolean
   pt_limit: number | null
+  partner_limit?: number | null   // owner-level partner logins allowed (column added 30 Oct, default 2)
   country: string | null
   is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
 }
@@ -75,6 +76,7 @@ type Partner = {
   full_name: string
   phone: string
   email?: string | null
+  archived_at?: string | null
 }
 
 export default function AdminPage() {
@@ -130,6 +132,8 @@ export default function AdminPage() {
   const [newPartner, setNewPartner] = useState({ full_name: '', phone: '', email: '', password: '' })
   const [savingPartner, setSavingPartner] = useState(false)
   const [partnerMessage, setPartnerMessage] = useState('')
+  const [partnerLimitInput, setPartnerLimitInput] = useState('')
+  const [savingPartnerLimit, setSavingPartnerLimit] = useState(false)
 
   // Big centred messages (same style as the coach screens)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
@@ -158,7 +162,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!editingCompany) { setCompanyPartners([]); setCompanyAdmins([]); setResetTarget(null); return }
-    supabase.from('profiles').select('id, full_name, phone, email')
+    supabase.from('profiles').select('id, full_name, phone, email, archived_at')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
       .then(({ data }) => setCompanyPartners(data || []))
     supabase.from('profiles').select('id, full_name, phone')
@@ -166,6 +170,7 @@ export default function AdminPage() {
       .then(({ data }) => setCompanyAdmins(data || []))
     setLimitInput(editingCompany.client_limit ? String(editingCompany.client_limit) : '')
     setPtLimitInput(editingCompany.pt_limit != null ? String(editingCompany.pt_limit) : '')
+    setPartnerLimitInput(String(editingCompany.partner_limit ?? 2))
     setResetTarget(null)
     setResetPasswordValue('')
   }, [editingCompany?.id])
@@ -437,6 +442,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     setEditingCompany({ ...editingCompany, trial_start: '', trial_end: '', is_trial: false })
   }
 
+  // Owner-level partner logins in use vs allowed (companies.partner_limit, default 2)
+  const activePartnerCount = companyPartners.filter(p => !p.archived_at).length
+  const partnerLimit = editingCompany?.partner_limit ?? 2
+  const partnerLimitReached = activePartnerCount >= partnerLimit
+
   const handleAddPartner = async () => {
     if (!editingCompany) return
     const name = newPartner.full_name.trim()
@@ -475,11 +485,29 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       ? `Partner added! They log in with ${email} and the password you set.`
       : 'Partner added! Default password = phone number.')
     showToast('Partner added ✓')
-    const { data } = await supabase.from('profiles').select('id, full_name, phone, email')
+    const { data } = await supabase.from('profiles').select('id, full_name, phone, email, archived_at')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
     setCompanyPartners(data || [])
     setSavingPartner(false)
     setTimeout(() => setPartnerMessage(''), 3000)
+  }
+
+  // Partner limit saves on its own (Add partner unlocks straight away); create-user enforces it too
+  const handleSavePartnerLimit = async () => {
+    if (!editingCompany) return
+    const limit = parseInt(partnerLimitInput, 10)
+    if (!Number.isInteger(limit) || limit < 0 || limit > 20) {
+      showToast('Partner limit must be a number from 0 to 20', 'error')
+      return
+    }
+    setSavingPartnerLimit(true)
+    const { data, error } = await supabase.from('companies')
+      .update({ partner_limit: limit }).eq('id', editingCompany.id).select('id')
+    setSavingPartnerLimit(false)
+    if (error || !data?.length) { showToast('Could not save: ' + (error?.message ?? 'not allowed by database rules'), 'error'); return }
+    setEditingCompany({ ...editingCompany, partner_limit: limit })
+    setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...c, partner_limit: limit } : c))
+    showToast(`Partner limit set to ${limit} ✓`)
   }
 
   const handleRemovePartner = (partnerId: string, partnerName: string) => {
@@ -1229,7 +1257,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
 
                         {/* Partner Logins */}
                         <div className="border-t border-gray-800 pt-4">
-                          <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Partner Logins</p>
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <p className="text-xs text-gray-500 uppercase tracking-wider">Partner Logins</p>
+                            <p className="text-xs text-gray-400">Partners: {activePartnerCount} of {partnerLimit}</p>
+                          </div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <label className="text-xs text-gray-500 shrink-0">Partner limit</label>
+                            <input type="number" inputMode="numeric" min={0} max={20} value={partnerLimitInput}
+                              onChange={e => setPartnerLimitInput(e.target.value)}
+                              className="w-20 bg-gray-800 text-white rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                            <button onClick={handleSavePartnerLimit}
+                              disabled={savingPartnerLimit || partnerLimitInput === String(partnerLimit)}
+                              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-xl border border-gray-700 transition disabled:opacity-40">
+                              {savingPartnerLimit ? 'Saving...' : 'Save limit'}
+                            </button>
+                          </div>
                           {companyPartners.length === 0 ? (
                             <p className="text-xs text-gray-600 mb-3">No partners yet.</p>
                           ) : (
@@ -1295,10 +1337,13 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               {partnerMessage}
                             </p>
                           )}
-                          <button onClick={handleAddPartner} disabled={savingPartner}
+                          <button onClick={handleAddPartner} disabled={savingPartner || partnerLimitReached}
                             className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
                             {savingPartner ? 'Adding...' : '+ Add Partner Login'}
                           </button>
+                          {partnerLimitReached && (
+                            <p className="text-xs text-amber-400 mt-1.5">Limit reached: raise the partner limit to add more</p>
+                          )}
                           <p className="text-xs text-gray-600 mt-1.5">
                             {loginMethod(normalizeCountry(editingCompany.country)) === 'email'
                               ? 'US company: partners log in with their email and the password you set. They can change it in Settings.'
