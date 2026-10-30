@@ -58,10 +58,17 @@ const paths = [
   { id: 'coaches', label: 'For personal trainers', line: 'AI-drafted plans, session logs and progress reports.', color: C.blue, bg: C.blueSoft },
 ]
 
-const manage = [
-  ['Renewals due this week', 'Who is about to expire, and who has already lapsed, without scrolling a register.'],
-  ['One-tap reminders', 'A ready-written WhatsApp message to the member, sent from your phone.'],
-  ['This month’s collections', 'What came in, and what is due for renewal next.'],
+// "For gym owners": how it works, then the extras
+const gymSteps = [
+  ['Add members and their plans', 'Name, phone, plan, amount paid and dates. Every renewal is kept as history.'],
+  ['See who is due', 'Expiring this week, already lapsed, and what came in this month — on the home screen.'],
+  ['Remind in one tap', 'Tap Remind and WhatsApp opens with the message already written. You just hit send.'],
+]
+
+const gymExtras = [
+  ['Enquiries don’t slip', 'Log walk-ins and Instagram enquiries, set a follow-up date, and convert them to members when they join.'],
+  ['Logins for your team', 'Up to two partners see everything with you. Coaches get their own view of PT clients — no payments or amounts.'],
+  ['Payments at a glance', 'This month’s collections and the renewal value coming up next.'],
 ]
 
 const train = [
@@ -78,6 +85,21 @@ const faqs = [
   ['Does it work outside India?', 'Yes. Dates, currency and phone numbers follow your country (India or the US).'],
   ['How much does it cost?', 'It depends on the size of your gym or client list. Send us a message below and we’ll share the details.'],
 ]
+
+// Numbered "how it works" cards: 3 across on desktop (4 when there are 4 steps), stacked on phone
+function Steps({ steps, color }: { steps: string[][]; color: string }) {
+  return (
+    <ol className={`grid gap-4 ${steps.length === 4 ? 'sm:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3'}`}>
+      {steps.map(([t, d], i) => (
+        <li key={t} className="rounded-2xl border p-5 sm:p-6" style={{ background: C.paper, borderColor: C.line }}>
+          <span className="grid h-9 w-9 place-items-center rounded-full text-sm font-extrabold text-white" style={{ background: color }} aria-hidden>{i + 1}</span>
+          <p className="mt-4 font-bold">{t}</p>
+          <p className="mt-1.5 leading-relaxed" style={{ color: C.steel }}>{d}</p>
+        </li>
+      ))}
+    </ol>
+  )
+}
 
 async function isLoggedIn() {
   const cookieStore = await cookies()
@@ -193,30 +215,24 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* What it does: two modules, colour-coded */}
-        <section className="border-y" style={{ background: C.paper, borderColor: C.line }}>
+        {/* For gym owners (orange): memberships, renewals, enquiries */}
+        <section id="gyms" className="scroll-mt-4 border-y" style={{ background: C.chalk, borderColor: C.line }}>
           <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
-            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
-              Two jobs, one app.
+            <p className="text-sm font-bold uppercase tracking-wider" style={{ color: C.orange }}>For gym owners</p>
+            <h2 className="mt-3 max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
+              Stop losing members to forgotten renewals.
             </h2>
-            <div className="mt-8 grid gap-8 md:mt-10 md:grid-cols-2 md:gap-14">
-              {[
-                { title: 'Manage your members', color: C.orange, items: manage },
-                { title: 'Train your clients', color: C.blue, items: train },
-              ].map(col => (
-                <div key={col.title} className="border-t-4 pt-6" style={{ borderColor: col.color }}>
-                  <h3 className="text-xl font-bold" style={{ color: col.color }}>{col.title}</h3>
-                  <dl className="mt-4 space-y-3 sm:mt-5 sm:space-y-5">
-                    {col.items.map(([t, d]) => (
-                      <div key={t}>
-                        <dt className="font-semibold">{t}</dt>
-                        <dd className="mt-1 hidden max-w-md leading-relaxed sm:block" style={{ color: C.steel }}>{d}</dd>
-                      </div>
-                    ))}
-                  </dl>
+            <div className="mt-8 md:mt-10">
+              <Steps steps={gymSteps} color={C.orange} />
+            </div>
+            <dl className="mt-10 grid gap-6 border-t-4 pt-6 md:grid-cols-3 md:gap-10" style={{ borderColor: C.orange }}>
+              {gymExtras.map(([t, d]) => (
+                <div key={t}>
+                  <dt className="font-semibold">{t}</dt>
+                  <dd className="mt-1 max-w-md leading-relaxed" style={{ color: C.steel }}>{d}</dd>
                 </div>
               ))}
-            </div>
+            </dl>
           </div>
         </section>
 
