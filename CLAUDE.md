@@ -56,7 +56,8 @@ companies
   ├── client_module_enabled
   ├── country (IN | US, default IN)   ← drives currency, date format, client login method
   ├── currency (INR | USD)            ← set from country by super admin
-  └── business_type (gym | trek | pilates | yoga | cycling | general)
+  ├── business_type (gym | trek | pilates | yoga | cycling | general)
+  └── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
 
 profiles (one per user, linked to a company)
   ├── role (super_admin | company_admin | partner | client | coach)
@@ -132,6 +133,7 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Client app | `app/client/page.tsx` |
 | Coach home (today's training list) | `app/coach/page.tsx` |
 | Coach rules (today's rows, Before you start, covering) | `lib/coach-today.ts` (check: `scripts/check-coach-today.ts`) |
+| Company type helpers (`isGym`, `isCoachCompany`, `companyType`) | `lib/company-type.ts` |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
 | API: delete company | `app/api/delete-company/route.ts` |
@@ -302,6 +304,8 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 **Component structure:** Pages are monolithic `'use client'` files. No shared component library. Build inline per page.
 
 **Country & dates:** Never hard-code `'en-IN'`, `'en'`, `toLocaleDateString()` or `new Date('YYYY-MM-DD')` for display. Use `lib/locale.ts` (`formatDate(value, country, style)`, `loginMethod`, `dialCode`, `phonePlaceholder`) with the company's `country`. Date-only DB values must go through `parseDate`/`formatDate` so they don't shift a day in US timezones. Money uses `lib/currency.ts`.
+
+**Company type (#60, `db/2026-10-30-company-type.md`):** `companies.company_type` is `gym` (default) or `coach` (an individual coach: one person). Always gate with `isGym(company)` / `isCoachCompany(company)` from `lib/company-type.ts`, never string comparisons; missing values count as `gym`. A `coach` company hides the Coaches section, Coach assignments / Coach activity cards, the primary-coach picker (Add member + client Profile tab), coach names on client cards, "by Coach X" / "covering" labels and the super admin's partner limit / Add partner. Leads, members, memberships, payments, plans, sessions and progress PDF stay. The server enforces it too: `create-user` refuses `coach` / `partner` logins, `set-coach-active` refuses turning a coach back on, and `update-client` refuses setting a primary coach. Switching a gym to `coach` deletes nothing: existing coach / partner logins stay (coaches can be turned off; partners removed by super admin). Separate from `business_type` and from #42 (in-gym vs online mode). Pages read the company with `companies(*)` so the column is picked up without breaking before its SQL ran.
 
 **Membership latest record:** Always sort by `start_date DESC`, take index `[0]`. This is the active plan.
 

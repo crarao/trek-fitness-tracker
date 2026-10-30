@@ -16,6 +16,7 @@ import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
+import { isCoachCompany } from '@/lib/company-type'
 import dynamic from 'next/dynamic'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -478,9 +479,11 @@ export default function ClientDetailPage() {
     return (first ? `by Coach ${first}` : 'by coach') + (covering ? ' (covering)' : '')
   }
   const staffFirstName = (id: string | null | undefined) => (staff.find(x => x.id === id)?.full_name || '').trim().split(/\s+/)[0]
+  // Individual coach company (company_type = 'coach'): the owner is the coach, so no coach names or primary coach
+  const coachCompany = isCoachCompany((client as { companies?: { company_type?: string | null } } | null)?.companies)
   // Shown near Mark done when a coach trains someone else's client (or a client with no primary coach)
   const coveringBadge = () => {
-    if (!isCoach || !viewerId || !isCovering(viewerId, { id: clientId, primary_coach_id: client?.primary_coach_id })) return null
+    if (coachCompany || !isCoach || !viewerId || !isCovering(viewerId, { id: clientId, primary_coach_id: client?.primary_coach_id })) return null
     const primary = staffFirstName(client?.primary_coach_id)
     return (
       <p className="text-[11px] text-gray-500 mb-2">
@@ -493,7 +496,7 @@ export default function ClientDetailPage() {
     const notes = doneDayNotes(planId, sessions, sessionKcal)
     for (const day of Object.keys(notes)) {
       const latest = sessions.filter(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day).pop()
-      if (latest) notes[day] = [notes[day], loggedByText(latest)].filter(Boolean).join(' · ')
+      if (latest && !coachCompany) notes[day] = [notes[day], loggedByText(latest)].filter(Boolean).join(' · ')
     }
     return notes
   }
@@ -1511,9 +1514,11 @@ const handleResetPassword = async () => {
               </button>
               {bysOpen && (
                 <div className="mt-3 space-y-2.5 text-sm">
-                  <p className="text-gray-400">
-                    Primary coach: <span className="text-white">{client.primary_coach_id ? (client.primary_coach_id === viewerId ? 'You' : primary || 'Coach') : 'No primary coach'}</span>
-                  </p>
+                  {!coachCompany && (
+                    <p className="text-gray-400">
+                      Primary coach: <span className="text-white">{client.primary_coach_id ? (client.primary_coach_id === viewerId ? 'You' : primary || 'Coach') : 'No primary coach'}</span>
+                    </p>
+                  )}
                   {b.goal && <p className="text-gray-400">Goal: <span className="text-white">{b.goal}</span></p>}
                   {b.medical && (
                     <p className="text-amber-300 bg-amber-950/40 border border-amber-900 rounded-lg px-3 py-2">⚠ Medical / injuries: {b.medical}</p>
@@ -1532,7 +1537,7 @@ const handleResetPassword = async () => {
                             {x.day ? <span className="text-gray-400"> · {x.day}</span> : null}
                             {x.exercises ? <span className="text-gray-400"> · {x.exercises}</span> : null}
                             {x.minutes ? <span className="text-gray-400"> · {x.minutes} min</span> : null}
-                            <span className="text-gray-500"> · by {x.by}{x.covering ? ' (covering)' : ''}</span>
+                            {!coachCompany && <span className="text-gray-500"> · by {x.by}{x.covering ? ' (covering)' : ''}</span>}
                           </p>
                           {x.notes && <p className="text-xs text-gray-400 mt-0.5">{x.notes}</p>}
                         </li>
@@ -2050,7 +2055,7 @@ const handleResetPassword = async () => {
                       <div>
                         <p className="text-sm font-medium text-white">
                           {formatDate(session.session_date, country, 'weekday')}
-                          <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>
+                          {!coachCompany && <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>}
                         </p>
                         {session.duration_minutes && (
                           <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
@@ -2509,6 +2514,7 @@ const handleResetPassword = async () => {
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
             {client?.client_type === 'pt' ? (
               <div>
+                {!coachCompany && (<>
                 <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Primary coach</label>
                 {isCoach ? (
                   <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || 'Coach') : 'No primary coach'}</p>
@@ -2522,6 +2528,7 @@ const handleResetPassword = async () => {
                   ))}
                 </select>
                 )}
+                </>)}
                 {client.trainer_name && (
                   <p className="text-xs text-gray-500 mt-1.5">Trainer (old field): <span className="text-gray-300">{client.trainer_name}</span></p>
                 )}

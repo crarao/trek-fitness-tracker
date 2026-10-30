@@ -12,6 +12,7 @@ import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
+import { isCoachCompany } from '@/lib/company-type'
 
 type Membership = {
   id: string
@@ -95,6 +96,8 @@ export default function CompanyAdminPage() {
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
+  // Individual coach company (company_type = 'coach'): no coaches, coach assignment or "logged by" names
+  const [coachCompany, setCoachCompany] = useState(false)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
@@ -183,7 +186,8 @@ export default function CompanyAdminPage() {
     // Profile + company in one request
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id, companies:company_id(name, logo_url, trial_end, is_active, client_limit, is_trial, pt_limit, currency, country, client_module_enabled)')
+      // companies(*) so the company_type column is read without breaking before its SQL runs
+      .select('company_id, companies:company_id(*)')
       .eq('id', user.id)
       .single()
 
@@ -201,10 +205,12 @@ export default function CompanyAdminPage() {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
       client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
       currency: string | null; country: string | null; client_module_enabled: boolean | null
+      company_type?: string | null
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
+    setCoachCompany(isCoachCompany(company))
     setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
@@ -569,7 +575,7 @@ export default function CompanyAdminPage() {
         trainer_name: newClient.trainer_name,
         diet_plan: newClient.diet_plan,
         client_type: newClient.client_type,
-        primary_coach_id: newClient.client_type === 'pt' && newClient.primary_coach_id ? newClient.primary_coach_id : null
+        primary_coach_id: !coachCompany && newClient.client_type === 'pt' && newClient.primary_coach_id ? newClient.primary_coach_id : null
       })
     })
 
@@ -1075,7 +1081,7 @@ export default function CompanyAdminPage() {
 
       {/* Training — PT clients (Train module, #44): Today (trained, due) and This week (plan weeks: %, missed, no plan, per coach) */}
       {/* Coach assignments (#40): how many PT clients each coach is primary coach for, and who has none */}
-      {trainModule && ptCount > 0 && coaches.length > 0 && (
+      {trainModule && !coachCompany && ptCount > 0 && coaches.length > 0 && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
@@ -1174,7 +1180,7 @@ export default function CompanyAdminPage() {
                                   {s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}
                                 </span>
                               </span>
-                              <span className="text-[11px] text-gray-400 shrink-0">{loggedByText(s)}</span>
+                              {!coachCompany && <span className="text-[11px] text-gray-400 shrink-0">{loggedByText(s)}</span>}
                             </button>
                           </li>
                         )
@@ -1242,7 +1248,7 @@ export default function CompanyAdminPage() {
                       </div>
                     </div>
                   )}
-                  {byLogger.length > 0 && (
+                  {!coachCompany && byLogger.length > 0 && (
                     <div className="mt-3">
                       <p className="text-[11px] text-gray-500 mb-1.5">Logged by · today / since Mon</p>
                       <ul className="space-y-1">
@@ -1264,7 +1270,7 @@ export default function CompanyAdminPage() {
 
       {/* Coach activity (#40): who trained whom, covering, and PT clients needing attention.
           Doesn't repeat the Training card (Today / This week / Missed / Per coach). */}
-      {trainModule && ptCount > 0 && coaches.length > 0 && (
+      {trainModule && !coachCompany && ptCount > 0 && coaches.length > 0 && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
@@ -1391,8 +1397,8 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted */}
-      {trainModule && (
+      {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted. Gyms only */}
+      {trainModule && !coachCompany && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
@@ -1729,7 +1735,7 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
-                              {client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
+                              {!coachCompany && client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
                                 <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
                               )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
@@ -1922,7 +1928,7 @@ export default function CompanyAdminPage() {
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
                 </label>
-                {newClient.client_type === 'pt' && activeCoaches.length > 0 && (
+                {!coachCompany && newClient.client_type === 'pt' && activeCoaches.length > 0 && (
                   <div className="col-span-2">
                     <label className="text-xs text-gray-500 mb-1 block">Primary coach</label>
                     <select
