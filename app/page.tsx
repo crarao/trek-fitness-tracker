@@ -166,8 +166,8 @@ export default async function Home() {
         <nav className="flex items-center gap-2 sm:gap-4">
           <a href="#gyms" className="cb-focus hidden rounded-md px-3 py-2 text-sm font-semibold hover:underline md:inline">For gyms</a>
           <a href="#coaches" className="cb-focus hidden rounded-md px-3 py-2 text-sm font-semibold hover:underline md:inline">For coaches</a>
-          <Link href="/login" className="cb-focus whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold hover:underline">Log in</Link>
-          <a href={contactHref} className="cb-focus whitespace-nowrap rounded-md px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Book a demo</a>
+          <Link href="/login" className="cb-focus whitespace-nowrap rounded-md px-2 sm:px-3 py-2 text-sm font-semibold hover:underline">Log in</Link>
+          <a href={contactHref} className="cb-focus whitespace-nowrap rounded-md px-3 sm:px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Book a demo</a>
         </nav>
       </header>
 
