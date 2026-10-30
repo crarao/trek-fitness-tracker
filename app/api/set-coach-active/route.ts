@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
+import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 
 export async function POST(request: Request) {
   const { caller, error: callerError } = await getCaller(STAFF)
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
   const { data: target } = await supabaseAdmin.from('profiles').select('role, company_id').eq('id', coachId).single()
   if (!target || target.role !== 'coach') return forbidden()
   if (caller.role !== 'super_admin' && target.company_id !== caller.companyId) return forbidden()
+
+  // Individual coach company: a coach login left over from when it was a gym can be turned off, not back on
+  if (active) {
+    const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', target.company_id).maybeSingle()
+    if (isCoachCompany(co)) return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
+  }
 
   const { error: profileError } = await supabaseAdmin
     .from('profiles')

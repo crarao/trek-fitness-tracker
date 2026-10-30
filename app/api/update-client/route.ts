@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, checkCanManageClient, checkPrimaryCoach } from '@/lib/auth-server'
+import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -30,6 +31,11 @@ export async function POST(request: Request) {
     const { data: target } = await supabaseAdmin.from('profiles').select('company_id').eq('id', user_id).single()
     const badCoach = await checkPrimaryCoach(target?.company_id ?? null, body.primary_coach_id)
     if (badCoach) return badCoach
+    // Individual coach company: the owner is the coach, so no primary coach can be set (clearing it is fine)
+    if (body.primary_coach_id && target?.company_id) {
+      const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', target.company_id).maybeSingle()
+      if (isCoachCompany(co)) return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
+    }
     updates.primary_coach_id = body.primary_coach_id || null
   }
 

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden, checkPrimaryCoach } from '@/lib/auth-server'
+import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -24,8 +25,19 @@ const { email, password, full_name, company_id, role, phone, trainer_name, diet_
     return forbidden()
   }
 
-  // Primary coach (PT clients only): null or an active coach of the same gym
-  const primaryCoachId: string | null = role === 'client' && client_type === 'pt' && primary_coach_id ? primary_coach_id : null
+  // Individual coach companies (companies.company_type = 'coach') have no coach or partner logins, for super admin too.
+  // select('*') so this still works before the company_type column exists (then every company is a gym).
+  let coachCompany = false
+  if (company_id) {
+    const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', company_id).maybeSingle()
+    coachCompany = isCoachCompany(co)
+  }
+  if (coachCompany && (role === 'coach' || role === 'partner')) {
+    return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
+  }
+
+  // Primary coach (PT clients only): null or an active coach of the same gym. Never set for an individual coach company.
+  const primaryCoachId: string | null = !coachCompany && role === 'client' && client_type === 'pt' && primary_coach_id ? primary_coach_id : null
   const badCoach = await checkPrimaryCoach(company_id, primaryCoachId)
   if (badCoach) return badCoach
 

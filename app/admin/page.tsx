@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
+import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -29,6 +30,7 @@ type Company = {
   partner_limit?: number | null   // owner-level partner logins allowed (column added 30 Oct, default 2)
   country: string | null
   is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
+  company_type?: string | null   // 'gym' | 'coach' (individual coach). lib/company-type.ts; absent before the SQL
 }
 
 type ContactRequest = {
@@ -114,6 +116,7 @@ export default function AdminPage() {
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
+  company_type: 'gym' as CompanyType,
   trial_start: localDateIso(),
   trial_end: localDateIso(7)
 })
@@ -128,6 +131,8 @@ export default function AdminPage() {
   const [savingCompany, setSavingCompany] = useState(false)
   const [editMessage, setEditMessage] = useState('')
   const [companyPartners, setCompanyPartners] = useState<Partner[]>([])
+  // Active coach logins of the company being edited (for the note when switching it to Individual coach)
+  const [companyCoachCount, setCompanyCoachCount] = useState(0)
   // India: name + phone (phone is the login and default password). US: name + email login + password, phone optional
   const [newPartner, setNewPartner] = useState({ full_name: '', phone: '', email: '', password: '' })
   const [savingPartner, setSavingPartner] = useState(false)
@@ -168,6 +173,9 @@ export default function AdminPage() {
     supabase.from('profiles').select('id, full_name, phone')
       .eq('company_id', editingCompany.id).eq('role', 'company_admin')
       .then(({ data }) => setCompanyAdmins(data || []))
+    supabase.from('profiles').select('id', { count: 'exact', head: true })
+      .eq('company_id', editingCompany.id).eq('role', 'coach').is('archived_at', null)
+      .then(({ count }) => setCompanyCoachCount(count ?? 0))
     setLimitInput(editingCompany.client_limit ? String(editingCompany.client_limit) : '')
     setPtLimitInput(editingCompany.pt_limit != null ? String(editingCompany.pt_limit) : '')
     setPartnerLimitInput(String(editingCompany.partner_limit ?? 2))
@@ -313,6 +321,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       name: newCompany.name, email: resolvedEmail, phone: newCompany.phone,
       country: newCompany.country, currency: currencyForCountry(newCompany.country),
       trial_start: newCompany.trial_start, trial_end: newCompany.trial_end, is_trial: true, is_active: true,
+      // Sent once the company_type column exists (or when it's an individual coach; the SQL must run first then)
+      ...(newCompany.company_type === 'coach' || companies.some(c => 'company_type' in c) ? { company_type: newCompany.company_type } : {}),
     }
     const { data: company, error: companyError } = pendingCompanyId
       ? await supabase.from('companies').update(companyFields).eq('id', pendingCompanyId).select().single()
@@ -354,6 +364,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
+  company_type: 'gym' as CompanyType,
   trial_start: localDateIso(),
   trial_end: localDateIso(7)
 })
@@ -421,6 +432,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         currency: currencyForCountry(normalizeCountry(editingCompany.country)),
         // Only once the is_test column exists (its value then comes back with the company)
         ...('is_test' in editingCompany ? { is_test: !!editingCompany.is_test } : {}),
+        // Only once the company_type column exists
+        ...('company_type' in editingCompany ? { company_type: companyType(editingCompany) } : {}),
       })
       .eq('id', editingCompany.id)
     setSavingCompany(false)
@@ -896,6 +909,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                 <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company type <span className="normal-case text-gray-600">— an individual coach has no coach or partner logins</span></label>
+                  <select value={newCompany.company_type} required
+                    onChange={(e) => setNewCompany({ ...newCompany, company_type: companyType({ company_type: e.target.value }) })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                    {COMPANY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Country <span className="normal-case text-gray-600">— sets currency, date format and how clients log in</span></label>
                   <select value={newCompany.country}
                     onChange={(e) => setNewCompany({ ...newCompany, country: normalizeCountry(e.target.value) })}
@@ -970,6 +991,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <p className="font-medium text-white text-sm">
                             {company.name}
                             {company.is_test && <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">TEST</span>}
+                            <span className={`ml-2 align-middle text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${isCoachCompany(company) ? 'text-sky-300 bg-sky-950 border border-sky-900' : 'text-gray-400 bg-gray-800 border border-gray-700'}`}>{companyTypeLabel(company).toUpperCase()}</span>
                           </p>
                           <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
@@ -1031,6 +1053,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <input type="tel" value={editingCompany.phone || ''}
                             onChange={e => setEditingCompany({ ...editingCompany, phone: e.target.value })}
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company type</label>
+                          <select value={companyType(editingCompany)} disabled={!('company_type' in editingCompany)}
+                            onChange={e => setEditingCompany({ ...editingCompany, company_type: companyType({ company_type: e.target.value }) })}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-40">
+                            {COMPANY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                          </select>
+                          {!('company_type' in editingCompany) && (
+                            <p className="text-xs text-gray-600 mt-1">Needs the company_type SQL first (db/2026-10-30-company-type.md)</p>
+                          )}
+                          {isCoachCompany(editingCompany) && (
+                            <p className="text-xs text-amber-400 mt-1">Individual coach: coach / partner screens are hidden and no new ones can be added. Existing logins are kept, not deleted{companyCoachCount + activePartnerCount > 0 ? ` (${companyCoachCount} coach, ${activePartnerCount} partner active now: turn coaches off or remove partners if they shouldn't log in)` : ''}.</p>
+                          )}
                         </div>
 
                         <div>
@@ -1261,6 +1298,10 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             <p className="text-xs text-gray-500 uppercase tracking-wider">Partner Logins</p>
                             <p className="text-xs text-gray-400">Partners: {activePartnerCount} of {partnerLimit}</p>
                           </div>
+                          {isCoachCompany(editingCompany) && (
+                            <p className="text-xs text-gray-500 mb-3">Individual coach: no partner logins. Existing ones (if any) are listed below and kept.</p>
+                          )}
+                          {!isCoachCompany(editingCompany) && (<>
                           <div className="flex items-center gap-2 mb-3">
                             <label className="text-xs text-gray-500 shrink-0">Partner limit</label>
                             <input type="number" inputMode="numeric" min={0} max={20} value={partnerLimitInput}
@@ -1272,6 +1313,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               {savingPartnerLimit ? 'Saving...' : 'Save limit'}
                             </button>
                           </div>
+                          </>)}
                           {companyPartners.length === 0 ? (
                             <p className="text-xs text-gray-600 mb-3">No partners yet.</p>
                           ) : (
@@ -1301,6 +1343,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               ))}
                             </div>
                           )}
+                          {!isCoachCompany(editingCompany) && (<>
                           {loginMethod(normalizeCountry(editingCompany.country)) === 'email' ? (
                             <div className="grid grid-cols-2 gap-2 mb-2">
                               <input type="text" placeholder="Partner name"
@@ -1349,6 +1392,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               ? 'US company: partners log in with their email and the password you set. They can change it in Settings.'
                               : 'Default password is their phone number. They can change it after first login via Settings.'}
                           </p>
+                          </>)}
                         </div>
 
                         {editMessage && (
