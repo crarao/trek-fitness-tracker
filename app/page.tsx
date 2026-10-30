@@ -14,12 +14,12 @@ const archivo = Archivo({ subsets: ['latin'], axes: ['wdth'], display: 'swap' })
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://getcoachboard.com'),
-  title: 'CoachBoard — memberships, renewals and training for gyms and coaches',
+  title: 'CoachBoard — memberships for gyms, training plans for coaches',
   description:
-    'See who is due for renewal, send a one-tap WhatsApp reminder, and keep every client’s plan and progress in one place. For gyms, studios and personal trainers.',
+    'Gyms: see who is due for renewal, remind them on WhatsApp in one tap and follow up enquiries. Coaches: draft weekly plans with AI, log sessions and share a progress report with each client.',
   openGraph: {
     title: 'CoachBoard',
-    description: 'Memberships, renewals and training plans for gyms and coaches — on your phone.',
+    description: 'Run your gym. Coach your clients. One place, on your phone.',
     url: 'https://getcoachboard.com',
     siteName: 'CoachBoard',
     type: 'website',
@@ -39,6 +39,8 @@ const C = {
   orange: '#EA620C',
   blue: '#2350B8',
   green: '#1F8A4C',
+  orangeSoft: '#FDF0E7',
+  blueSoft: '#EAF0FB',
 }
 
 const wide = { fontStretch: '125%' } as const
@@ -63,11 +65,12 @@ const train = [
 ]
 
 const faqs = [
-  ['How long does setup take?', 'About 20 minutes on a call. We create your account, and you can add your first members while we talk.'],
-  ['Do my members need to download an app?', 'No. CoachBoard opens in the phone’s browser and can be added to the home screen like an app.'],
-  ['Can my staff use it?', 'Yes. Front desk staff and managers get their own logins for your gym.'],
-  ['Does it work outside India?', 'Yes. Gyms in India and the US use it; dates, currency and phone numbers follow your country.'],
-  ['How much does it cost?', 'It depends on the size of your gym. Email us and we’ll share the details.'],
+  ['How long does setup take?', 'About 20 minutes on a call. We create your account and you add your first members or clients while we talk.'],
+  ['Do I need to download an app?', 'No. CoachBoard opens in your phone’s browser and can be added to the home screen like an app.'],
+  ['Is it for gyms or for individual coaches?', 'Both. A gym gets memberships, enquiries and coach logins. An individual coach gets a simpler view focused on clients, plans and progress.'],
+  ['Can my coaches use it?', 'Yes. Each coach gets their own login, sees today’s PT clients and can log sessions and edit plans. They don’t see payments or enquiries.'],
+  ['Does it work outside India?', 'Yes. Dates, currency and phone numbers follow your country (India or the US).'],
+  ['How much does it cost?', 'It depends on the size of your gym or client list. Send us a message below and we’ll share the details.'],
 ]
 
 async function isLoggedIn() {
