@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { thisWeekMonday } from '@/lib/calories'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
+import { loadGymStaff } from '@/lib/gym-staff'
 
 type Staff = StaffMember & { role: string; archived_at: string | null }
 type MembershipStatus = { profile_id: string; plan_type: string | null; start_date: string | null; end_date: string | null }
@@ -51,10 +52,8 @@ export default function CoachHomePage() {
         .select('id, full_name, phone, primary_coach_id, archived_at, client_type')
         .eq('role', 'client').eq('client_type', 'pt').is('archived_at', null)
         .order('full_name'),
-      supabase.from('profiles')
-        .select('id, full_name, role, archived_at')
-        .in('role', ['company_admin', 'partner', 'coach'])
-        .order('full_name'),
+      // Staff names through gym_staff() (coaches can't read owner / partner rows directly)
+      loadGymStaff(),
       supabase.from('weekly_plans')
         .select('id, client_id, week_start, plan_details, plan_json, workout_time')
         .gte('week_start', planSince).lte('week_start', today),
@@ -64,7 +63,7 @@ export default function CoachHomePage() {
       supabase.rpc('pt_membership_status'),
     ])
 
-    const failed = [profileRes, clientsRes, staffRes, plansRes, sessionsRes].find(r => r.error)
+    const failed = [profileRes, clientsRes, plansRes, sessionsRes].find(r => r.error)
     if (failed?.error) { console.error('Coach home load error:', failed.error); setError("Couldn't load today's list. Refresh the page to try again.") }
     if (membershipRes.error) console.error('Membership status error:', membershipRes.error)
 
@@ -76,7 +75,7 @@ export default function CoachHomePage() {
       country: normalizeCountry(profile?.companies?.country),
     })
     setClients((clientsRes.data || []) as CoachClient[])
-    setStaff((staffRes.data || []) as Staff[])
+    setStaff(staffRes as Staff[])
     setPlans((plansRes.data || []) as CoachPlan[])
     setSessions((sessionsRes.data || []) as CoachSession[])
     setMembershipEnd(Object.fromEntries(((membershipRes.data || []) as MembershipStatus[]).map(m => [m.profile_id, m.end_date])))

@@ -18,6 +18,7 @@ import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import dynamic from 'next/dynamic'
+import { loadGymStaff } from '@/lib/gym-staff'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -287,12 +288,8 @@ export default function ClientDetailPage() {
       setIsCoach(data.role === 'coach')
       try { if (localStorage.getItem(`bys-collapsed:${data.id}`) === '1') setBysOpen(false) } catch { /* storage unavailable */ }
       if (!data.company_id) return
-      const { data: staffRows } = await supabase.from('profiles')
-        .select('id, full_name, role, archived_at')
-        .eq('company_id', data.company_id)
-        .in('role', ['company_admin', 'partner', 'coach'])
-        .order('full_name')
-      setStaff((staffRows || []) as Staff[])
+      // Through gym_staff() (coaches can't read owner / partner rows directly)
+      setStaff(await loadGymStaff(data.company_id))
     })()
   }, [])
 
