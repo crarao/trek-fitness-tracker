@@ -272,14 +272,14 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## Known Issues / Tech Debt
 
-**RLS status (completed 25 Oct 2026).** RLS is ON for all tables, using `get_my_role()` / `get_my_company_id()` (security definer). Summary of who can do what from the browser:
-- `profiles`: everyone reads/updates their own row; coach + partners read their gym and update clients in it; super admin all. Trigger `protect_profile_columns`: only super admin / server may change `role` or `company_id`; clients can't change `client_type` or `archived_at`.
-- `companies`: members read their own company; super admin all; logged-out (`anon`) may read only `name, slug, logo_url, banner_url, business_type` (column grant). Only the company admin may update their row, and trigger `protect_company_columns` limits that to `logo_url` / `banner_url`.
-- `memberships`, `weekly_plans`, `logged_sessions`, `session_feedback`: staff (company_admin + partner) of the client's gym; clients their own; deletes staff-only.
-- `leads`: staff of the gym read/add/update, super admin reads all, no delete.
-- Coaches (30 Oct, `db/2026-10-30-coach-view.md`): read PT clients and staff of their gym; read/add/update PT clients' `weekly_plans` and `logged_sessions` (insert only with `logged_by` = themselves); read `session_feedback`; no delete anywhere; nothing on `memberships`, `leads`, `ai_usage`. `pt_membership_status()` (security definer) gives coach, owner and partners the latest plan and dates (no amounts) of their gym's PT clients. `protect_profile_columns` also stops clients and coaches changing `client_type`, `archived_at` or `primary_coach_id` on their own row.
-- API routes and `proxy.ts` use the server key, so RLS doesn't affect them. Blocked updates/deletes return 0 rows without an error: use `.select()` after update/delete and check rows when it matters.
-- Full history and undo scripts: `db/2026-10-25-rls-remaining.md`. When adding a table: enable RLS, add policies, GRANT explicitly.
+**RLS status (hardened 30 Oct 2026, `db/2026-10-30-rls-hardening.md`; history in `db/2026-10-25-rls-remaining.md`).** RLS is ON for every table. Each company-owned table has exactly four rules, `iso <table> <action>`; cross-company test passed 117 / 117 on production. Who can do what from the browser:
+- `companies`: members read their own row; super admin reads / creates / edits / deletes all; the owner may update their row, and trigger `protect_company_columns` limits that to `logo_url` / `banner_url`. Logged out (`anon`): only `name, slug, logo_url, banner_url, business_type` (column grant, for the branded login page).
+- `profiles`: everyone reads and updates their own row; staff read their gym and update its **clients**; coaches read their gym's PT clients and coaches (owner / partner names via `rpc('gym_staff')`); super admin all. **Only the server creates profiles**; only super admin deletes from the browser (partner removal). Trigger `protect_profile_columns` locks `role` / `company_id`, and for clients + coaches `client_type`, `archived_at`, `primary_coach_id`.
+- `memberships`: staff of the gym (the profile must be in the same gym), clients read their own, super admin all; coaches nothing (plan + dates only via `pt_membership_status()`).
+- `weekly_plans`, `logged_sessions`: staff of the client's gym; coaches for PT clients (no deletes); clients read their own and log their own sessions (`logged_by` empty or themselves); `weekly_plan_id` must belong to the same client.
+- `session_feedback`: staff of the gym; coaches read PT clients'; clients read their own and add a star rating only (no `admin_feedback`, no edit / delete).
+- `leads`: staff of the gym read / add / update, super admin reads all, no delete. `ai_usage`, `contact_requests`: super admin read (server writes).
+- API routes and `proxy.ts` use the server key, so RLS doesn't affect them; every route checks the caller with `getCaller()`. Blocked updates / deletes return 0 rows without an error: use `.select()` after update / delete and check rows when it matters.
 
 **RLS rules (company isolation, 30 Oct 2026).** Follow these for every table and policy:
 - **Helpers:** `get_my_role()` and `get_my_company_id()` — `stable security definer set search_path = public`, reading `profiles` where `id = auth.uid()`. Always call them as `(select public.get_my_role())` so they run once per query, not per row.
