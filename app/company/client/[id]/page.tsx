@@ -2410,11 +2410,10 @@ const handleResetPassword = async () => {
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
             <div>
-              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Assigned Trainer</label>
-              <input type="text" placeholder="Trainer name"
-                value={clientProfileForm.trainer_name}
-                onChange={e => setClientProfileForm({ ...clientProfileForm, trainer_name: e.target.value })}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              {!coachCompany && (<>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{client?.client_type === 'pt' ? 'Primary coach' : 'Trainer'}</p>
+              <p className="text-xs text-gray-400">Pick the coach from the dropdown on the Profile tab (after saving).</p>
+              </>)}
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Diet Plan</label>
@@ -2509,17 +2508,17 @@ const handleResetPassword = async () => {
           {/* Trainer + Diet Plan */}
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
-            {client?.client_type === 'pt' ? (
+            {client && (
               <div>
                 {!coachCompany && (<>
-                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Primary coach</label>
+                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{client.client_type === 'pt' ? 'Primary coach' : 'Trainer'}</label>
                 {isCoach ? (
                   <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || 'Coach') : 'No primary coach'}</p>
                 ) : (
                 <select id="primary-coach" value={client.primary_coach_id || ''} disabled={savingPrimaryCoach}
                   onChange={e => handleSavePrimaryCoach(e.target.value)}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-50">
-                  <option value="">No primary coach</option>
+                  <option value="">{client.client_type === 'pt' ? 'No primary coach' : 'No trainer'}</option>
                   {staff.filter(x => x.role === 'coach' && (!x.archived_at || x.id === client.primary_coach_id)).map(x => (
                     <option key={x.id} value={x.id}>{x.full_name}{x.archived_at ? ' (login off)' : ''}</option>
                   ))}
@@ -2527,13 +2526,8 @@ const handleResetPassword = async () => {
                 )}
                 </>)}
                 {client.trainer_name && (
-                  <p className="text-xs text-gray-500 mt-1.5">Trainer (old field): <span className="text-gray-300">{client.trainer_name}</span></p>
+                  <p className="text-xs text-gray-500 mt-1.5">Trainer (old typed name): <span className="text-gray-300">{client.trainer_name}</span></p>
                 )}
-              </div>
-            ) : (
-              <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Assigned Trainer</p>
-                <p className="text-sm text-white">{client?.trainer_name || '—'}</p>
               </div>
             )}
             <div>

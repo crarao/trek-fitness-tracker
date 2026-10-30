@@ -64,7 +64,7 @@ profiles (one per user, linked to a company)
   ├── company_id → companies
   ├── client_type (member | pt)       ← PT = personal training client
   ├── archived_at (timestamptz null)  ← null = active, set = archived (for a coach: login turned off)
-  ├── primary_coach_id → profiles     ← PT client's usual coach (soft link, never limits access; owner/partner set it)
+  ├── primary_coach_id → profiles     ← client's coach, picked from a dropdown (PT: primary coach; regular member: optional trainer). Soft link, never limits access; owner/partner set it. trainer_name = old free-text field, read-only now
   ├── full_name, email, phone
   └── fitness fields: goal, age, gender, height_cm, weight_kg,
       fitness_level, food_preference (Vegetarian | Non-Vegetarian | Eggetarian | Vegan | Jain),
