@@ -71,10 +71,18 @@ const gymExtras = [
   ['Payments at a glance', 'This month’s collections and the renewal value coming up next.'],
 ]
 
-const train = [
-  ['Weekly plans in minutes', 'AI drafts a plan from the client’s goal, level, available days and injuries. You edit it before it goes out.'],
-  ['Session logs and feedback', 'Clients log each workout from their phone, and you reply against that session.'],
-  ['Progress you can see', 'Workouts per week, minutes trained and streaks.'],
+// "For personal trainers": how it works, then what progress means
+const coachSteps = [
+  ['Enter the client’s details', 'Goal, fitness level, available days, equipment and any injuries.'],
+  ['Get a draft weekly plan', 'AI drafts the week in seconds. You review it, edit anything, then assign it.'],
+  ['Log sessions as they train', 'Mark exercises done and add notes during the session — the client doesn’t need to log anything.'],
+  ['Share their progress', 'Download a PDF with your note and the last 8 weeks of charts, and send it on WhatsApp.'],
+]
+
+const progressSignals = [
+  ['Sessions per week', 'Spot a client who is slipping before they quit.'],
+  ['Minutes trained per week', 'See whether the load is building as planned.'],
+  ['Your notes on each session', 'Remember what happened last time, even if another coach covered.'],
 ]
 
 const faqs = [
@@ -233,6 +241,36 @@ export default async function Home() {
                 </div>
               ))}
             </dl>
+          </div>
+        </section>
+
+        {/* For personal trainers (blue): plans, session logs, progress */}
+        <section id="coaches" className="scroll-mt-4 border-b" style={{ background: C.paper, borderColor: C.line }}>
+          <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 md:py-20">
+            <p className="text-sm font-bold uppercase tracking-wider" style={{ color: C.blue }}>For personal trainers</p>
+            <h2 className="mt-3 max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
+              Create a draft plan, personalise it, assign it.
+            </h2>
+            <p className="mt-4 max-w-2xl text-lg leading-relaxed" style={{ color: C.steel }}>
+              For online coaches and coaches inside a gym. Clients who see their progress stay longer.
+            </p>
+            <div className="mt-8 md:mt-10">
+              <Steps steps={coachSteps} color={C.blue} />
+            </div>
+            <div className="mt-10 grid gap-6 border-t-4 pt-6 md:grid-cols-[1fr_1.4fr] md:gap-10" style={{ borderColor: C.blue }}>
+              <div>
+                <h3 className="text-xl font-bold" style={{ color: C.blue }}>What “progress” means here</h3>
+                <p className="mt-2 max-w-sm leading-relaxed" style={{ color: C.steel }}>Three things you can see for every client, and put in the report you send them.</p>
+              </div>
+              <dl className="space-y-4 sm:space-y-5">
+                {progressSignals.map(([t, d]) => (
+                  <div key={t}>
+                    <dt className="font-semibold">{t}</dt>
+                    <dd className="mt-1 leading-relaxed" style={{ color: C.steel }}>{d}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
           </div>
         </section>
 
