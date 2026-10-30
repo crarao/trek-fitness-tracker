@@ -9,6 +9,7 @@ import ContactForm from './contact-form'
 
 // Public home page for getcoachboard.com.
 // Logged-in users skip it and go straight to their dashboard.
+// Redesign (30 Oct 2026): two clear audiences (gym owners, personal trainers), each with a short "how it works" flow, a specific demo CTA, and only claims the product supports today.
 
 const archivo = Archivo({ subsets: ['latin'], axes: ['wdth'], display: 'swap' })
 
@@ -327,10 +328,10 @@ export default async function Home() {
         <section id="contact" className="mx-auto max-w-6xl scroll-mt-4 px-5 pb-16 sm:px-8 md:pb-20">
           <div className="rounded-2xl px-5 py-10 text-white sm:px-12 sm:py-12" style={{ background: C.orange }}>
             <h2 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl" style={wide}>
-              See it with your own members.
+              Book a 20-minute demo.
             </h2>
             <p className="mt-4 max-w-xl text-lg leading-relaxed text-white/90">
-              Tell us about your gym and we’ll set up a 20-minute walkthrough. Members just open it in their phone browser, nothing to download. You talk directly to the person who builds CoachBoard.
+              We’ll show you a membership renewal and a client training plan, live, using your own gym or clients. You talk directly to the person who builds CoachBoard.
             </p>
             <div className="mt-8 max-w-2xl">
               <ContactForm />
@@ -355,7 +356,9 @@ export default async function Home() {
       <footer className="border-t" style={{ borderColor: C.line }}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-sm sm:px-8" style={{ color: C.steel }}>
           <p>© {new Date().getFullYear()} CoachBoard</p>
-          <div className="flex gap-5">
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <a href="#gyms" className="cb-focus rounded hover:underline">For gyms</a>
+            <a href="#coaches" className="cb-focus rounded hover:underline">For coaches</a>
             <Link href="/login" className="cb-focus rounded hover:underline">Log in</Link>
             <a href={contactHref} className="cb-focus rounded hover:underline">Contact</a>
           </div>
