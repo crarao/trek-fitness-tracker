@@ -120,7 +120,8 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Supabase browser client | `lib/supabase.ts` |
 | Supabase admin client | Instantiated inline in each API route (no shared helper) |
 | Public landing page (getcoachboard.com) | `app/page.tsx` — logged-in users redirect to `/dashboard` |
-| Landing page content (email, testimonials) | `app/landing-content.ts` |
+| Home page sections | hero → audience cards → #gyms → #coaches → testimonials (hidden until filled) → FAQ → #contact. Orange = gyms, blue = coaches. Only claims the product supports today. |
+| Landing page content (testimonials, Instagram, walkthrough video IDs) | `app/landing-content.ts` |
 | API auth check (every `/api` route calls this first) | `lib/auth-server.ts` (`getCaller`, `checkCanManageClient`) |
 | Landing page contact form | `app/contact-form.tsx` → `app/api/contact/route.ts` → `contact_requests` table (read in /admin → Requests) |
 | Auth + role routing | `app/login/page.tsx`, `app/dashboard/page.tsx` |
