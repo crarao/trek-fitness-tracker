@@ -113,32 +113,32 @@ export default async function Home() {
           <span className="text-lg font-extrabold tracking-tight" style={wide}>CoachBoard</span>
         </Link>
         <nav className="flex items-center gap-2 sm:gap-4">
+          <a href="#gyms" className="cb-focus hidden rounded-md px-3 py-2 text-sm font-semibold hover:underline md:inline">For gyms</a>
+          <a href="#coaches" className="cb-focus hidden rounded-md px-3 py-2 text-sm font-semibold hover:underline md:inline">For coaches</a>
           <Link href="/login" className="cb-focus rounded-md px-3 py-2 text-sm font-semibold hover:underline">Log in</Link>
-          <a href={contactHref} className="cb-focus rounded-md px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Contact us</a>
+          <a href={contactHref} className="cb-focus rounded-md px-4 py-2 text-sm font-semibold text-white" style={{ background: C.iron }}>Book a demo</a>
         </nav>
       </header>
 
       <main>
         {/* Hero */}
-        <section className="mx-auto grid max-w-6xl items-center gap-8 px-5 pb-12 pt-4 sm:px-8 md:grid-cols-[1.1fr_1fr] md:gap-12 md:pb-24 md:pt-14">
+        <section className="mx-auto grid max-w-6xl items-center gap-8 px-5 pb-10 pt-4 sm:px-8 md:grid-cols-[1.1fr_1fr] md:gap-12 md:pb-16 md:pt-14">
           <div>
-            <h1 className="text-[1.75rem] font-extrabold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.02]" style={wide}>
-              Renewals, reminders and training plans. On one phone.
+            <h1 className="text-[1.9rem] font-extrabold leading-[1.08] tracking-tight sm:text-5xl md:text-6xl md:leading-[1.02]" style={wide}>
+              Run your gym. Coach your clients. One place.
             </h1>
             <p className="mt-4 max-w-[34rem] text-base leading-relaxed sm:mt-6 sm:text-lg" style={{ color: C.steel }}>
-              CoachBoard shows who is due for renewal, sends the reminder on WhatsApp in one tap, and keeps every client’s plan and progress in one place.
-            </p>
-            <p className="mt-3 max-w-[34rem] text-sm font-medium sm:text-base">
-              For gyms, studios, personal trainers and trek coaches, in India and the US.
+              Keep membership renewals on track with one-tap WhatsApp reminders, and create, log and share every client’s training plan — all from your phone.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3 sm:mt-8">
               <a href={contactHref} className="cb-focus rounded-lg px-6 py-3.5 text-base font-semibold text-white" style={{ background: C.orange }}>
-                Book a demo
+                Book a 20-minute demo
               </a>
               <Link href="/login" className="cb-focus rounded-lg border px-6 py-3.5 text-base font-semibold" style={{ borderColor: C.iron }}>
                 Log in
               </Link>
             </div>
+            <p className="mt-4 text-sm" style={{ color: C.steel }}>Nothing to download. Opens in your phone’s browser.</p>
           </div>
 
           {/* The front-desk board: the one moving moment on the page */}
