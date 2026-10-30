@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
-import { TESTIMONIALS, INSTAGRAM_HANDLE, INSTAGRAM_URL } from './landing-content'
+import { TESTIMONIALS, INSTAGRAM_HANDLE, INSTAGRAM_URL, WALKTHROUGHS } from './landing-content'
 import ContactForm from './contact-form'
 
 // Public home page for getcoachboard.com.
@@ -106,6 +106,20 @@ function Steps({ steps, color }: { steps: string[][]; color: string }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+// Product walkthrough video; hidden until its YouTube ID is filled in (app/landing-content.ts)
+function Walkthrough({ id, label }: { id: string; label: string }) {
+  if (!id) return null
+  return (
+    <figure className="mt-10 overflow-hidden rounded-2xl border" style={{ background: C.paper, borderColor: C.line }}>
+      <div className="aspect-video">
+        <iframe src={`https://www.youtube-nocookie.com/embed/${id}`} title={label} loading="lazy" allowFullScreen
+          allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" className="h-full w-full" />
+      </div>
+      <figcaption className="px-4 py-3 text-sm" style={{ background: C.paper, color: C.steel }}>{label}</figcaption>
+    </figure>
   )
 }
 
@@ -241,6 +255,7 @@ export default async function Home() {
                 </div>
               ))}
             </dl>
+            <Walkthrough id={WALKTHROUGHS.renewals} label="Walkthrough: a membership renewal, from due to reminder sent" />
           </div>
         </section>
 
@@ -271,6 +286,7 @@ export default async function Home() {
                 ))}
               </dl>
             </div>
+            <Walkthrough id={WALKTHROUGHS.plans} label="Walkthrough: drafting, editing and assigning a weekly training plan" />
           </div>
         </section>
 

@@ -17,3 +17,11 @@ export const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_HANDLE}/`
 export type Testimonial = { quote: string; name: string; role: string; place: string }
 
 export const TESTIMONIALS: Testimonial[] = []
+
+// Short product walkthrough videos (YouTube video IDs, e.g. 'dQw4w9WgXcQ').
+// Each one appears on the home page automatically once its ID is filled in; empty = hidden.
+// renewals → shown in the "For gym owners" section; plans → in the "For personal trainers" section.
+export const WALKTHROUGHS = {
+  renewals: '',
+  plans: '',
+}
