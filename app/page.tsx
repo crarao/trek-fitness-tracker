@@ -52,6 +52,12 @@ const desk = [
   { name: 'Marcus T.', plan: '1 year', due: 'Expired 3 days ago' },
 ]
 
+// "Choose your use case" cards under the hero; each jumps to its section
+const paths = [
+  { id: 'gyms', label: 'For gym owners', line: 'Memberships, renewals, enquiries and staff logins.', color: C.orange, bg: C.orangeSoft },
+  { id: 'coaches', label: 'For personal trainers', line: 'AI-drafted plans, session logs and progress reports.', color: C.blue, bg: C.blueSoft },
+]
+
 const manage = [
   ['Renewals due this week', 'Who is about to expire, and who has already lapsed, without scrolling a register.'],
   ['One-tap reminders', 'A ready-written WhatsApp message to the member, sent from your phone.'],
@@ -168,6 +174,22 @@ export default async function Home() {
               ))}
             </ul>
             <p className="mt-3 text-xs" style={{ color: C.steel }}>Each reminder opens WhatsApp with the message already written.</p>
+          </div>
+        </section>
+
+        {/* Choose your use case: orange = gyms, blue = coaches */}
+        <section className="mx-auto max-w-6xl px-5 pb-12 sm:px-8 md:pb-20">
+          <div className="grid gap-4 md:grid-cols-2">
+            {paths.map(p => (
+              <a key={p.id} href={`#${p.id}`} className="cb-focus group flex items-center justify-between gap-4 rounded-2xl border-l-4 px-5 py-5 sm:px-6"
+                style={{ background: p.bg, borderColor: p.color }}>
+                <div>
+                  <p className="text-lg font-bold" style={{ color: p.color }}>{p.label}</p>
+                  <p className="mt-1" style={{ color: C.iron }}>{p.line}</p>
+                </div>
+                <span className="text-2xl leading-none transition-transform group-hover:translate-y-1" style={{ color: p.color }} aria-hidden>↓</span>
+              </a>
+            ))}
           </div>
         </section>
 
