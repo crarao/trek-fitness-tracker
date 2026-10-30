@@ -41,6 +41,20 @@ const { email, password, full_name, company_id, role, phone, trainer_name, diet_
   const badCoach = await checkPrimaryCoach(company_id, primaryCoachId)
   if (badCoach) return badCoach
 
+  // Client limit (companies.client_limit, set by super admin; 50 if empty, same as the dashboard): active clients only.
+  // Checked here too so a direct API call can't go past it.
+  if (role === 'client' && caller.role !== 'super_admin') {
+    const [{ data: company }, { count }] = await Promise.all([
+      supabaseAdmin.from('companies').select('client_limit').eq('id', company_id).single(),
+      supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true })
+        .eq('company_id', company_id).eq('role', 'client').is('archived_at', null),
+    ])
+    const limit = company?.client_limit || 50
+    if ((count ?? 0) >= limit) {
+      return NextResponse.json({ error: `Client limit reached (${limit}). Contact CoachBoard to increase your limit.` }, { status: 400 })
+    }
+  }
+
   // Owner-level partner logins are capped per company (companies.partner_limit, default 2), for super admin too
   if (role === 'partner') {
     const [{ data: company }, { count }] = await Promise.all([
