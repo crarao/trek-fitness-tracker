@@ -575,7 +575,7 @@ export default function CompanyAdminPage() {
         trainer_name: newClient.trainer_name,
         diet_plan: newClient.diet_plan,
         client_type: newClient.client_type,
-        primary_coach_id: !coachCompany && newClient.client_type === 'pt' && newClient.primary_coach_id ? newClient.primary_coach_id : null
+        primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null
       })
     })
 
@@ -1735,7 +1735,7 @@ export default function CompanyAdminPage() {
                               {client.client_type === 'pt' && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
-                              {!coachCompany && client.client_type === 'pt' && client.primary_coach_id && coachById[client.primary_coach_id] && (
+                              {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
                                 <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
                               )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
@@ -1912,10 +1912,6 @@ export default function CompanyAdminPage() {
                     {newClient.end_date ? ` → ${formatDate(newClient.end_date, country, 'medium')}` : ''}
                   </p>
                 )}
-                <input type="text" placeholder="Trainer name (optional)"
-                  value={newClient.trainer_name}
-                  onChange={e => setNewClient({ ...newClient, trainer_name: e.target.value })}
-                  className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
                 <textarea placeholder="Diet plan (optional)"
                   value={newClient.diet_plan}
                   onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
@@ -1928,9 +1924,10 @@ export default function CompanyAdminPage() {
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
                 </label>
-                {!coachCompany && newClient.client_type === 'pt' && activeCoaches.length > 0 && (
+                {/* Coach for this member: picked from the gym's coaches (no free text). PT: primary coach; regular member: optional */}
+                {!coachCompany && activeCoaches.length > 0 && (
                   <div className="col-span-2">
-                    <label className="text-xs text-gray-500 mb-1 block">Primary coach</label>
+                    <label className="text-xs text-gray-500 mb-1 block">{newClient.client_type === 'pt' ? 'Primary coach' : 'Trainer (optional)'}</label>
                     <select
                       value={newClient.primary_coach_id}
                       onChange={e => setNewClient({ ...newClient, primary_coach_id: e.target.value })}

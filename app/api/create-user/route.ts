@@ -36,8 +36,9 @@ const { email, password, full_name, company_id, role, phone, trainer_name, diet_
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
   }
 
-  // Primary coach (PT clients only): null or an active coach of the same gym. Never set for an individual coach company.
-  const primaryCoachId: string | null = !coachCompany && role === 'client' && client_type === 'pt' && primary_coach_id ? primary_coach_id : null
+  // Coach for a client (PT: primary coach; regular member: optional trainer): null or an active coach of the same gym,
+  // picked from the dropdown. Never set for an individual coach company.
+  const primaryCoachId: string | null = !coachCompany && role === 'client' && primary_coach_id ? primary_coach_id : null
   const badCoach = await checkPrimaryCoach(company_id, primaryCoachId)
   if (badCoach) return badCoach
 
