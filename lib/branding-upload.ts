@@ -45,8 +45,9 @@ export async function uploadBranding(supabase: SupabaseClient, companyId: string
   const path = `${companyId}/${kind}-${Date.now()}.${ext}`
   const { error } = await supabase.storage.from(BRANDING_BUCKET).upload(path, blob, { contentType: type, upsert: false })
   if (error) {
+    // Show Supabase's own words too, so a refusal can be told apart from a size or type limit
     throw new Error(/row-level security|unauthorized|not allowed/i.test(error.message)
-      ? 'Upload not allowed yet: run db/2026-10-31-branding-upload.md in Supabase'
+      ? `Upload not allowed (${error.message}): check the Storage rules in db/2026-10-31-branding-upload.md`
       : error.message)
   }
   return supabase.storage.from(BRANDING_BUCKET).getPublicUrl(path).data.publicUrl
