@@ -4,7 +4,7 @@ import { useState, useEffect, useSyncExternalStore, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { tenantSlugFromHost } from '@/lib/tenant'
-import { bannerFor, taglineFor } from '@/lib/login-branding'
+import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
 // The address and the remembered gym don't change while the page is open, so nothing to subscribe to
@@ -23,6 +23,7 @@ type CompanyBranding = {
   logo_url: string | null
   banner_url: string | null
   business_type: string | null
+  banner_has_branding?: boolean | null // absent until db/2026-10-31-banner-branding.md runs
 }
 
 function LoginForm() {
@@ -63,11 +64,16 @@ function LoginForm() {
     if (!companySlug) return
     const fetchBranding = async (slug: string) => {
       console.log('Fetching branding for:', slug)
-      const { data, error } = await supabase
+      const columns = 'name, logo_url, banner_url, business_type'
+      let { data, error } = await supabase
         .from('companies')
-        .select('name, logo_url, banner_url, business_type')
+        .select<string, CompanyBranding>(`${columns}, banner_has_branding`)
         .eq('slug', slug)
         .single()
+      // Column not there yet (or not readable logged out): load the rest as before
+      if (error && (error.code === '42703' || error.code === '42501')) {
+        ({ data, error } = await supabase.from('companies').select<string, CompanyBranding>(columns).eq('slug', slug).single())
+      }
       console.log('Branding data:', data, 'Error:', error)
       setBranding(data ?? null)
       setLoadedSlug(slug)
@@ -82,6 +88,7 @@ function LoginForm() {
   const brandingPending = !!companySlug && loadedSlug !== companySlug
   const gymName = branding?.name || (brandingPending ? '' : 'CoachBoard')
   const gymInitial = (branding?.name?.trim()[0] || 'C').toUpperCase()
+  const bannerOnly = bannerShowsBranding(branding) // banner already has the name / logo: show it alone
 
   // The gym's logo, or its first letter on an orange tile
   const gymMark = (size: 'md' | 'lg', extra = '') => {
@@ -157,8 +164,17 @@ function LoginForm() {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-gray-950">
+      {/* Phones — a finished banner design (own name / logo), shown whole */}
+      {bannerOnly && (
+        <div className="md:hidden relative shrink-0 bg-gray-950">
+          <img src={branding!.banner_url!} alt={gymName} className="w-full h-auto block" />
+          <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-gray-950 to-transparent" />
+          <h1 className="sr-only">{gymName}</h1>
+        </div>
+      )}
+
       {/* Phones — the gym's banner across the top, with logo, name and tagline */}
-      <div
+      {!bannerOnly && <div
         className="md:hidden relative h-64 shrink-0 bg-gray-900"
         style={brandingPending ? undefined : {
           backgroundImage: `url('${getBannerUrl()}')`,
@@ -171,10 +187,17 @@ function LoginForm() {
           <h1 className="text-3xl font-bold leading-tight min-h-9">{gymName}</h1>
           <p className="text-gray-300 text-sm mt-1 min-h-5">{brandingPending ? '' : getTagline()}</p>
         </div>
-      </div>
+      </div>}
+
+      {/* Left side (tablet / desktop) — a finished banner design, uncropped */}
+      {bannerOnly && (
+        <div className="hidden md:flex md:w-1/2 items-center justify-center bg-gray-950 p-10">
+          <img src={branding!.banner_url!} alt={gymName} className="max-w-full max-h-[80vh] object-contain rounded-2xl" />
+        </div>
+      )}
 
       {/* Left side — Banner (tablet / desktop) */}
-      <div
+      {!bannerOnly && <div
         className="hidden md:flex md:w-1/2 relative bg-gray-900"
         style={{
           backgroundImage: `url('${getBannerUrl()}')`,
@@ -192,7 +215,7 @@ function LoginForm() {
           </div>
           <div className="text-xs text-gray-400">Powered by CoachBoard</div>
         </div>
-      </div>
+      </div>}
 
       {/* Right side — Login form */}
       <div className="w-full md:w-1/2 flex-1 bg-gray-950 flex items-start md:items-center justify-center px-6 pt-2 pb-8 md:p-8">

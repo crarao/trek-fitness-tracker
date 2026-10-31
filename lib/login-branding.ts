@@ -1,7 +1,7 @@
 // What a gym's login screen shows when the gym hasn't uploaded its own banner: a stock photo and a
 // tagline for its business type. Used by the login page and the super admin's branding preview.
 
-type Branded = { banner_url?: string | null; business_type?: string | null }
+type Branded = { banner_url?: string | null; business_type?: string | null; banner_has_branding?: boolean | null }
 
 export const DEFAULT_BANNERS: Record<string, string> = {
   gym: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1200&q=80',
@@ -26,3 +26,7 @@ export const bannerFor = (c: Branded | null | undefined) =>
 
 export const taglineFor = (c: Branded | null | undefined) =>
   DEFAULT_TAGLINES[c?.business_type || 'general'] || DEFAULT_TAGLINES.general
+
+// The gym's uploaded banner is a finished design with its own name / logo (switch set by super admin,
+// db/2026-10-31-banner-branding.md): show it whole, without the name, tagline and logo on top
+export const bannerShowsBranding = (c: Branded | null | undefined) => !!(c?.banner_has_branding && c?.banner_url)
