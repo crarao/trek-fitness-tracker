@@ -30,6 +30,8 @@ select name, slug, banner_has_branding from public.companies order by created_at
 The app works before and after this runs: until the column exists the switch is greyed out and the
 login looks as before.
 
+**Result 31 Oct:** run in Mumbai (`coachboard-mumbai`): column added, all 7 companies `false`. Switched on for Coach Srinivas from /admin (after reloading the page); the phone login shows the whole banner. Works.
+
 ## Test
 
 1. `/admin` → Companies → Coach Srinivas → Edit → Logo & banner → tick **Banner already shows the name and
