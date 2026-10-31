@@ -7,6 +7,7 @@ import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDa
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
+import { gymAddress } from '@/lib/tenant'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -967,7 +968,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                       setNewSlugError('')
                     }}
                     className={`w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border text-sm ${newSlugError || (newCompany.slug && slugProblem(newCompany.slug)) ? 'border-red-500' : 'border-gray-700'}`} />
-                  <p className="text-xs text-gray-500 mt-1.5">Login link: <span className="text-gray-300">{loginLinkPreview(newCompany.slug)}</span></p>
+                  <p className="text-xs text-gray-500 mt-1.5">Gym address: <span className="text-gray-300">{gymAddress(newCompany.slug)}</span> · also {loginLinkPreview(newCompany.slug)}</p>
                   {(newSlugError || (newCompany.slug && slugProblem(newCompany.slug))) && (
                     <p className="text-xs text-red-400 mt-1">{newSlugError || slugProblem(newCompany.slug)}</p>
                   )}
@@ -1130,10 +1131,10 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 value={slug}
                                 onChange={e => { setEditingCompany({ ...editingCompany, slug: cleanSlugInput(e.target.value) }); setEditSlugError('') }}
                                 className={`w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border text-sm ${slugError ? 'border-red-500' : 'border-gray-700'}`} />
-                              <p className="text-xs text-gray-500 mt-1.5">Login link: <span className="text-gray-300">{loginLinkPreview(slug)}</span></p>
+                              <p className="text-xs text-gray-500 mt-1.5">Gym address: <span className="text-gray-300">{gymAddress(slug)}</span> · also {loginLinkPreview(slug)}</p>
                               {slugError && <p className="text-xs text-red-400 mt-1">{slugError}</p>}
                               {savedSlug && slug !== savedSlug && (
-                                <p className="text-xs text-amber-400 mt-1">⚠ Changing the slug breaks the old login link ({loginLinkPreview(savedSlug)}). Send the company the new link.</p>
+                                <p className="text-xs text-amber-400 mt-1">⚠ Changing the slug breaks the old address ({gymAddress(savedSlug)}) and login link: members and installed apps on it stop working. Send the company the new address.</p>
                               )}
                               {!savedSlug && !slug && (
                                 <p className="text-xs text-gray-600 mt-1">No slug yet, so this company has no branded login link.</p>
