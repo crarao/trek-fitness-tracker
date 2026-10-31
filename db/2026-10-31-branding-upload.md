@@ -45,6 +45,8 @@ where id = 'branding';
 
 Applies to new uploads only; the two files already in the bucket stay as they are.
 
+**Result 31 Oct:** Steps 1 and 2 ran on production: rule "branding super admin upload" (INSERT, authenticated) is the only Storage rule; bucket `branding` is public, 5 MB limit, PNG / JPEG / WebP only.
+
 ## Test
 
 1. `/admin` → Companies → Coach Rich → Edit → **Upload banner** → pick a wide photo. "Banner updated ✓",
