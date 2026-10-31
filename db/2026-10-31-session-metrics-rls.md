@@ -28,7 +28,10 @@ Nothing is dropped: the existing rule is edited in place (`alter policy`) and na
 users; three coach rules are added. The app doesn't use `session_metrics` yet, so nothing changes on
 screen. `client_goals` (RLS on, no rules, not used) is left locked on purpose.
 
-## Step 1
+## Step 1 — ✅ run on Mumbai 31 Oct 2026
+
+Check passed: 4 rules, all `{authenticated}` (the ALL rule plus coach select / insert / update).
+Cross-company test cases below: not yet added to the test script.
 
 ```sql
 begin;
