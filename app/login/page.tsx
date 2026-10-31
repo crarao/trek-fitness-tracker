@@ -4,24 +4,7 @@ import { useState, useEffect, useSyncExternalStore, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { tenantSlugFromHost } from '@/lib/tenant'
-
-const defaultBanners: Record<string, string> = {
-  gym: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1200&q=80',
-  pilates: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=1200&q=80',
-  yoga: 'https://images.unsplash.com/photo-1588286840104-8957b019727f?w=1200&q=80',
-  trek: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200&q=80',
-  cycling: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80',
-  general: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=1200&q=80'
-}
-
-const defaultTaglines: Record<string, string> = {
-  gym: 'Real Training. Real Results.',
-  pilates: 'Strength From Within.',
-  yoga: 'Find Your Balance.',
-  trek: 'Every Summit Begins With A Single Step.',
-  cycling: 'Push Your Limits.',
-  general: 'Achieve Your Goals.'
-}
+import { bannerFor, taglineFor } from '@/lib/login-branding'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
 // The address and the remembered gym don't change while the page is open, so nothing to subscribe to
@@ -92,16 +75,8 @@ function LoginForm() {
     fetchBranding(companySlug)
   }, [companySlug])
 
-  const getBannerUrl = () => {
-    if (branding?.banner_url) return branding.banner_url
-    const type = branding?.business_type || 'general'
-    return defaultBanners[type] || defaultBanners.general
-  }
-
-  const getTagline = () => {
-    const type = branding?.business_type || 'general'
-    return defaultTaglines[type] || defaultTaglines.general
-  }
+  const getBannerUrl = () => bannerFor(branding)
+  const getTagline = () => taglineFor(branding)
 
   // Gym known but its branding still loading: show nothing yet rather than flash "CoachBoard"
   const brandingPending = !!companySlug && loadedSlug !== companySlug
