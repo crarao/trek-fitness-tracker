@@ -7,8 +7,8 @@ id, e.g. `branding/<company id>/logo-1761900000000.png`. The public link is save
 `companies.logo_url` / `banner_url`.
 
 Today nobody may add files to the bucket from the app (Storage has RLS on `storage.objects`, and there
-is no rule for it). This adds **one rule: only super admin may add files to `branding`**. Reading needs
-no rule (public bucket links). Nothing is dropped, deleted or overwritten: every upload gets a new file
+is no rule for it). This adds **two rules: only super admin may add files to `branding`, and read them back** (Step 1b). Showing the
+images needs no rule (public bucket links). Nothing is dropped, deleted or overwritten: every upload gets a new file
 name, and "Remove logo" / "Use the stock photo" only clear the link on the company (the file stays).
 
 Optional step 2 limits the bucket to images of at most 5 MB (the app already shrinks logos to 512 px
@@ -34,6 +34,18 @@ create policy "branding super admin upload" on storage.objects
   with check (bucket_id = 'branding' and (select public.get_my_role()) = 'super_admin');
 ```
 
+## Step 1b: super admin may read `branding` (needed for uploads)
+
+Storage saves a new file with `insert … returning`, and Postgres only returns the new row if a
+**select** rule passes too, so with only Step 1 every upload is refused ("new row violates row-level
+security policy"). Found 31 Oct on production. Public links don't need this rule; it gives nobody else access.
+
+```sql
+create policy "branding super admin read" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'branding' and (select public.get_my_role()) = 'super_admin');
+```
+
 ## Step 2 (recommended): images only, 5 MB max
 
 ```sql
@@ -44,6 +56,8 @@ where id = 'branding';
 ```
 
 Applies to new uploads only; the two files already in the bucket stay as they are.
+
+**Result 31 Oct:** Steps 1 and 2 ran on production (Step 1b added after the first upload was refused): rule "branding super admin upload" (INSERT, authenticated) is the only Storage rule; bucket `branding` is public, 5 MB limit, PNG / JPEG / WebP only.
 
 ## Test
 
