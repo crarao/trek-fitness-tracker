@@ -43,6 +43,8 @@ alter table public.companies
   ) not valid;
 ```
 
+**Result 31 Oct:** Step 0: `slug` is `text`, and one slug was already set (Coach Rich → `coach-rich`, valid, no duplicates). Step 1 ran successfully on production.
+
 ## Test
 
 1. `/admin` → Add Company → type "Syed Fitness": the slug field fills in `syed-fitness`, and the preview reads
