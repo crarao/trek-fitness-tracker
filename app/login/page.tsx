@@ -24,8 +24,14 @@ const defaultTaglines: Record<string, string> = {
 }
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
-// The address never changes while the page is open, so nothing to subscribe to
+// The address and the remembered gym don't change while the page is open, so nothing to subscribe to
 const noSubscribe = () => () => {}
+
+// The gym of the last login on this device, so the login screen stays branded in an app installed
+// from getcoachboard.com (no gym in the address). Kept after logout; replaced by the next login's gym.
+const REMEMBERED_GYM_KEY = 'coachboard-gym'
+const readRememberedGym = () => { try { return localStorage.getItem(REMEMBERED_GYM_KEY) } catch { return null } }
+const rememberGym = (slug: string) => { try { localStorage.setItem(REMEMBERED_GYM_KEY, slug) } catch { /* private mode */ } }
 const otherGymMessage = (gym: string | undefined) =>
   `This login isn't part of ${gym || 'this gym'}. Use your own gym's link, or sign in at getcoachboard.com/login.`
 
@@ -41,10 +47,11 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const coachOff = searchParams.get('off') === 'coach'
   const otherGym = searchParams.get('off') === 'gym'
-  // On a gym subdomain (syedfitness.getcoachboard.com) the address picks the gym; else ?company=<slug>.
-  // null while pre-rendering on the server (no window there).
+  // Which gym's branding to show: the address (syedfitness.getcoachboard.com), else a ?company=<slug>
+  // link, else the gym of the last login on this device. null while pre-rendering (no window there).
   const hostSlug = useSyncExternalStore(noSubscribe, () => tenantSlugFromHost(window.location.host), () => null)
-  const companySlug = hostSlug || searchParams.get('company')
+  const rememberedSlug = useSyncExternalStore(noSubscribe, readRememberedGym, () => null)
+  const companySlug = hostSlug || searchParams.get('company') || rememberedSlug
 
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -52,6 +59,7 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [branding, setBranding] = useState<CompanyBranding | null>(null)
+  const [loadedSlug, setLoadedSlug] = useState<string | null>(null) // branding lookup finished for this slug
   const [tried, setTried] = useState(false) // a sign-in was attempted: the ?off=gym note has done its job
 
   // Sent here by proxy.ts because this coach login was turned off: end the open session
@@ -78,7 +86,8 @@ function LoginForm() {
         .eq('slug', slug)
         .single()
       console.log('Branding data:', data, 'Error:', error)
-      if (data) setBranding(data)
+      setBranding(data ?? null)
+      setLoadedSlug(slug)
     }
     fetchBranding(companySlug)
   }, [companySlug])
@@ -92,6 +101,22 @@ function LoginForm() {
   const getTagline = () => {
     const type = branding?.business_type || 'general'
     return defaultTaglines[type] || defaultTaglines.general
+  }
+
+  // Gym known but its branding still loading: show nothing yet rather than flash "CoachBoard"
+  const brandingPending = !!companySlug && loadedSlug !== companySlug
+  const gymName = branding?.name || (brandingPending ? '' : 'CoachBoard')
+  const gymInitial = (branding?.name?.trim()[0] || 'C').toUpperCase()
+
+  // The gym's logo, or its first letter on an orange tile
+  const gymMark = (size: 'md' | 'lg', extra = '') => {
+    if (brandingPending) return <div className={`${size === 'lg' ? 'w-14 h-14' : 'w-12 h-12'} rounded-2xl bg-gray-800/60 ${extra}`} />
+    if (branding?.logo_url) return <img src={branding.logo_url} alt={branding.name} className={`${size === 'lg' ? 'h-14' : 'h-12'} max-w-[70%] object-contain ${extra}`} />
+    return (
+      <div className={`${size === 'lg' ? 'w-14 h-14 text-2xl' : 'w-12 h-12 text-xl'} bg-orange-500 rounded-2xl flex items-center justify-center text-white font-bold ${extra}`}>
+        {gymInitial}
+      </div>
+    )
   }
 
   const toEmail = (input: string) => {
@@ -129,14 +154,16 @@ function LoginForm() {
     }
 
     // On a gym's own address, only that gym's logins (and super admin) get in
-    if (hostSlug && profile.role !== 'super_admin') {
+    if (profile.role !== 'super_admin') {
       const { data: own } = await supabase.from('companies').select('slug').eq('id', profile.company_id).maybeSingle()
-      if (own?.slug !== hostSlug) {
+      if (hostSlug && own?.slug !== hostSlug) {
         await supabase.auth.signOut()
         setError(otherGymMessage(branding?.name))
         setLoading(false)
         return
       }
+      // Next time this device opens the login (even from getcoachboard.com), show this gym
+      if (own?.slug) rememberGym(own.slug)
     }
 
     if (profile.role === 'super_admin') router.push('/admin')
@@ -154,8 +181,24 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left side — Banner */}
+    <div className="min-h-screen flex flex-col md:flex-row bg-gray-950">
+      {/* Phones — the gym's banner across the top, with logo, name and tagline */}
+      <div
+        className="md:hidden relative h-64 shrink-0 bg-gray-900"
+        style={brandingPending ? undefined : {
+          backgroundImage: `url('${getBannerUrl()}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}>
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-black/60 to-black/30" />
+        <div className="relative z-10 h-full flex flex-col justify-end px-6 pb-5 text-white">
+          {gymMark('lg', 'mb-3 self-start')}
+          <h1 className="text-3xl font-bold leading-tight min-h-9">{gymName}</h1>
+          <p className="text-gray-300 text-sm mt-1 min-h-5">{brandingPending ? '' : getTagline()}</p>
+        </div>
+      </div>
+
+      {/* Left side — Banner (tablet / desktop) */}
       <div
         className="hidden md:flex md:w-1/2 relative bg-gray-900"
         style={{
@@ -166,21 +209,9 @@ function LoginForm() {
         <div className="absolute inset-0 bg-black opacity-55" />
         <div className="relative z-10 flex flex-col justify-end p-10 text-white w-full">
           <div className="mb-6">
-            {branding?.logo_url ? (
-              <img
-                src={branding.logo_url}
-                alt={branding.name}
-                className="h-12 mb-4 object-contain"
-              />
-            ) : (
-              <div className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center mb-4">
-                <span className="text-white text-xl font-bold">
-                  {branding?.name?.[0] || 'C'}
-                </span>
-              </div>
-            )}
+            {gymMark('md', 'mb-4')}
             <h2 className="text-3xl font-bold mb-2">
-              {branding?.name || 'CoachBoard'}
+              {gymName}
             </h2>
             <p className="text-gray-300 text-sm">{getTagline()}</p>
           </div>
@@ -189,25 +220,16 @@ function LoginForm() {
       </div>
 
       {/* Right side — Login form */}
-      <div className="w-full md:w-1/2 bg-gray-950 flex items-center justify-center p-8">
+      <div className="w-full md:w-1/2 flex-1 bg-gray-950 flex items-start md:items-center justify-center px-6 pt-2 pb-8 md:p-8">
         <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            {branding?.logo_url ? (
-              <img
-                src={branding.logo_url}
-                alt={branding.name}
-                className="h-12 mx-auto mb-4 object-contain"
-              />
-            ) : (
-              <div className="inline-flex items-center justify-center w-14 h-14 bg-orange-500 rounded-2xl mb-4">
-                <span className="text-white text-2xl font-bold">C</span>
-              </div>
-            )}
-            <h1 className="text-2xl font-bold text-white">
-              {branding?.name || 'CoachBoard'}
+          <div className="hidden md:block text-center mb-8">
+            {gymMark('lg', 'mx-auto mb-4')}
+            <h1 className="text-2xl font-bold text-white min-h-8">
+              {gymName}
             </h1>
             <p className="text-gray-500 text-sm mt-1">Sign in to your account</p>
           </div>
+          <p className="md:hidden text-gray-400 text-sm mb-4">Sign in to your account</p>
 
           <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 space-y-4">
             <div>
