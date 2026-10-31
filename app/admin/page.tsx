@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
+import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -31,6 +32,7 @@ type Company = {
   country: string | null
   is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
   company_type?: string | null   // 'gym' | 'coach' (individual coach). lib/company-type.ts; absent before the SQL
+  slug?: string | null   // branded login link getcoachboard.com/login/<slug>, lib/company-slug.ts
 }
 
 type ContactRequest = {
@@ -117,6 +119,8 @@ export default function AdminPage() {
   phone: '',
   country: 'IN' as Country,
   company_type: 'gym' as CompanyType,
+  slug: '',
+  slugEdited: false, // admin typed in the slug field: stop following the company name
   trial_start: localDateIso(),
   trial_end: localDateIso(7)
 })
@@ -124,6 +128,9 @@ export default function AdminPage() {
   const [message, setMessage] = useState('')
   // Company row saved but its admin login failed: retry reuses this row instead of creating a duplicate
   const [pendingCompanyId, setPendingCompanyId] = useState<string | null>(null)
+  // Inline slug errors ("already used") for the create form and the edit panel
+  const [newSlugError, setNewSlugError] = useState('')
+  const [editSlugError, setEditSlugError] = useState('')
   const [showPasswordForm, setShowPasswordForm] = useState(false)
   const [passwordData, setPasswordData] = useState({ newPassword: '', confirmPassword: '' })
   const [passwordMessage, setPasswordMessage] = useState('')
@@ -166,6 +173,7 @@ export default function AdminPage() {
   useEffect(() => { fetchAll() }, [])
 
   useEffect(() => {
+    setEditSlugError('')
     if (!editingCompany) { setCompanyPartners([]); setCompanyAdmins([]); setResetTarget(null); return }
     supabase.from('profiles').select('id, full_name, phone, email, archived_at')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
@@ -309,9 +317,22 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
             ? 'Pick the trial start and end dates'
             : newCompany.trial_end < newCompany.trial_start
               ? 'Trial end must be on or after the start date'
-              : ''
+              : slugProblem(newCompany.slug)
     if (problem) {
       setMessage('Error: ' + problem)
+      setSaving(false)
+      return
+    }
+
+    // Slug must be free (a retry of a half-created company may keep its own slug)
+    try {
+      if (await slugTaken(supabase, newCompany.slug, pendingCompanyId)) {
+        setNewSlugError(slugTakenMessage(newCompany.slug))
+        setSaving(false)
+        return
+      }
+    } catch (e) {
+      setMessage('Error: could not check the slug (' + (e as Error).message + ')')
       setSaving(false)
       return
     }
@@ -321,6 +342,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       name: newCompany.name, email: resolvedEmail, phone: newCompany.phone,
       country: newCompany.country, currency: currencyForCountry(newCompany.country),
       trial_start: newCompany.trial_start, trial_end: newCompany.trial_end, is_trial: true, is_active: true,
+      slug: newCompany.slug,
       // Sent once the company_type column exists (or when it's an individual coach; the SQL must run first then)
       ...(newCompany.company_type === 'coach' || companies.some(c => 'company_type' in c) ? { company_type: newCompany.company_type } : {}),
     }
@@ -329,7 +351,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       : await supabase.from('companies').insert(companyFields).select().single()
 
     if (companyError) {
-      setMessage('Error: ' + companyError.message)
+      if (isSlugConflict(companyError)) setNewSlugError(slugTakenMessage(newCompany.slug))
+      else setMessage('Error: ' + companyError.message)
       setSaving(false)
       return
     }
@@ -365,6 +388,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   phone: '',
   country: 'IN' as Country,
   company_type: 'gym' as CompanyType,
+  slug: '',
+  slugEdited: false, // admin typed in the slug field: stop following the company name
   trial_start: localDateIso(),
   trial_end: localDateIso(7)
 })
@@ -407,6 +432,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       showToast('PT limit must be a number, or leave it empty for no limit', 'error')
       return
     }
+    // Slug: may stay empty only if it was never set (companies made before slugs); otherwise same rules as create
+    const slug = editingCompany.slug || ''
+    const savedSlug = companies.find(c => c.id === editingCompany.id)?.slug || ''
+    if (slug || savedSlug) {
+      const problem = slugProblem(slug)
+      if (problem) { setEditSlugError(problem); return }
+      if (slug !== savedSlug) {
+        try {
+          if (await slugTaken(supabase, slug, editingCompany.id)) { setEditSlugError(slugTakenMessage(slug)); return }
+        } catch (e) {
+          showToast('Could not check the slug: ' + (e as Error).message, 'error')
+          return
+        }
+      }
+    }
     setSavingCompany(true)
     const { error } = await supabase
       .from('companies')
@@ -434,9 +474,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ...('is_test' in editingCompany ? { is_test: !!editingCompany.is_test } : {}),
         // Only once the company_type column exists
         ...('company_type' in editingCompany ? { company_type: companyType(editingCompany) } : {}),
+        slug: slug || null,
       })
       .eq('id', editingCompany.id)
     setSavingCompany(false)
+    if (isSlugConflict(error)) {
+      setEditSlugError(slugTakenMessage(slug))
+      return
+    }
     if (error) {
       showToast('Could not save: ' + error.message, 'error')
       return
@@ -906,8 +951,27 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                 <h3 className="font-semibold text-white">New Company</h3>
                 <input type="text" placeholder="Company name"
                   value={newCompany.name}
-                  onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
+                  onChange={(e) => {
+                    setNewCompany({ ...newCompany, name: e.target.value, ...(newCompany.slugEdited ? {} : { slug: slugFromName(e.target.value) }) })
+                    if (!newCompany.slugEdited) setNewSlugError('')
+                  }}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Slug <span className="normal-case text-gray-600">— short name in the login link, filled from the company name</span></label>
+                  <input type="text" placeholder="e.g. syedfitness" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                    value={newCompany.slug}
+                    onChange={(e) => {
+                      const slug = cleanSlugInput(e.target.value)
+                      // Cleared: go back to following the company name
+                      setNewCompany({ ...newCompany, slug, slugEdited: slug !== '' })
+                      setNewSlugError('')
+                    }}
+                    className={`w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border text-sm ${newSlugError || (newCompany.slug && slugProblem(newCompany.slug)) ? 'border-red-500' : 'border-gray-700'}`} />
+                  <p className="text-xs text-gray-500 mt-1.5">Login link: <span className="text-gray-300">{loginLinkPreview(newCompany.slug)}</span></p>
+                  {(newSlugError || (newCompany.slug && slugProblem(newCompany.slug))) && (
+                    <p className="text-xs text-red-400 mt-1">{newSlugError || slugProblem(newCompany.slug)}</p>
+                  )}
+                </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company type <span className="normal-case text-gray-600">— an individual coach has no coach or partner logins</span></label>
                   <select value={newCompany.company_type} required
@@ -1054,6 +1118,29 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             onChange={e => setEditingCompany({ ...editingCompany, phone: e.target.value })}
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
                         </div>
+
+                        {(() => {
+                          const slug = editingCompany.slug || ''
+                          const savedSlug = company.slug || ''
+                          const slugError = editSlugError || ((slug || savedSlug) ? slugProblem(slug) : '')
+                          return (
+                            <div>
+                              <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Slug <span className="normal-case text-gray-600">— short name in the login link</span></label>
+                              <input type="text" placeholder="e.g. syedfitness" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                                value={slug}
+                                onChange={e => { setEditingCompany({ ...editingCompany, slug: cleanSlugInput(e.target.value) }); setEditSlugError('') }}
+                                className={`w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border text-sm ${slugError ? 'border-red-500' : 'border-gray-700'}`} />
+                              <p className="text-xs text-gray-500 mt-1.5">Login link: <span className="text-gray-300">{loginLinkPreview(slug)}</span></p>
+                              {slugError && <p className="text-xs text-red-400 mt-1">{slugError}</p>}
+                              {savedSlug && slug !== savedSlug && (
+                                <p className="text-xs text-amber-400 mt-1">⚠ Changing the slug breaks the old login link ({loginLinkPreview(savedSlug)}). Send the company the new link.</p>
+                              )}
+                              {!savedSlug && !slug && (
+                                <p className="text-xs text-gray-600 mt-1">No slug yet, so this company has no branded login link.</p>
+                              )}
+                            </div>
+                          )
+                        })()}
 
                         <div>
                           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company type</label>
