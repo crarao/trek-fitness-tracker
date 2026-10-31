@@ -86,19 +86,19 @@ select policyname, cmd, roles from pg_policies where schemaname = 'public' and t
 commit;
 ```
 
-Undo (puts the old rule back exactly; the three coach rules would also need removing, which needs
-Anand's approval under Rule #1):
+Undo (old behaviour back: only the session's own client; before, `with_check` was empty, which
+means "same as using", so setting it to the same expression behaves identically). The three coach
+rules would also need removing, which needs Anand's approval under Rule #1.
 
 ```sql
 alter policy "Users can manage own session metrics" on public.session_metrics to public
   using (exists (select 1 from public.logged_sessions
                  where logged_sessions.id = session_metrics.session_id
-                   and logged_sessions.client_id = (select auth.uid())));
+                   and logged_sessions.client_id = (select auth.uid())))
+  with check (exists (select 1 from public.logged_sessions
+                      where logged_sessions.id = session_metrics.session_id
+                        and logged_sessions.client_id = (select auth.uid())));
 ```
-
-Note: `alter policy … using (…)` without `with check` keeps the existing `with check`, so after the undo
-run `select with_check from pg_policies where tablename = 'session_metrics';` — if it isn't NULL, the
-new check is still there; tell Claude before going further.
 
 ## Test
 
