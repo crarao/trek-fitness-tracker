@@ -57,7 +57,8 @@ companies
   ├── country (IN | US, default IN)   ← drives currency, date format, client login method
   ├── currency (INR | USD)            ← set from country by super admin
   ├── business_type (gym | trek | pilates | yoga | cycling | general)
-  └── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
+  ├── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
+  └── slug (unique, nullable)          ← super admin sets it; login link /login/<slug> (→ /login?company=<slug>), later <slug>.getcoachboard.com. Rules in lib/company-slug.ts, DB guard db/2026-10-31-company-slug.md
 
 profiles (one per user, linked to a company)
   ├── role (super_admin | company_admin | partner | client | coach)
@@ -135,6 +136,8 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Coach home (today's training list) | `app/coach/page.tsx` |
 | Coach rules (today's rows, Before you start, covering) | `lib/coach-today.ts` (check: `scripts/check-coach-today.ts`) |
 | Company type helpers (`isGym`, `isCoachCompany`, `companyType`) | `lib/company-type.ts` |
+| Company slug rules (suggest from name, validate, reserved words, uniqueness check) | `lib/company-slug.ts` |
+| Branded login link `/login/<slug>` (forwards to `/login?company=<slug>`) | `app/login/[slug]/page.tsx` |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
 | API: delete company | `app/api/delete-company/route.ts` |
