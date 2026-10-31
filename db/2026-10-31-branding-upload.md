@@ -1,5 +1,10 @@
 # Logo / banner upload from the super admin panel (31 Oct 2026)
 
+> **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
+> SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
+> Check the address bar shows `nptxjfvkqjuekgkspemu` before running. The old Tokyo project
+> (`rzndxzhmgxkxihnwqnoy`) is not used by the app.
+
 Super admin → Companies → Edit → **Logo & banner** uploads a gym's logo and login banner from the
 browser (`lib/branding-upload.ts`). Files go to the existing **public** Storage bucket `branding`
 (made by hand during the Mumbai move, `db/2026-10-29-move-to-mumbai.md` C7), in a folder per company
@@ -57,7 +62,7 @@ where id = 'branding';
 
 Applies to new uploads only; the two files already in the bucket stay as they are.
 
-**Result 31 Oct:** Steps 1 and 2 ran on production (Step 1b added after the first upload was refused): rule "branding super admin upload" (INSERT, authenticated) is the only Storage rule; bucket `branding` is public, 5 MB limit, PNG / JPEG / WebP only.
+**Result 31 Oct:** Steps 1, 1b and 2 were first run by mistake in the old **Tokyo** project, so uploads kept being refused ("new row violates row-level security policy") although the rules looked right. Then run in **Mumbai** (live): bucket `branding` public, 5 MB, PNG / JPEG / WebP; rules "branding super admin upload" (INSERT) and "branding super admin read" (SELECT). First real upload (Coach Srinivas logo + banner) worked. Step 1b is needed: Storage inserts with `returning`.
 
 ## Test
 

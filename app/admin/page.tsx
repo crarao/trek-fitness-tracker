@@ -9,7 +9,7 @@ import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTy
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
-import { bannerFor, taglineFor } from '@/lib/login-branding'
+import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -38,6 +38,7 @@ type Company = {
   slug?: string | null   // branded login link getcoachboard.com/login/<slug>, lib/company-slug.ts
   logo_url?: string | null     // gym logo / login banner (uploaded in the edit panel, lib/branding-upload.ts)
   banner_url?: string | null
+  banner_has_branding?: boolean | null // banner already has the gym's name / logo (absent before db/2026-10-31-banner-branding.md)
   business_type?: string | null
 }
 
@@ -534,6 +535,18 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   }
 
   // Clears the link on the company; the file stays in storage
+  // "Banner already shows the name and logo": saved straight away, like the images
+  const handleBannerBrandingToggle = async (on: boolean) => {
+    if (!editingCompany) return
+    const id = editingCompany.id
+    setBrandingError('')
+    const { data, error } = await supabase.from('companies').update({ banner_has_branding: on }).eq('id', id).select('id')
+    if (error || !data?.length) { setBrandingError('Could not save: ' + (error?.message || 'no change saved')); return }
+    setEditingCompany(c => (c && c.id === id ? { ...c, banner_has_branding: on } : c))
+    setCompanies(cs => cs.map(c => (c.id === id ? { ...c, banner_has_branding: on } : c)))
+    showToast(on ? 'Login shows the banner on its own ✓' : 'Login shows the name on the banner ✓')
+  }
+
   const handleBrandingRemove = async (kind: BrandingKind) => {
     setBrandingBusy(kind)
     setBrandingError('')
@@ -1198,6 +1211,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         <div>
                           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Logo & banner <span className="normal-case text-gray-600">— how the login looks on a phone</span></label>
                           <div className="rounded-2xl overflow-hidden border border-gray-700 max-w-sm bg-gray-950">
+                            {bannerShowsBranding(editingCompany) ? (
+                              <img src={editingCompany.banner_url!} alt="" className="w-full h-auto block" />
+                            ) : (
                             <div className="relative h-40 bg-gray-900"
                               style={{ backgroundImage: `url('${bannerFor(editingCompany)}')`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
                               <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-black/60 to-black/30" />
@@ -1209,6 +1225,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 <p className="text-xs text-gray-300">{taglineFor(editingCompany)}</p>
                               </div>
                             </div>
+                            )}
                             <div className="px-4 py-2 text-[11px] text-gray-500">Sign in to your account…</div>
                           </div>
 
@@ -1237,6 +1254,22 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             onChange={e => { handleBrandingFile('logo', e.target.files?.[0]); e.target.value = '' }} />
                           <input ref={bannerInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
                             onChange={e => { handleBrandingFile('banner', e.target.files?.[0]); e.target.value = '' }} />
+                          <label className={`flex items-start gap-2.5 mt-3 max-w-sm text-sm ${'banner_has_branding' in editingCompany && editingCompany.banner_url ? 'text-gray-300 cursor-pointer' : 'text-gray-600'}`}>
+                            <input type="checkbox" className="mt-0.5 accent-orange-500"
+                              checked={!!editingCompany.banner_has_branding}
+                              disabled={!('banner_has_branding' in editingCompany) || !editingCompany.banner_url || !!brandingBusy}
+                              onChange={e => handleBannerBrandingToggle(e.target.checked)} />
+                            <span>
+                              Banner already shows the name and logo
+                              <span className="block text-xs text-gray-600">
+                                {!('banner_has_branding' in editingCompany)
+                                  ? 'Available after db/2026-10-31-banner-branding.md runs in Supabase (Mumbai).'
+                                  : !editingCompany.banner_url
+                                    ? 'Upload a banner first.'
+                                    : 'The login then shows the banner whole, without the name, tagline and logo on top.'}
+                              </span>
+                            </span>
+                          </label>
                           {brandingError && <p className="text-xs text-red-400 mt-2">{brandingError}</p>}
                           <p className="text-xs text-gray-600 mt-2">
                             Logo: a square PNG with a transparent background looks best. Banner: a wide (landscape) photo; the middle shows on phones.

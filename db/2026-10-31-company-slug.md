@@ -1,5 +1,10 @@
 # Company slug: unique + format rule (31 Oct 2026)
 
+> **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
+> SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
+> Check the address bar shows `nptxjfvkqjuekgkspemu` before running. The old Tokyo project
+> (`rzndxzhmgxkxihnwqnoy`) is not used by the app.
+
 The super admin now sets each company's **slug** (create form and edit panel in `/admin`). It is the short
 name in the branded login link `getcoachboard.com/login/<slug>` and, later, the subdomain
 `<slug>.getcoachboard.com`. Rules (same as `lib/company-slug.ts`): 3–30 characters, lowercase letters,
@@ -43,7 +48,7 @@ alter table public.companies
   ) not valid;
 ```
 
-**Result 31 Oct:** Step 0: `slug` is `text`, and one slug was already set (Coach Rich → `coach-rich`, valid, no duplicates). Step 1 ran successfully on production.
+**Result 31 Oct:** first run by mistake in the old **Tokyo** project (`rzndxzhmgxkxihnwqnoy`; found from the project id in its logs), harmless there. Then run in **Mumbai** (live): no duplicate slugs, unique index and format check added. The app's own check before saving worked throughout.
 
 ## Test
 
