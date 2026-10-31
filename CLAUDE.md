@@ -287,6 +287,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - `weekly_plans`, `logged_sessions`: staff of the client's gym; coaches for PT clients (no deletes); clients read their own and log their own sessions (`logged_by` empty or themselves); `weekly_plan_id` must belong to the same client.
 - `session_feedback`: staff of the gym; coaches read PT clients'; clients read their own and add a star rating only (no `admin_feedback`, no edit / delete).
 - `leads`: staff of the gym read / add / update, super admin reads all, no delete. `ai_usage`, `contact_requests`: super admin read (server writes).
+- `session_metrics` (not used by the app yet): same reach as `logged_sessions` — client own sessions, staff their gym's client sessions, coaches their gym's PT client sessions (no delete), super admin all (`db/2026-10-31-session-metrics-rls.md`). `client_goals`: RLS on, no rules, not used — locked on purpose.
 - API routes and `proxy.ts` use the server key, so RLS doesn't affect them; every route checks the caller with `getCaller()`. Blocked updates / deletes return 0 rows without an error: use `.select()` after update / delete and check rows when it matters.
 
 **RLS rules (company isolation, 30 Oct 2026).** Follow these for every table and policy:
