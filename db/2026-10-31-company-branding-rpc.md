@@ -17,7 +17,7 @@ There is no colour column on `companies`; the login's colours come from `busines
 falls back to the old table read until Step 1 has run, so the order is: deploy the app, run Step 1,
 test, then Step 2.
 
-## Step 1 — add the function (nothing removed)
+## Step 1 — add the function (nothing removed) — ✅ run on Mumbai 31 Oct 2026
 
 Needs `db/2026-10-31-banner-branding.md` first (the `banner_has_branding` column).
 
@@ -60,9 +60,10 @@ If `create function` complains about a type (e.g. `name` is `varchar`), cast in 
 2. Browser dev tools → Network: the page calls `rpc/get_company_branding`, not `companies?select=…`.
 3. A made-up slug (`/login?company=no-such-gym`) shows the plain CoachBoard login.
 
-## Step 2 — remove the open read rule (needs Anand's approval, Rule #1)
+## Step 2 — remove the open read rule — ✅ approved by Anand and run on Mumbai 31 Oct 2026
 
-**Do not run until approved.** This removes one RLS policy (no data, no columns). After it,
+Checks passed: as anon, `select count(*) from companies` = 0; `get_company_branding('coach-srinig')`
+returns Coach Srinivas. This removed one RLS policy (no data, no columns). After it,
 logged-out visitors can't read `companies` at all; they only get the one-row result of the function.
 Undo = recreate it: `create policy "Public can read company branding" on public.companies for select to anon using (true);`
 
