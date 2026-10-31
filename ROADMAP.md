@@ -107,7 +107,7 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 - [x] **Run 2 SQL lines in Supabase (at a computer)** — done by Anand 25 Oct; both only add empty columns:
   `alter table public.logged_sessions add column if not exists exercises_done jsonb;` (saves exercise ticks so coaches see them, #15)
   `alter table public.logged_sessions add column if not exists activity text;` (needed before #32 activity type is built)
-- [ ] **#62 Check Resend email after the DNS move** — 31 Oct the nameservers moved from Namecheap to Vercel DNS (for #22); the 5 Resend records (SPF `@` and `send`, DMARC, DKIM `resend._domainkey`, MX `send`) were copied to Vercel. Once the switch has gone through: Resend → Domains → getcoachboard.com → Verify, and send a test email. If it fails, compare each record in Vercel with the one still listed in Namecheap (Advanced DNS).
+- [x] **#62 Check Resend email after the DNS move** — 31 Oct the nameservers moved from Namecheap to Vercel DNS (for #22); the 5 Resend records (SPF `@` and `send`, DMARC, DKIM `resend._domainkey`, MX `send`) were copied to Vercel first. Checked 31 Oct after the switch: Resend → Domains shows getcoachboard.com **Verified**. If email ever stops, compare each record in Vercel DNS with the old list still in Namecheap (Advanced DNS).
 - [ ] Set up admin@getcoachboard.com (forwarding is free; a real mailbox is ~$1/user/month).
 - [x] Delete the duplicate "New US company" (Usc@gmail.com) that has no admin login. (done 25 Oct)
 - [ ] Add testimonials to `app/landing-content.ts` (or send them to Claude) when you get them.
