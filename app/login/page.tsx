@@ -63,18 +63,21 @@ function LoginForm() {
   useEffect(() => {
     if (!companySlug) return
     const fetchBranding = async (slug: string) => {
-      console.log('Fetching branding for:', slug)
-      const columns = 'name, logo_url, banner_url, business_type'
+      // Logged-out visitors can't read companies; get_company_branding returns only the branding
+      // columns of this one gym (db/2026-10-31-company-branding-rpc.md)
       let { data, error } = await supabase
-        .from('companies')
-        .select<string, CompanyBranding>(`${columns}, banner_has_branding`)
-        .eq('slug', slug)
-        .single()
-      // Column not there yet (or not readable logged out): load the rest as before
-      if (error && (error.code === '42703' || error.code === '42501')) {
-        ({ data, error } = await supabase.from('companies').select<string, CompanyBranding>(columns).eq('slug', slug).single())
+        .rpc('get_company_branding', { p_slug: slug })
+        .returns<CompanyBranding[]>()
+        .maybeSingle<CompanyBranding>()
+      // Function not created yet (Step 1 not run): read the table as before
+      if (error && (error.code === 'PGRST202' || error.code === '42883')) {
+        const columns = 'name, logo_url, banner_url, business_type'
+        ;({ data, error } = await supabase.from('companies').select<string, CompanyBranding>(`${columns}, banner_has_branding`).eq('slug', slug).maybeSingle())
+        if (error && (error.code === '42703' || error.code === '42501')) {
+          ({ data, error } = await supabase.from('companies').select<string, CompanyBranding>(columns).eq('slug', slug).maybeSingle())
+        }
       }
-      console.log('Branding data:', data, 'Error:', error)
+      if (error) console.error('Branding lookup failed:', error.message)
       setBranding(data ?? null)
       setLoadedSlug(slug)
     }
