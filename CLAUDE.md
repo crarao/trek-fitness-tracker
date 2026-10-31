@@ -139,6 +139,8 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Company slug rules (suggest from name, validate, reserved words, uniqueness check) | `lib/company-slug.ts` |
 | Branded login link `/login/<slug>` (forwards to `/login?company=<slug>`) | `app/login/[slug]/page.tsx` |
 | Gym subdomains: read the gym from the host (`tenantSlugFromHost`, `rootHost`, `gymAddress`) | `lib/tenant.ts` |
+| Gym logo / banner upload (super admin edit panel → public Storage bucket `branding/<company id>/`, shrunk in the browser; rule in `db/2026-10-31-branding-upload.md`) | `lib/branding-upload.ts` |
+| Login stock banner + tagline per business type (login page and the admin preview) | `lib/login-branding.ts` |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
 | API: delete company | `app/api/delete-company/route.ts` |

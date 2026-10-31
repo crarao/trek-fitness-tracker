@@ -8,6 +8,8 @@ import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricin
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
+import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
+import { bannerFor, taglineFor } from '@/lib/login-branding'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
@@ -34,6 +36,9 @@ type Company = {
   is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
   company_type?: string | null   // 'gym' | 'coach' (individual coach). lib/company-type.ts; absent before the SQL
   slug?: string | null   // branded login link getcoachboard.com/login/<slug>, lib/company-slug.ts
+  logo_url?: string | null     // gym logo / login banner (uploaded in the edit panel, lib/branding-upload.ts)
+  banner_url?: string | null
+  business_type?: string | null
 }
 
 type ContactRequest = {
@@ -169,12 +174,18 @@ export default function AdminPage() {
   const [resetTarget, setResetTarget] = useState<{ id: string; name: string } | null>(null)
   const [resetPasswordValue, setResetPasswordValue] = useState('')
   const [resettingPassword, setResettingPassword] = useState(false)
+  // Logo / banner upload in the edit panel
+  const [brandingBusy, setBrandingBusy] = useState<BrandingKind | null>(null)
+  const [brandingError, setBrandingError] = useState('')
+  const logoInput = useRef<HTMLInputElement>(null)
+  const bannerInput = useRef<HTMLInputElement>(null)
 
 
   useEffect(() => { fetchAll() }, [])
 
   useEffect(() => {
     setEditSlugError('')
+    setBrandingError('')
     if (!editingCompany) { setCompanyPartners([]); setCompanyAdmins([]); setResetTarget(null); return }
     supabase.from('profiles').select('id, full_name, phone, email, archived_at')
       .eq('company_id', editingCompany.id).eq('role', 'partner')
@@ -494,6 +505,46 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       setEditingCompany(null)
     }, 1500)
     fetchAll()
+  }
+
+  // Logo / banner: saved straight away (not with the panel's Save), so an upload is never lost
+  const saveBranding = async (kind: BrandingKind, url: string | null) => {
+    if (!editingCompany) return
+    const id = editingCompany.id
+    const column = kind === 'logo' ? 'logo_url' : 'banner_url'
+    const { data, error } = await supabase.from('companies').update({ [column]: url }).eq('id', id).select('id')
+    if (error || !data?.length) throw new Error(error?.message || 'Could not save it on the company')
+    setEditingCompany(c => (c && c.id === id ? { ...c, [column]: url } : c))
+    setCompanies(cs => cs.map(c => (c.id === id ? { ...c, [column]: url } : c)))
+  }
+
+  const handleBrandingFile = async (kind: BrandingKind, file: File | undefined) => {
+    if (!editingCompany || !file) return
+    setBrandingBusy(kind)
+    setBrandingError('')
+    try {
+      const url = await uploadBranding(supabase, editingCompany.id, kind, file)
+      await saveBranding(kind, url)
+      showToast(kind === 'logo' ? 'Logo updated ✓' : 'Banner updated ✓')
+    } catch (e) {
+      setBrandingError((e as Error).message)
+    } finally {
+      setBrandingBusy(null)
+    }
+  }
+
+  // Clears the link on the company; the file stays in storage
+  const handleBrandingRemove = async (kind: BrandingKind) => {
+    setBrandingBusy(kind)
+    setBrandingError('')
+    try {
+      await saveBranding(kind, null)
+      showToast(kind === 'logo' ? 'Logo removed' : 'Banner removed: the stock photo shows')
+    } catch (e) {
+      setBrandingError((e as Error).message)
+    } finally {
+      setBrandingBusy(null)
+    }
   }
 
   const handleRemoveTrial = async () => {
@@ -1142,6 +1193,56 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             </div>
                           )
                         })()}
+
+                        {/* Logo + banner, with a preview of the phone login */}
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Logo & banner <span className="normal-case text-gray-600">— how the login looks on a phone</span></label>
+                          <div className="rounded-2xl overflow-hidden border border-gray-700 max-w-sm bg-gray-950">
+                            <div className="relative h-40 bg-gray-900"
+                              style={{ backgroundImage: `url('${bannerFor(editingCompany)}')`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                              <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-black/60 to-black/30" />
+                              <div className="relative z-10 h-full flex flex-col justify-end px-4 pb-3 text-white">
+                                {editingCompany.logo_url
+                                  ? <img src={editingCompany.logo_url} alt="" className="h-10 max-w-[60%] object-contain self-start mb-2" />
+                                  : <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center font-bold mb-2">{(editingCompany.name?.trim()[0] || 'C').toUpperCase()}</div>}
+                                <p className="text-lg font-bold leading-tight">{editingCompany.name || 'Company name'}</p>
+                                <p className="text-xs text-gray-300">{taglineFor(editingCompany)}</p>
+                              </div>
+                            </div>
+                            <div className="px-4 py-2 text-[11px] text-gray-500">Sign in to your account…</div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 mt-3 max-w-sm">
+                            {(['logo', 'banner'] as const).map(kind => {
+                              const has = kind === 'logo' ? !!editingCompany.logo_url : !!editingCompany.banner_url
+                              const busy = brandingBusy === kind
+                              return (
+                                <div key={kind} className="space-y-1.5">
+                                  <button type="button" disabled={!!brandingBusy}
+                                    onClick={() => (kind === 'logo' ? logoInput : bannerInput).current?.click()}
+                                    className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm rounded-xl px-3 py-2.5 transition disabled:opacity-50">
+                                    {busy ? 'Uploading…' : `${has ? 'Change' : 'Upload'} ${kind}`}
+                                  </button>
+                                  {has && (
+                                    <button type="button" disabled={!!brandingBusy} onClick={() => handleBrandingRemove(kind)}
+                                      className="w-full text-xs text-gray-500 hover:text-red-400 transition disabled:opacity-50">
+                                      {kind === 'logo' ? 'Remove logo' : 'Use the stock photo'}
+                                    </button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <input ref={logoInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                            onChange={e => { handleBrandingFile('logo', e.target.files?.[0]); e.target.value = '' }} />
+                          <input ref={bannerInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                            onChange={e => { handleBrandingFile('banner', e.target.files?.[0]); e.target.value = '' }} />
+                          {brandingError && <p className="text-xs text-red-400 mt-2">{brandingError}</p>}
+                          <p className="text-xs text-gray-600 mt-2">
+                            Logo: a square PNG with a transparent background looks best. Banner: a wide (landscape) photo; the middle shows on phones.
+                            Both save straight away{editingCompany.banner_url ? '' : '. No banner yet, so a stock photo for the business type shows'}.
+                          </p>
+                        </div>
 
                         <div>
                           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Company type</label>
