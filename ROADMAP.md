@@ -3,7 +3,7 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 30 Oct 2026_
+_Last updated: 31 Oct 2026_
 
 ---
 
@@ -30,6 +30,7 @@ _Last updated: 30 Oct 2026_
 - [x] **#28 Membership renew fix** — Edit opens in Renew mode with dates starting after the current membership (or today); separate Correct mode; saves checked with red errors; same-day tie goes to the newest entry (#16)
 - [x] **#4 Role check at the door** — `middleware.ts` renamed to `proxy.ts` (Next 16); each section only opens for the right role, others go to their own home (#14)
 - [x] **#3 `.claude/settings.local.json` no longer tracked** — approved by Anand; added to `.gitignore` (#13)
+- [x] **#22 Gym slugs and subdomains** — 31 Oct. Super admin sets each company's slug (create + edit, filled from the name, 3–30 chars, starts with a letter, reserved words blocked, must be unused; `lib/company-slug.ts`, unique index + format check in `db/2026-10-31-company-slug.md`, run by Anand 31 Oct) (#72). `<slug>.getcoachboard.com` runs the whole app for that gym: branded login from the address, members stay on it, another gym's login is refused, unknown gyms go to the main site; `getcoachboard.com/login/<slug>` also works (`lib/tenant.ts`, `proxy.ts`). Wildcard `*.getcoachboard.com` on Vercel DNS (nameservers moved from Namecheap 31 Oct) (#73)
 - [x] **No-deletion rule for Claude** — CLAUDE.md Rule #1 + `.claude/settings.json` deny list (#2)
 
 ---
@@ -83,7 +84,7 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 ## Later (after #1 and a consent flow)
 
 - [ ] **#21 Medical report upload** feeding into the diet chart.
-- [ ] **#22 Subdomain branding** (gymname.getcoachboard.com).
+- [x] **#22 Subdomain branding** — moved up and shipped 31 Oct, see Done.
 
 ---
 
@@ -97,6 +98,7 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 - [x] **#33 New company showed "trial expired" until edited** — reported 25 Oct. Cause: Create Company showed the trial date boxes but didn't save them, and the coach dashboard treated "no end date" as expired. Fixed: Create saves trial start / end with `is_trial` and `is_active`, checks end ≥ start; default dates are local (not UTC); end date counts as the last full day everywhere (`daysUntil` / `localDateIso` in `lib/locale.ts`); no end date = no warning (#34)
 - [x] **#61 Plans tab order + AI draft collapsed** — reported by Anand 30 Oct. Coach → client → Plans: cards now go This week first, then Upcoming (soonest first), then Past (most recent first), and "Show older plans" keeps that order (`orderPlansByWeek` in `lib/plan-summary.ts`; plans were newest `week_start` first, so upcoming weeks sat above this week). A freshly generated AI plan opens with all 7 days collapsed (tap a day to see or edit it); hand-written and edited plans still open their first workout day (`PlanEditor startCollapsed`). No SQL
 - [ ] **#26 Email alert for contact form requests** — needs a sending address (admin@getcoachboard.com via Zoho Mail / Namecheap Private Email) and an email provider (e.g. Resend).
+- [ ] **#63 Gym's own name and icon on the installed app (only if a gym asks)** — after #22: the installed app (PWA) on a gym's address still shows "CoachBoard" and the CoachBoard icon on the home screen and splash; inside, the screens already show the gym's logo. Would need a manifest made per gym (name from `companies.name`, icon from `logo_url`, which must be a square PNG of at least 512 px) served from the gym's address. No SQL.
 - [ ] **#27 Fresh demo video** — the YouTube demo is from April; a new 60-second recording would show today's app (could go on the landing page).
 
 ## Manual to-dos for Anand (not code)
@@ -104,6 +106,7 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 - [x] **Run 2 SQL lines in Supabase (at a computer)** — done by Anand 25 Oct; both only add empty columns:
   `alter table public.logged_sessions add column if not exists exercises_done jsonb;` (saves exercise ticks so coaches see them, #15)
   `alter table public.logged_sessions add column if not exists activity text;` (needed before #32 activity type is built)
+- [ ] **#62 Check Resend email after the DNS move** — 31 Oct the nameservers moved from Namecheap to Vercel DNS (for #22); the 5 Resend records (SPF `@` and `send`, DMARC, DKIM `resend._domainkey`, MX `send`) were copied to Vercel. Once the switch has gone through: Resend → Domains → getcoachboard.com → Verify, and send a test email. If it fails, compare each record in Vercel with the one still listed in Namecheap (Advanced DNS).
 - [ ] Set up admin@getcoachboard.com (forwarding is free; a real mailbox is ~$1/user/month).
 - [x] Delete the duplicate "New US company" (Usc@gmail.com) that has no admin login. (done 25 Oct)
 - [ ] Add testimonials to `app/landing-content.ts` (or send them to Claude) when you get them.
