@@ -58,7 +58,7 @@ companies
   ├── currency (INR | USD)            ← set from country by super admin
   ├── business_type (gym | trek | pilates | yoga | cycling | general)
   ├── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
-  └── slug (unique, nullable)          ← super admin sets it; login link /login/<slug> (→ /login?company=<slug>), later <slug>.getcoachboard.com. Rules in lib/company-slug.ts, DB guard db/2026-10-31-company-slug.md
+  └── slug (unique, nullable)          ← super admin sets it; gym address <slug>.getcoachboard.com (lib/tenant.ts) and login link /login/<slug> (→ /login?company=<slug>). Rules in lib/company-slug.ts, DB guard db/2026-10-31-company-slug.md
 
 profiles (one per user, linked to a company)
   ├── role (super_admin | company_admin | partner | client | coach)
@@ -138,6 +138,7 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Company type helpers (`isGym`, `isCoachCompany`, `companyType`) | `lib/company-type.ts` |
 | Company slug rules (suggest from name, validate, reserved words, uniqueness check) | `lib/company-slug.ts` |
 | Branded login link `/login/<slug>` (forwards to `/login?company=<slug>`) | `app/login/[slug]/page.tsx` |
+| Gym subdomains: read the gym from the host (`tenantSlugFromHost`, `rootHost`, `gymAddress`) | `lib/tenant.ts` |
 | API: create user | `app/api/create-user/route.ts` |
 | API: delete user | `app/api/delete-user/route.ts` |
 | API: delete company | `app/api/delete-company/route.ts` |
@@ -306,7 +307,9 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## Conventions
 
-**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`, `coach` → `/coach`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/coach` coach; `/company/client` company_admin + partner + coach, listed before `/company` because the first match wins; `/company` incl. `/company/leads` company_admin + partner; `/client` client) and sends anyone else to their own home. A turned-off coach is sent to `/login?off=coach`. Keep that table in `proxy.ts` up to date when adding sections. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
+**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`, `coach` → `/coach`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/coach` coach; `/company/client` company_admin + partner + coach, listed before `/company` because the first match wins; `/company` incl. `/company/leads` company_admin + partner; `/client` client) and sends anyone else to their own home. A turned-off coach is sent to `/login?off=coach`. Keep that table in `proxy.ts` up to date when adding sections.
+
+**Gym subdomains:** `<slug>.getcoachboard.com` runs the whole app for that company (Vercel wildcard domain `*.getcoachboard.com`). `proxy.ts` runs on every page (not `/api` or static files): only `PROTECTED` pages need a login; on a subdomain it also sends an unknown gym to the main site, `/` to `/dashboard`, and a login from another gym (not super admin) to `/login?off=gym`. The login page reads the gym from the address (`lib/tenant.ts`), else `?company=<slug>`, and refuses another gym's login there. Logins are per address (cookies aren't shared between the subdomain and getcoachboard.com). Keep redirects relative (same address); a redirect to another host needs an explicit `Location` header. Local dev: `syedfitness.localhost:3000`. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
 
 **Styling:** Tailwind CSS 4 utility classes inline. No separate CSS files. No CSS modules.
 

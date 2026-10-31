@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useSyncExternalStore, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { tenantSlugFromHost } from '@/lib/tenant'
 
 const defaultBanners: Record<string, string> = {
   gym: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=1200&q=80',
@@ -23,6 +24,10 @@ const defaultTaglines: Record<string, string> = {
 }
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
+// The address never changes while the page is open, so nothing to subscribe to
+const noSubscribe = () => () => {}
+const otherGymMessage = (gym: string | undefined) =>
+  `This login isn't part of ${gym || 'this gym'}. Use your own gym's link, or sign in at getcoachboard.com/login.`
 
 type CompanyBranding = {
   name: string
@@ -34,8 +39,12 @@ type CompanyBranding = {
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const companySlug = searchParams.get('company')
   const coachOff = searchParams.get('off') === 'coach'
+  const otherGym = searchParams.get('off') === 'gym'
+  // On a gym subdomain (syedfitness.getcoachboard.com) the address picks the gym; else ?company=<slug>.
+  // null while pre-rendering on the server (no window there).
+  const hostSlug = useSyncExternalStore(noSubscribe, () => tenantSlugFromHost(window.location.host), () => null)
+  const companySlug = hostSlug || searchParams.get('company')
 
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -43,6 +52,7 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [branding, setBranding] = useState<CompanyBranding | null>(null)
+  const [tried, setTried] = useState(false) // a sign-in was attempted: the ?off=gym note has done its job
 
   // Sent here by proxy.ts because this coach login was turned off: end the open session
   useEffect(() => {
@@ -52,22 +62,26 @@ function LoginForm() {
     }
   }, [coachOff])
 
+  // Sent here by proxy.ts because this login belongs to another gym than this address
   useEffect(() => {
-    if (companySlug) {
-      fetchBranding(companySlug)
-    }
-  }, [companySlug])
+    if (otherGym) supabase.auth.signOut()
+  }, [otherGym])
+  const shownError = error || (otherGym && !tried ? otherGymMessage(branding?.name) : '')
 
-const fetchBranding = async (slug: string) => {
-    console.log('Fetching branding for:', slug)
-    const { data, error } = await supabase
-      .from('companies')
-      .select('name, logo_url, banner_url, business_type')
-      .eq('slug', slug)
-      .single()
-    console.log('Branding data:', data, 'Error:', error)
-    if (data) setBranding(data)
-  }
+  useEffect(() => {
+    if (!companySlug) return
+    const fetchBranding = async (slug: string) => {
+      console.log('Fetching branding for:', slug)
+      const { data, error } = await supabase
+        .from('companies')
+        .select('name, logo_url, banner_url, business_type')
+        .eq('slug', slug)
+        .single()
+      console.log('Branding data:', data, 'Error:', error)
+      if (data) setBranding(data)
+    }
+    fetchBranding(companySlug)
+  }, [companySlug])
 
   const getBannerUrl = () => {
     if (branding?.banner_url) return branding.banner_url
@@ -91,6 +105,7 @@ const fetchBranding = async (slug: string) => {
   const handleLogin = async () => {
     setLoading(true)
     setError('')
+    setTried(true)
 
     const { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(identifier), password })
 
@@ -103,7 +118,7 @@ const fetchBranding = async (slug: string) => {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, archived_at')
+      .select('role, archived_at, company_id')
       .eq('id', data.user.id)
       .single()
 
@@ -111,6 +126,17 @@ const fetchBranding = async (slug: string) => {
       setError('No profile found. Contact administrator.')
       setLoading(false)
       return
+    }
+
+    // On a gym's own address, only that gym's logins (and super admin) get in
+    if (hostSlug && profile.role !== 'super_admin') {
+      const { data: own } = await supabase.from('companies').select('slug').eq('id', profile.company_id).maybeSingle()
+      if (own?.slug !== hostSlug) {
+        await supabase.auth.signOut()
+        setError(otherGymMessage(branding?.name))
+        setLoading(false)
+        return
+      }
     }
 
     if (profile.role === 'super_admin') router.push('/admin')
@@ -217,9 +243,9 @@ const fetchBranding = async (slug: string) => {
               </div>
             </div>
 
-            {error && (
+            {shownError && (
               <div className="bg-red-950 border border-red-800 rounded-xl px-4 py-3">
-                <p className="text-red-400 text-sm">{error}</p>
+                <p className="text-red-400 text-sm">{shownError}</p>
               </div>
             )}
 
