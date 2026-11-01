@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getCaller, PLAN_ROLES, forbidden, checkCanManageClient } from '@/lib/auth-server'
-import { normalizePlan, planToText, workoutDays } from '@/lib/plan-structure'
+import { normalizePlan, planToText, workoutDays, parseAvailableDays, daysPerWeekMentioned, WEEKDAYS, type PlanJson, type Weekday } from '@/lib/plan-structure'
 import { recordAiUsage } from '@/lib/ai-usage'
 import { getAiPlanUsage, type AiPlanUsage } from '@/lib/ai-plan-limit'
 import { normalizeCountry, formatDate } from '@/lib/locale'
@@ -60,7 +60,35 @@ const coachingStyles: Record<string, string> = {
   general: `Focus on overall fitness with a balanced mix of cardio, strength and flexibility exercises.`
 }
 
+// Available days the AI left as rest (or with no exercises)
+function missingWorkoutDays(plan: PlanJson, trainDays: Weekday[]): Weekday[] {
+  return trainDays.filter(d => {
+    const day = plan.days.find(x => x.day === d)
+    return !day || day.rest || day.exercises.length === 0
+  })
+}
+
+// Days outside Available Days always end up as rest days with at most an optional light item,
+// even if the AI marked them rest but still filled in a workout
+const LIGHT_ITEM = { name: 'Light walk or stretching', sets: '', reps: '20 min', rest: '', note: 'Optional' }
+function enforceSchedule(plan: PlanJson, trainDays: Weekday[]): PlanJson {
+  if (!trainDays.length) return plan
+  return {
+    ...plan,
+    days: plan.days.map(d => {
+      if (trainDays.includes(d.day)) return d
+      if (d.rest && d.exercises.length <= 1) return { ...d, focus: '' }
+      return { ...d, rest: true, focus: '', exercises: [LIGHT_ITEM] }
+    }),
+  }
+}
+
+// Time for the whole request (maxDuration is 60 s); the schedule retry only runs if it fits
+const TIME_BUDGET_MS = 52_000
+const MIN_RETRY_MS = 20_000
+
 export async function POST(request: Request) {
+  const startedAt = Date.now()
   // Only gym staff, coaches (PT clients only) or super admin can generate plans — protects Anthropic credits
   const { caller, error: authError } = await getCaller(PLAN_ROLES)
   if (authError) return authError
@@ -105,6 +133,24 @@ export async function POST(request: Request) {
     const businessType = profile.business_type || 'gym'
     const style = coachingStyles[businessType] || coachingStyles.general
 
+    // The schedule comes from the Available Days chips, worked out here so the AI can't miscount
+    const trainDays = parseAvailableDays(profile.available_days)
+    const restDays = WEEKDAYS.filter(d => trainDays.length && !trainDays.includes(d))
+    const schedule = trainDays.length
+      ? `WEEKLY SCHEDULE (fixed, do not change):
+- Workout days (exactly ${trainDays.length}): ${trainDays.join(', ')}
+- Rest days (exactly ${restDays.length}): ${restDays.length ? restDays.join(', ') : 'none'}
+If the Goal or Medical Conditions text mentions a different number of days, still follow this schedule exactly.`
+      : `WEEKLY SCHEDULE: no available days were set. Pick a sensible number of workout days for the client's goal and level.`
+
+    // The chips win over the free text; tell the coach when the notes say something else
+    const mentioned = daysPerWeekMentioned(profile.goal) ?? daysPerWeekMentioned(profile.medical_conditions)
+    const scheduleNotes: string[] = []
+    if (trainDays.length && mentioned && mentioned !== trainDays.length) {
+      scheduleNotes.push(`This plan uses the Available Days from the client's profile (${trainDays.join(', ')}: ${trainDays.length} days). `
+        + `The client's notes mention ${mentioned} days a week. If the profile is wrong, update Available Days and generate again.`)
+    }
+
     const prompt = `You are an experienced ${businessType} coach creating a detailed weekly training plan for a client.
 
 Coaching approach: ${style}
@@ -114,18 +160,20 @@ Name: ${profile.full_name}
 Age: ${profile.age} | Gender: ${profile.gender}
 Height: ${profile.height_cm}cm | Weight: ${profile.weight_kg}kg
 Fitness Level: ${profile.fitness_level}
-Available Days: ${profile.available_days}
+Available Days: ${trainDays.length ? trainDays.join(', ') : 'Not set'}
 Goal: ${profile.goal}
 Medical Conditions / Injuries: ${profile.medical_conditions || 'None'}
 
+${schedule}
+
 PRIORITY RULES (these override the coaching approach above):
-- Treat every instruction in the Goal and Medical Conditions fields as a hard requirement, including schedule, rest days, equipment and exercise preferences.
+- Treat every instruction in the Goal and Medical Conditions fields as a hard requirement for equipment, exercise choice and preferences (the weekly schedule above decides which days are workouts).
 - If machines are excluded, do NOT use any machine or cable station (no cable exercises, pec deck, leg press, leg curl, lat pulldown, smith machine). Free weights, bodyweight and outdoor exercises are allowed unless also excluded.
 - If the client has knee pain, avoid deep or heavy loaded knee flexion (back squats, deep lunges, jumping) and prefer knee-friendly alternatives (glute bridges, hip thrusts, step-ups to a low box, wall sits with limited range).
 - Never include exercises that could aggravate the listed medical conditions or injuries.
-- Match the exact number of workout days and rest days requested.
+- Give every workout day in the schedule a full workout; never turn one into a rest day.
 - Before answering, silently check every exercise against these rules and replace any that break them.
-- Schedule workouts ONLY on the client's Available Days. Every other day of the week must be "REST DAY" (optional light walk/stretching only).
+- Schedule workouts ONLY on the workout days above. Every other day of the week must be a rest day (optional light walk/stretching only).
 
 OUTPUT: call the weekly_plan tool. Fill in all 7 days, Monday to Sunday.
 - Workout days: rest = false, a short focus (e.g. "Lower Body Strength"), 5–7 exercises including a warm-up first and a cool-down last.
@@ -134,29 +182,69 @@ OUTPUT: call the weekly_plan tool. Fill in all 7 days, Monday to Sunday.
 - note: "Review with your coach before starting. Not medical advice."
 Plain words only, no markdown symbols.`
 
-    const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4000,
-      tools: [PLAN_TOOL],
-      tool_choice: { type: 'tool', name: 'weekly_plan' },
-      messages: [{ role: 'user', content: prompt }]
-    })
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: prompt }]
+    const askAi = async (options?: Anthropic.RequestOptions) => {
+      const message = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4000,
+        tools: [PLAN_TOOL],
+        tool_choice: { type: 'tool', name: 'weekly_plan' },
+        messages,
+      }, options)
+      // Cost of this call, per gym, for the super admin Dashboard (the client's gym)
+      await recordAiUsage({
+        companyId, userId: caller.userId, clientId, feature: 'plan', model: message.model, usage: message.usage,
+      })
+      const toolUse = message.content.find(c => c.type === 'tool_use')
+      const plan = toolUse && toolUse.type === 'tool_use' ? normalizePlan(toolUse.input) : null
+      return { message, toolUse, plan }
+    }
 
-    // Cost of this call, per gym, for the super admin Dashboard (the client's gym)
-    await recordAiUsage({
-      companyId, userId: caller.userId, clientId, feature: 'plan', model: message.model, usage: message.usage,
-    })
-    // This call counts towards the month even if the output below turns out unusable (it was paid for)
+    const first = await askAi()
+    let { message } = first
+    const { toolUse } = first
+    let planJson = first.plan
+
+    // The AI sometimes leaves a workout day as rest. Ask it once to fix that (still one plan towards the
+    // client's monthly cap; both calls are recorded as cost), if there's time left. Extra workout days
+    // need no retry: enforceSchedule turns them into rest days below.
+    const missing = planJson ? missingWorkoutDays(planJson, trainDays) : []
+    const timeLeft = TIME_BUDGET_MS - (Date.now() - startedAt)
+    if (planJson && missing.length && toolUse && toolUse.type === 'tool_use' && timeLeft >= MIN_RETRY_MS) {
+      messages.push({ role: 'assistant', content: message.content })
+      messages.push({ role: 'user', content: [{
+        type: 'tool_result', tool_use_id: toolUse.id, is_error: true,
+        content: `The schedule is wrong. These must be workout days with a full workout: ${missing.join(', ')}. Workout days are exactly ${trainDays.join(', ')}; every other day is a rest day. Call weekly_plan again with all 7 days, keeping every other rule.`,
+      }] })
+      try {
+        const retry = await askAi({ timeout: timeLeft, maxRetries: 0 })
+        // Use the retry only if it is actually better
+        if (retry.plan && workoutDays(retry.plan).length && missingWorkoutDays(retry.plan, trainDays).length < missing.length) {
+          planJson = retry.plan
+          message = retry.message
+        }
+      } catch (e) {
+        // The first plan is usable and already paid for: keep it rather than failing the request
+        console.error('Plan generation: schedule retry failed, keeping first plan', e)
+      }
+    }
+    if (planJson) {
+      planJson = enforceSchedule(planJson, trainDays)
+      const stillMissing = missingWorkoutDays(planJson, trainDays)
+      if (stillMissing.length && workoutDays(planJson).length) {
+        scheduleNotes.push(`The AI left ${stillMissing.join(', ')} without a workout. Add exercises for ${stillMissing.length === 1 ? 'that day' : 'those days'} before assigning, or generate again.`)
+      }
+    }
+
+    // Counts as one plan towards the month even if the output below turns out unusable (it was paid for)
     const aiPlans = usage ? { ...usage, used: usage.used + 1 } : null
 
     // The plan comes back as structured days; the text copy is built from it
-    const toolUse = message.content.find(c => c.type === 'tool_use')
-    const planJson = toolUse && toolUse.type === 'tool_use' ? normalizePlan(toolUse.input) : null
     if (!planJson || workoutDays(planJson).length === 0) {
       console.error('Plan generation: unusable output', message.stop_reason)
       return NextResponse.json({ error: 'The AI returned an incomplete plan. Please try again.', aiPlans }, { status: 502 })
     }
-    return NextResponse.json({ plan: planToText(planJson), plan_json: planJson, aiPlans })
+    return NextResponse.json({ plan: planToText(planJson), plan_json: planJson, aiPlans, scheduleNotes })
 
   } catch (error: any) {
     console.error('Plan generation error:', error)
