@@ -90,6 +90,9 @@ function fmtDate(d: string, country: Country | null) {
   return formatDate(d, country, 'dayMonth')
 }
 
+// Gym owners don't edit the logo link; super admin uploads it (lib/branding-upload.ts).
+const SHOW_LOGO_URL_SETTING = false
+
 export default function CompanyAdminPage() {
   const router = useRouter()
   const [clients, setClients] = useState<Client[]>([])
@@ -869,6 +872,9 @@ export default function CompanyAdminPage() {
       {/* Settings Panel */}
       {showSettings && (
         <div className="mx-4 sm:mx-8 mt-4 mb-0 bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
+          {/* Logo is set by the super admin only (admin edit panel → upload). The raw Supabase Storage
+              link isn't shown to the gym; the logo itself still shows in the header above. */}
+          {SHOW_LOGO_URL_SETTING && (
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Company Logo URL</p>
             <div className="flex gap-2">
@@ -881,6 +887,7 @@ export default function CompanyAdminPage() {
               </button>
             </div>
           </div>
+          )}
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Change Password</p>
             <div className="relative">
