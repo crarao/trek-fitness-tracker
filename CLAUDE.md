@@ -107,6 +107,12 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
   ├── converted_profile_id → profiles (set by "Convert to member")
   ├── created_by → profiles (defaults to auth.uid())
   └── created_at, updated_at (trigger keeps updated_at current)
+
+exercises (exercise library, #74; never deleted: archived)
+  ├── company_id → companies (null = shared starter list, super admin only edits)
+  ├── name (unique per gym, case-insensitive), aliases text[], muscle_group, equipment
+  ├── is_archived, created_by → profiles, created_at
+  └── plans keep a copy of the name in plan_json (+ optional exercise_id, weight)
 ```
 
 **Membership history is preserved.** Every renewal inserts a new `memberships` row. `Correct Current` updates the latest row (for typos only). Latest membership = `ORDER BY start_date DESC LIMIT 1`.
@@ -133,6 +139,9 @@ leads (enquiries, #52; never deleted: they end as joined or lost)
 | Client detail (coach view) | `app/company/client/[id]/page.tsx` |
 | Leads / enquiries page | `app/company/leads/page.tsx` |
 | Leads rules (sources, follow-up state, WhatsApp wording, summary) | `lib/leads.ts` |
+| Exercise library rules (search, labels, recent) | `lib/exercises.ts` (check: `scripts/check-exercises.ts`) |
+| Plan builder: editor, exercise picker sheet, copy-plan sheet | `app/plan-editor.tsx`, `app/exercise-picker.tsx`, `app/plan-copy-sheet.tsx` |
+| Manage the gym's exercises (owner / partner) | `app/company/exercises/page.tsx` |
 | Client app | `app/client/page.tsx` |
 | Coach home (today's training list) | `app/coach/page.tsx` |
 | Coach rules (today's rows, Before you start, covering) | `lib/coach-today.ts` (check: `scripts/check-coach-today.ts`) |
@@ -287,6 +296,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - `weekly_plans`, `logged_sessions`: staff of the client's gym; coaches for PT clients (no deletes); clients read their own and log their own sessions (`logged_by` empty or themselves); `weekly_plan_id` must belong to the same client.
 - `session_feedback`: staff of the gym; coaches read PT clients'; clients read their own and add a star rating only (no `admin_feedback`, no edit / delete).
 - `leads`: staff of the gym read / add / update, super admin reads all, no delete. `ai_usage`, `contact_requests`: super admin read (server writes).
+- `exercises` (#74, `db/2026-11-01-exercise-library.md`): everyone signed in reads the starter list + their gym's; owner / partner / coach add and edit their gym's; starter list super admin only; no delete (archive).
 - `session_metrics` (not used by the app yet): same reach as `logged_sessions` — client own sessions, staff their gym's client sessions, coaches their gym's PT client sessions (no delete), super admin all (`db/2026-10-31-session-metrics-rls.md`, run on Mumbai 31 Oct). `client_goals`: RLS on, no rules, not used — locked on purpose.
 - API routes and `proxy.ts` use the server key, so RLS doesn't affect them; every route checks the caller with `getCaller()`. Blocked updates / deletes return 0 rows without an error: use `.select()` after update / delete and check rows when it matters.
 
@@ -311,7 +321,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 ## Conventions
 
-**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`, `coach` → `/coach`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/coach` coach; `/company/client` company_admin + partner + coach, listed before `/company` because the first match wins; `/company` incl. `/company/leads` company_admin + partner; `/client` client) and sends anyone else to their own home. A turned-off coach is sent to `/login?off=coach`. Keep that table in `proxy.ts` up to date when adding sections.
+**Routing by role:** `/dashboard/page.tsx` reads the role and redirects. `partner` → `/company`, `coach` → `/coach`. `proxy.ts` enforces which roles may open each section (`/admin` super_admin; `/coach` coach; `/company/client` company_admin + partner + coach, listed before `/company` because the first match wins; `/company` incl. `/company/leads` and `/company/exercises` company_admin + partner; `/client` client) and sends anyone else to their own home. A turned-off coach is sent to `/login?off=coach`. Keep that table in `proxy.ts` up to date when adding sections.
 
 **Gym subdomains:** `<slug>.getcoachboard.com` runs the whole app for that company (Vercel wildcard domain `*.getcoachboard.com`). `proxy.ts` runs on every page (not `/api` or static files): only `PROTECTED` pages need a login; on a subdomain it also sends an unknown gym to the main site, `/` to `/dashboard`, and a login from another gym (not super admin) to `/login?off=gym`. The login page reads the gym from the address (`lib/tenant.ts`), else `?company=<slug>`, else the gym of the last login on that device (`localStorage` key `coachboard-gym`, saved after a successful non-super-admin login, kept after logout, so apps installed from getcoachboard.com stay branded), and refuses another gym's login on a gym's address. On phones the gym's banner, logo (or first letter), name and tagline sit across the top. Logins are per address (cookies aren't shared between the subdomain and getcoachboard.com). Keep redirects relative (same address); a redirect to another host needs an explicit `Location` header. Local dev: `syedfitness.localhost:3000`. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
 

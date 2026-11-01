@@ -19,6 +19,8 @@ export type PlanExercise = {
   reps: string   // "10", "8–12", "30 s", "1 km"
   rest: string   // "60 s" (free text so coaches can write what they like)
   note: string   // optional cue, e.g. "keep back flat"
+  weight?: string      // optional load, e.g. "20 kg", "bodyweight", "RPE 7" (free text)
+  exercise_id?: string // optional link to the exercise library (exercises.id); `name` is always the copy shown
 }
 
 export type PlanDay = {
@@ -51,6 +53,9 @@ export function emptyPlan(availableDays?: string | null): PlanJson {
   }
 }
 
+export const MAX_EXERCISES_PER_DAY = 30
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const str = (v: unknown, max = 200) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').trim().slice(0, max)
 
 function toWeekday(v: unknown): Weekday | null {
@@ -73,10 +78,15 @@ export function normalizePlan(raw: unknown): PlanJson | null {
       .filter(e => e && typeof e === 'object')
       .map(e => {
         const x = e as Record<string, unknown>
-        return { name: str(x.name, 120), sets: str(x.sets, 20), reps: str(x.reps, 40), rest: str(x.rest, 30), note: str(x.note, 160) }
+        const ex: PlanExercise = { name: str(x.name, 120), sets: str(x.sets, 20), reps: str(x.reps, 40), rest: str(x.rest, 30), note: str(x.note, 160) }
+        const weight = str(x.weight, 30)
+        const id = str(x.exercise_id, 36)
+        if (weight) ex.weight = weight
+        if (UUID.test(id)) ex.exercise_id = id
+        return ex
       })
       .filter(e => e.name)
-      .slice(0, 20)
+      .slice(0, MAX_EXERCISES_PER_DAY)
     const focus = str(o.focus, 60)
     const rest = o.rest === true || (exercises.length === 0 && !focus) || /^rest\b/i.test(focus)
     byDay.set(day, { day, rest, focus: rest && /^rest\b/i.test(focus) ? '' : focus, exercises })
@@ -105,10 +115,11 @@ export function dayLabel(d: PlanDay): string {
   return `${d.day} · ${focus}`
 }
 
-// "3 x 10, rest 60 s" from the parts that are filled in
+// "3 x 10 @ 20 kg, rest 60 s" from the parts that are filled in
 export function exerciseDetail(e: PlanExercise): string {
   const vol = e.sets && e.reps ? `${e.sets} x ${e.reps}` : e.sets ? `${e.sets} sets` : e.reps
-  return [vol, e.rest ? `rest ${e.rest}` : ''].filter(Boolean).join(', ')
+  const load = e.weight ? (vol ? `${vol} @ ${e.weight}` : `@ ${e.weight}`) : vol
+  return [load, e.rest ? `rest ${e.rest}` : ''].filter(Boolean).join(', ')
 }
 
 // Text copy saved in plan_details. Headings use full weekday names so summarizePlan() reads them.
@@ -155,15 +166,19 @@ export function parseExerciseLine(line: string): PlanExercise {
   const parts = text.split(/\s+[–—-]\s+|:\s+/)
   const name = parts[0].trim()
   const rest = parts.slice(1).join(' – ')
-  let sets = '', reps = '', restTime = ''
-  const vol = rest.match(/(\d+)\s*[x×]\s*([^,;]+)/i)
+  let sets = '', reps = '', restTime = '', weight = ''
+  const vol = rest.match(/(\d+)\s*[x×]\s*([^,;@]+)/i)
   if (vol) { sets = vol[1]; reps = vol[2].trim() }
   const r = rest.match(/rest\s*:?\s*([^,;]+)/i)
   if (r) restTime = r[1].trim()
-  let leftover = vol || r ? '' : rest
+  const w = rest.match(/@\s*([^,;]+)/)
+  if (w) weight = w[1].trim()
+  let leftover = vol || r || w ? '' : rest
   // "40 m", "5 min", "30 s" with no sets: that's the amount
   if (leftover && /^\d/.test(leftover) && leftover.length <= 20) { reps = leftover; leftover = '' }
-  return { name: leftover ? `${name} – ${leftover}` : name, sets, reps, rest: restTime, note }
+  const out: PlanExercise = { name: leftover ? `${name} – ${leftover}` : name, sets, reps, rest: restTime, note }
+  if (weight) out.weight = weight
+  return out
 }
 
 // Reads a text plan's day headings and "-" lines. "Day 1, Day 2…" are placed on the client's

@@ -6,6 +6,7 @@
 import { type Country, formatDate } from './locale'
 import { imagesToPdf, type PdfPage } from './pdf'
 import type { WeekSummary } from './progress-share'
+import { type PlanJson, daysInWeekOrder, exerciseDetail } from './plan-structure'
 
 export type ProgressPdfInput = {
   companyName: string
@@ -16,6 +17,7 @@ export type ProgressPdfInput = {
   week: WeekSummary
   fourWeeks: { done: number; planned: number } | null // plan days done over the last 4 weeks
   totals: { start: string; sessions: number; minutes: number }[] // per week, oldest first
+  plan?: { weekStart: string; json: PlanJson } | null // the week's day-by-day plan, if it has one
 }
 
 // 150 dpi A4
@@ -204,6 +206,48 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     ctx.drawImage(await chartImage(kind, labels, [...data], chartW, chartH), x, y + 50)
   }
   y += 50 + chartH + 40
+
+  // The week's plan, day by day (structured plans only; text plans are left out)
+  if (input.plan) {
+    const days = daysInWeekOrder(input.plan.json, input.plan.weekStart).filter(d => !d.rest || d.exercises.length)
+    if (days.length) {
+      heading(`Plan for the week of ${formatDate(input.plan.weekStart.slice(0, 10), input.country, 'dayMonth')}`)
+      for (const d of days) {
+        ensure(48 + Math.min(d.exercises.length, 3) * 38)
+        ctx.fillStyle = ORANGE
+        ctx.font = font(26, 700)
+        ctx.fillText(d.day, M, y + 28)
+        ctx.fillStyle = DARK
+        ctx.font = font(26, 600)
+        ctx.fillText(d.rest ? 'Rest day' : d.focus || 'Workout', M + 90, y + 28, W - 2 * M - 90)
+        y += 46
+        for (const e of d.exercises) {
+          ensure(38)
+          const detail = exerciseDetail(e)
+          ctx.font = font(23)
+          ctx.fillStyle = GRAY
+          ctx.textAlign = 'right'
+          if (detail) ctx.fillText(detail, W - M, y + 24)
+          ctx.textAlign = 'left'
+          const detailW = detail ? ctx.measureText(detail).width + 30 : 0
+          ctx.fillStyle = DARK
+          ctx.fillText(e.name, M + 90, y + 24, W - 2 * M - 90 - detailW)
+          y += 38
+        }
+        y += 16
+      }
+      if (input.plan.json.note) {
+        ctx.font = font(22)
+        for (const line of wrap(ctx, input.plan.json.note, W - 2 * M)) {
+          ensure(32)
+          ctx.fillStyle = GRAY
+          ctx.font = font(22)
+          ctx.fillText(line, M, y + 22)
+          y += 32
+        }
+      }
+    }
+  }
 
   // Footer on every page
   const made = formatDate(new Date(), input.country, 'medium')
