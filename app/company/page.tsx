@@ -1397,6 +1397,16 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Exercise list: the gym's own exercises for the plan builder (rename / archive) */}
+      {trainModule && (
+        <div className="px-4 sm:px-8 pt-3">
+          <button type="button" data-nav onClick={() => router.push('/company/exercises')}
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Exercises for plans <span className="text-white font-medium">→ Exercise list</span>
+          </button>
+        </div>
+      )}
+
       {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted. Gyms only */}
       {trainModule && !coachCompany && (
         <div className="px-4 sm:px-8 pt-3">

@@ -15,7 +15,7 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 //   /admin             super_admin
 //   /coach             coach
 //   /company/client    company_admin, partner, coach   (coaches open PT clients; RLS limits them to PT)
-//   /company           company_admin, partner          (incl. /company/leads)
+//   /company           company_admin, partner          (incl. /company/leads, /company/exercises)
 //   /client            client
 //   /dashboard         any logged-in user (routes by role)
 
