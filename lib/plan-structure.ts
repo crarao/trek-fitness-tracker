@@ -38,9 +38,28 @@ export type PlanJson = {
 
 export const emptyExercise = (): PlanExercise => ({ name: '', sets: '', reps: '', rest: '', note: '' })
 
+// The client's available days ("Mon,Wed,Fri,Thu,Tue") as weekdays in Mon…Sun order, unknown values dropped
+export function parseAvailableDays(availableDays?: string | null): Weekday[] {
+  const set = new Set((availableDays || '').split(',').map(d => d.trim().slice(0, 3).toLowerCase()))
+  return WEEKDAYS.filter(d => set.has(d.toLowerCase()))
+}
+
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 }
+
+// Training days per week written in free text ("3 days a week", "four times per week", "3x/week",
+// "5-day split"), or null. Needs "week" / "split" etc. after the number, so "surgery 3 days ago" doesn't count.
+export function daysPerWeekMentioned(text?: string | null): number | null {
+  const t = (text || '').toLowerCase()
+  const n = '([1-7]|one|two|three|four|five|six|seven)'
+  const m = t.match(new RegExp(`\\b${n}\\s*(?:x|times|days?)\\s*(?:a|per|each|every|/|in a)\\s*week`))
+    || t.match(new RegExp(`\\b${n}[- ]days? (?:split|program|programme|plan|routine|schedule)`))
+  if (!m) return null
+  return NUMBER_WORDS[m[1]] ?? Number(m[1])
+}
+
 // A blank plan; the client's available days (e.g. "Mon,Wed,Fri") start as workout days
 export function emptyPlan(availableDays?: string | null): PlanJson {
-  const avail = new Set((availableDays || '').split(',').map(d => d.trim()))
+  const avail = new Set<string>(parseAvailableDays(availableDays))
   return {
     version: 1,
     note: '',

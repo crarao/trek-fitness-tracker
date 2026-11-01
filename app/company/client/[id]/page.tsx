@@ -155,6 +155,8 @@ export default function ClientDetailPage() {
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [aiError, setAiError] = useState('')
+  // Notes for the coach about the AI plan's schedule (e.g. the client's notes ask for a different number of days)
+  const [scheduleNotes, setScheduleNotes] = useState<string[]>([])
   // #37: AI plans used this month for this client (null = not loaded / couldn't be counted)
   const [aiPlans, setAiPlans] = useState<{ used: number; limit: number; resetsOn: string } | null>(null)
   const [aiElapsed, setAiElapsed] = useState(0)
@@ -795,6 +797,7 @@ const handleGeneratePlan = async () => {
   setGeneratingPlan(true)
   setShowGeneratedPlan(false)
   setGeneratedPlan('')
+  setScheduleNotes([])
   setShowPlanForm(false)
   setPlanError('')
   setAiError('')
@@ -817,13 +820,14 @@ const handleGeneratePlan = async () => {
       })
     })
 
-    let data: { plan?: string; plan_json?: unknown; error?: string; aiPlans?: { used: number; limit: number; resetsOn: string } | null } = {}
+    let data: { plan?: string; plan_json?: unknown; scheduleNotes?: string[]; error?: string; aiPlans?: { used: number; limit: number; resetsOn: string } | null } = {}
     try { data = await response.json() } catch { /* non-JSON, e.g. server timeout page */ }
     if (data.aiPlans) setAiPlans(data.aiPlans)
 
     if (response.ok && data.plan) {
       setGeneratedPlan(data.plan)
       setGeneratedJson(data.plan_json ? planJsonOf({ plan_json: data.plan_json }) : null)
+      setScheduleNotes(Array.isArray(data.scheduleNotes) ? data.scheduleNotes.filter(n => typeof n === 'string') : [])
       setAiPlanMeta(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
       setShowGeneratedPlan(true)
     } else if (response.status === 429) {
@@ -1698,6 +1702,11 @@ const handleResetPassword = async () => {
         Dismiss
       </button>
     </div>
+    {scheduleNotes.length > 0 && (
+      <div className="bg-amber-950 border border-amber-800 rounded-xl px-4 py-3 space-y-1">
+        {scheduleNotes.map(n => <p key={n} className="text-sm text-amber-200">{n}</p>)}
+      </div>
+    )}
     {generatedJson ? (
       <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} />
     ) : (
