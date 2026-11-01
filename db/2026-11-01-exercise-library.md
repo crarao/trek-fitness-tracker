@@ -1,4 +1,6 @@
-# 1 Nov 2026 — Exercise library (`exercises` table) — RUN WHEN AT A COMPUTER
+# 1 Nov 2026 — Exercise library (`exercises` table) — ✅ RUN ON MUMBAI 1 NOV
+
+**Status:** Steps 1–3 run by Anand on Mumbai (`coachboard-mumbai`) 1 Nov 2026. Check passed: RLS on, 4 rules all `{authenticated}`, 9 check rows. Cross-company test below: not yet run.
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
