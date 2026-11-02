@@ -1,11 +1,11 @@
-# 1 Nov 2026 — Multi-country clients & per-currency income — NOT RUN YET
+# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 1 NOT RUN YET
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
 > Check the address bar shows `nptxjfvkqjuekgkspemu` before running. The old Tokyo project
 > (`rzndxzhmgxkxihnwqnoy`) is not used by the app.
 
-**Anand runs this; Claude does not.** Additive only: no `DROP`, no `DELETE`, no `TRUNCATE` (CLAUDE.md Rule #1).
+**Anand runs this; Claude does not.** Additive only: no `DROP`, no `DELETE`, no `TRUNCATE` (CLAUDE.md Rule #1), except the one country-rule drop in Step 0b, approved and run by Anand 2 Nov.
 
 **Order:**
 1. **Deploy the app change first** (branch `multi-country`). The new code reads phones in both formats
@@ -54,6 +54,34 @@ where conrelid = 'public.companies'::regclass and contype = 'c';
 
 If a rule mentions `country` or `currency` with only `'IN'` / `'US'` / `'INR'` / `'USD'`, stop and tell Claude
 (a UAE / Canada company couldn't be saved).
+
+**Step 0 run by Anand 2 Nov 2026 on Mumbai:**
+- `protect_profile_columns()` matched the 30 Oct version (coach-view Step 4) exactly → Step 1 item 5 is safe.
+- Found `companies_country_check CHECK (country = ANY (ARRAY['IN', 'US']))` (no rule on `currency`). Other checks:
+  `companies_company_type_check`, `companies_partner_limit_check`, `companies_slug_format` (unchanged).
+
+### Step 0b — country rule widened to IN / AE / US / CA — ✅ RUN BY ANAND 2 NOV
+
+Postgres can't edit a check in place, so the old rule was dropped and re-added with the four countries.
+This one drop was explained in the conversation and run by Anand himself (Rule #1: only this rule, no data removed;
+every company row unchanged).
+
+```sql
+-- ALREADY RUN 2 Nov 2026 — do not run again
+alter table public.companies drop constraint companies_country_check;
+alter table public.companies
+  add constraint companies_country_check check (country = any (array['IN', 'AE', 'US', 'CA']));
+```
+
+Result: "Success. No rows returned". Check:
+
+```sql
+select pg_get_constraintdef(oid) from pg_constraint where conname = 'companies_country_check';
+-- expect CHECK ((country = ANY (ARRAY['IN'::text, 'AE'::text, 'US'::text, 'CA'::text])))
+```
+
+Undo would mean dropping this rule again and re-adding the IN / US one: ask Claude first (needs Anand's OK for that drop),
+and only if no company uses AE or CA.
 
 ---
 
