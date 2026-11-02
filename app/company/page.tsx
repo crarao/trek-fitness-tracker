@@ -10,7 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol, groupByCurrency, formatMoneyByCurrency, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, waDigits, splitE164, staffLogin, isPhoneLogin, phoneHint } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, waDigits, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
@@ -553,6 +553,17 @@ export default function CompanyAdminPage() {
     return own && allowedCurrencies.includes(own) ? own : baseCurrency
   }
 
+  // How the new member will log in: an email, an Indian phone, or not at all (coach-run member, login can come later)
+  const newClientLogin = (): { kind: 'email' | 'phone'; email: string; shown: string } | { kind: 'none' } | { kind: 'bad-email' } => {
+    const place = newClientPlace()
+    const entered = newClient.email.trim()
+    if (entered) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entered) ? { kind: 'email', email: entered, shown: entered } : { kind: 'bad-email' }
+    }
+    const indianDigits = loginMethod(place.country) === 'phone' && place.phoneCountry === 'IN' ? validLocalDigits('IN', newClient.phone) : null
+    return indianDigits ? { kind: 'phone', email: loginEmailFor('IN', indianDigits), shown: indianDigits } : { kind: 'none' }
+  }
+
   const handleCreateClient = async () => {
     setSaving(true)
     setMessage('')
@@ -570,25 +581,20 @@ export default function CompanyAdminPage() {
       return
     }
 
+    // A login is optional: the coach can enter everything and share progress themselves.
     // Login rule comes from the client's country (lib/locale.ts loginMethod; the gym's country unless multi-country):
     // India → email if given, else the 10-digit phone (lib/phone.ts loginEmailFor)
-    // UAE / US / Canada → email only; phone is saved for contact, never used as a login
+    // UAE / US / Canada → email if given; their phone is for contact only
+    // Neither → no login (newClientLogin)
     const place = newClientPlace()
-    const method = loginMethod(place.country)
-    const enteredEmail = newClient.email.trim()
-    const indianDigits = place.phoneCountry === 'IN' ? validLocalDigits('IN', newClient.phone) : null
-    const resolvedEmail = method === 'email'
-      ? (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enteredEmail) ? enteredEmail : '')
-      : enteredEmail
-        ? enteredEmail
-        : indianDigits
-          ? loginEmailFor('IN', indianDigits)
-          : ''
-
-    if (!resolvedEmail) {
-      setMessage(method === 'email'
-        ? 'Error: Enter the client\'s email — clients outside India log in with email'
-        : 'Error: Enter a valid email or 10-digit phone number')
+    const login = newClientLogin()
+    if (login.kind === 'bad-email') {
+      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the member without a login')
+      setSaving(false)
+      return
+    }
+    if (login.kind !== 'none' && newClient.password.length < 6) {
+      setMessage('Error: Temporary password must be at least 6 characters')
       setSaving(false)
       return
     }
@@ -597,8 +603,7 @@ export default function CompanyAdminPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: resolvedEmail,
-        password: newClient.password,
+        ...(login.kind === 'none' ? { no_login: true } : { email: login.email, password: newClient.password }),
         full_name: newClient.full_name,
         company_id: companyId,
         role: 'client',
@@ -1849,7 +1854,7 @@ export default function CompanyAdminPage() {
                               </p>
                             ) : (
                               <p className="text-xs text-gray-500">
-                                {displayPhone(client.phone, country) || client.email}
+                                {displayPhone(client.phone, country) || shownEmail(client.email)}
                                 {/* PT plan progress this week, on the second line so the row stays phone-width */}
                                 {trainModule && client.client_type === 'pt' && (() => {
                                   const a = weekAdherence[client.id]
@@ -1970,11 +1975,11 @@ export default function CompanyAdminPage() {
                     onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
                     className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
                 )}
-                <input type="email" placeholder={loginMethod(newClientPlace().country) === 'email' ? 'Email (required — used to log in)' : 'Email (optional)'}
+                <input type="email" placeholder="Email (optional)"
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                   className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
-                <div className="col-span-2 relative">
+                {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
                   <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
                     value={newClient.password}
                     onChange={e => setNewClient({ ...newClient, password: e.target.value })}
@@ -1986,15 +1991,16 @@ export default function CompanyAdminPage() {
                       : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     }
                   </button>
-                </div>
+                </div>}
                 <p className="col-span-2 -mt-1 text-xs text-gray-500">
-                  {newClient.email.trim()
-                    ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.email.trim()}</span></>
-                    : loginMethod(newClientPlace().country) === 'email'
-                      ? 'Client logs in with email — required for clients outside India. Phone is for contact only.'
-                      : newClientPlace().phoneCountry === 'IN' && validLocalDigits('IN', newClient.phone)
-                      ? <>Client logs in with: <span className="text-gray-300 font-medium">{validLocalDigits('IN', newClient.phone)}</span></>
-                      : 'Client logs in with phone (10 digits, +91) or email'}
+                  {(() => {
+                    const l = newClientLogin()
+                    if (l.kind === 'email' || l.kind === 'phone') return <>Client logs in with: <span className="text-gray-300 font-medium">{l.shown}</span></>
+                    if (l.kind === 'bad-email') return <span className="text-amber-400">Check the email, or leave it empty for no login</span>
+                    return loginMethod(newClientPlace().country) === 'phone'
+                      ? 'No login: you enter their sessions and share progress. Add an email or a 10-digit +91 phone to give them a login.'
+                      : 'No login: you enter their sessions and share progress. Add an email to give them a login (phone is for contact only).'
+                  })()}
                 </p>
                 <select
                   value={newClient.plan_type}

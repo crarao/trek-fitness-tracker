@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { CURRENCIES, normalizeCurrency } from '@/lib/currency'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhoneLogin, displayPhone, phoneHint } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhoneLogin, displayPhone, phoneHint, shownEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
@@ -1828,7 +1828,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 {c.full_name}
                                 {c.client_type === 'pt' && <span className="ml-1.5 text-[10px] bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full align-middle">PT</span>}
                               </p>
-                              <p className="text-xs text-gray-500 truncate">{c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, companies.find(co => co.id === c.company_id)?.country) || c.email}</p>
+                              <p className="text-xs text-gray-500 truncate">{c.email && !isPhoneLogin(c.email) && shownEmail(c.email) ? c.email : displayPhone(c.phone, companies.find(co => co.id === c.company_id)?.country) || shownEmail(c.email) || 'No login'}</p>
                             </div>
                             <span className={`text-xs shrink-0 ${stateCls[state]}`}>● {stateLabel[state]}</span>
                           </div>

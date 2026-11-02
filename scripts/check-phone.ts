@@ -5,7 +5,7 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
-import { loginEmailFor, validLocalDigits, toE164, splitE164, waDigits, displayPhone, clientPhoneValue, staffLogin, type PhoneCountry } from '../lib/phone'
+import { loginEmailFor, validLocalDigits, toE164, splitE164, waDigits, displayPhone, clientPhoneValue, staffLogin, isPhoneLogin, isNoLogin, shownEmail, type PhoneCountry } from '../lib/phone'
 import { groupByCurrency, formatMoneyByCurrency, formatMoney, formatMoneyCompact } from '../lib/currency'
 import { loginMethod } from '../lib/locale'
 
@@ -72,6 +72,13 @@ check('staff, AE gym, no email → phone login', staffLogin('AE', { phoneCountry
 check('staff, US gym, email', staffLogin('US', { phoneCountry: 'US', phone: '', email: 'Sam@Gym.com', password: 'secret1' }),
   { email: 'sam@gym.com', password: 'secret1', phone: null, method: 'email' })
 check('staff, IN gym, bad phone', 'error' in staffLogin('IN', { phoneCountry: 'IN', phone: '12345' }), true)
+
+console.log('\n6b. Members without a login (coach-run)')
+const placeholder = 'client-1b2c3d4e@nologin.getcoachboard.in'
+check('placeholder is no-login', isNoLogin(placeholder), true)
+check('placeholder is not a phone login', isPhoneLogin(placeholder), false)
+check('phone login is not no-login', isNoLogin('9876543210@getcoachboard.in'), false)
+check('shown email hides the placeholder', [shownEmail(placeholder), shownEmail('sam@gym.com')], ['', 'sam@gym.com'])
 
 console.log('\n7. Money per currency (D3)')
 type Row = { amount_paid: number; currency?: string | null }

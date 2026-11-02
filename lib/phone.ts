@@ -49,6 +49,21 @@ export function isPhoneLogin(email: string | null | undefined): boolean {
   return !!email && email.endsWith(LOGIN_DOMAIN)
 }
 
+// Clients added without a login (the coach enters everything and shares progress themselves).
+// Every profile needs a Supabase Auth user, so the server gives them a placeholder nobody can sign in with:
+// client-<random>@nologin.getcoachboard.in and a random password (made in create-user, never shown).
+// Giving the client a real login later = change that user's email / password.
+export const NO_LOGIN_DOMAIN = '@nologin.getcoachboard.in'
+
+export function isNoLogin(email: string | null | undefined): boolean {
+  return !!email && email.endsWith(NO_LOGIN_DOMAIN)
+}
+
+// The email to show for a client: '' for a no-login placeholder
+export function shownEmail(email: string | null | undefined): string {
+  return email && !isNoLogin(email) ? email : ''
+}
+
 // +<code><digits>, e.g. +919876543210
 export function toE164(country: PhoneCountry, localDigits: string): string {
   return `+${PHONE_COUNTRIES[country].dial}${localDigits}`

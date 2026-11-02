@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
+import { NO_LOGIN_DOMAIN } from '@/lib/phone'
+import { randomUUID, randomBytes } from 'crypto'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -16,7 +18,12 @@ export async function POST(request: Request) {
     }
   )
 
-const { email, password, full_name, company_id, role, phone, trainer_name, diet_plan, client_type, primary_coach_id, country, currency } = await request.json()
+const body = await request.json()
+const { full_name, company_id, role, phone, trainer_name, diet_plan, client_type, primary_coach_id, country, currency } = body
+// Client without a login (no_login: true): a placeholder nobody can sign in with, made here (lib/phone.ts NO_LOGIN_DOMAIN)
+const noLogin = body.no_login === true && role === 'client'
+const email: string = noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : body.email
+const password: string = noLogin ? randomBytes(24).toString('base64url') : body.password
 
   // Super admin can create any login. Gym staff can only add clients and coaches to their own gym.
   // Coaches don't count toward client_limit (that count filters role = 'client').

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry } from '@/lib/phone'
+import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, orderPlansByWeek, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
@@ -1255,11 +1255,12 @@ const handleResetPassword = async () => {
           </button>
           {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
           {!isCoach && (<>
-          <button
+          {/* No login yet (coach-run member): nothing to reset */}
+          {!isNoLogin(client?.email) && <button
             onClick={() => setShowResetPassword(!showResetPassword)}
             className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
             Reset Password
-          </button>
+          </button>}
           <button
             onClick={() => {
               const latest = memberships[0]
@@ -1321,7 +1322,7 @@ const handleResetPassword = async () => {
                   <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
                 )}
               </div>
-              <p className="text-xs text-gray-400">{client?.email}</p>
+              <p className="text-xs text-gray-400">{shownEmail(client?.email) || (isNoLogin(client?.email) ? 'No login' : '')}</p>
               {client?.phone && (
                 <p className="text-xs text-gray-400">{displayPhone(client?.phone, country)}</p>
               )}
@@ -2692,7 +2693,7 @@ const handleResetPassword = async () => {
           <div className="border-t border-gray-800 pt-4">
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
             <p className="text-sm text-white">{displayPhone(client?.phone, country) || '—'}</p>
-            <p className="text-sm text-gray-400">{client?.email}</p>
+            <p className="text-sm text-gray-400">{shownEmail(client?.email)}</p>
           </div>
         </>
       )}

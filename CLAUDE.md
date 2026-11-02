@@ -323,6 +323,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - every other country → full digits with the country code: `971501234567@getcoachboard.in` (UAE), `15551234567@getcoachboard.in` (US / Canada)
 - Digits: IN 10, AE 9, US 10, CA 10. `isPhoneLogin(email)` tells phone logins from real emails.
 - **Clients:** `loginMethod(country)` (lib/locale.ts) is `'phone'` only for India; clients from anywhere else log in with email. A client's country = the gym's, or their own in a multi-country gym.
+- **Clients without a login (2 Nov):** a login is optional. With no email (and, for India, no valid 10-digit phone) the member is added without one: the coach enters everything and shares progress. `create-user` (`no_login: true`) gives them a placeholder Auth user `client-<uuid>@nologin.getcoachboard.in` with a random password nobody knows (`NO_LOGIN_DOMAIN`, `isNoLogin`, `shownEmail` in lib/phone.ts); screens show "No login", never the placeholder, and hide Reset Password. Not a phone login, so `update-client` never moves it. A "create login for this client" action (change that user's email / password) is not built yet.
 - **Staff** (`staffLogin` in lib/phone.ts): India phone (password = number). Other countries: email + password, or with no email the phone + country code (password = number). Existing US staff keep their email logins.
 This is load-bearing — `update-client` (Indian numbers only) and `update-coach` sync the auth email when the phone changes. `scripts/check-phone.ts` fails if a page builds `@getcoachboard.in` inline.
 
