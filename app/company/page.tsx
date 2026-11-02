@@ -8,8 +8,10 @@ import { thisWeekMonday } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { formatMoney, formatMoneyCompact, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, dialCode, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
+import { formatMoney, formatMoneyCompact, currencySymbol, groupByCurrency, formatMoneyByCurrency, normalizeCurrency, CURRENCIES } from '@/lib/currency'
+import { type Country, COUNTRIES, normalizeCountry, formatDate, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, waDigits, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
+import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
@@ -21,6 +23,7 @@ type Membership = {
   start_date: string
   end_date: string
   created_at?: string
+  currency?: string | null // the currency it was paid in (absent before db/2026-11-01-multi-country.md)
 }
 
 type Client = {
@@ -33,6 +36,8 @@ type Client = {
   memberships: Membership[]
   archived_at: string | null
   primary_coach_id?: string | null
+  country?: string | null  // client's own country / default currency (multi-country gyms)
+  currency?: string | null
 }
 
 // Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
@@ -103,6 +108,12 @@ export default function CompanyAdminPage() {
   const [coachCompany, setCoachCompany] = useState(false)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
+  // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
+  // Off (or before db/2026-11-01-multi-country.md runs): no new fields anywhere.
+  const [multiCountry, setMultiCountry] = useState(false)
+  const [allowedCurrencies, setAllowedCurrencies] = useState<string[]>([])
+  // The multi-country columns exist: memberships get a currency
+  const [currencyColumns, setCurrencyColumns] = useState(false)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -118,7 +129,9 @@ export default function CompanyAdminPage() {
     full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
-    client_type: 'member', primary_coach_id: ''
+    client_type: 'member', primary_coach_id: '',
+    // Multi-country only: the client's country, the phone's country code and the payment currency ('' = home / base)
+    country: '', phone_country: '', currency: ''
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -149,7 +162,7 @@ export default function CompanyAdminPage() {
   // Coach logins (#40): every coach of the gym, Off ones included (names stay on history)
   const [coaches, setCoaches] = useState<Coach[]>([])
   const [showCoaches, setShowCoaches] = useState(false)
-  const [newCoach, setNewCoach] = useState({ full_name: '', phone: '', email: '', password: '' })
+  const [newCoach, setNewCoach] = useState<{ full_name: string; phone: string; email: string; password: string; phone_country: PhoneCountry | '' }>({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
   // Coach being renamed / given a new phone (one at a time)
   const [editCoach, setEditCoach] = useState<{ id: string; full_name: string; phone: string; phoneLogin: boolean } | null>(null)
   const [savingEditCoach, setSavingEditCoach] = useState(false)
@@ -209,6 +222,7 @@ export default function CompanyAdminPage() {
       client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
       currency: string | null; country: string | null; client_module_enabled: boolean | null
       company_type?: string | null
+      multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null // db/2026-11-01-multi-country.md
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
@@ -217,6 +231,9 @@ export default function CompanyAdminPage() {
     setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
+    setCurrencyColumns(!!company && 'allowed_currencies' in company)
+    setMultiCountry(!!company?.multi_country_enabled)
+    setAllowedCurrencies(company?.allowed_currencies?.length ? company.allowed_currencies : [company?.currency || 'INR'])
     setClientLimit(company?.client_limit || 50)
     setPtLimit(company?.pt_limit ?? null)
     setLogoUrl(company?.logo_url || '')
@@ -288,7 +305,7 @@ export default function CompanyAdminPage() {
         .not('archived_at', 'is', null),
       supabase
         .from('memberships')
-        .select('id, profile_id, plan_type, amount_paid, start_date, end_date, created_at')
+        .select('*') // * so memberships.currency is read once it exists
         .eq('company_id', cId)
     ])
 
@@ -365,25 +382,15 @@ export default function CompanyAdminPage() {
     setCoaches((data || []) as Coach[])
   }
 
-  // Same login rule as members (lib/locale.ts): India phone ({phone}@getcoachboard.in, password = phone, like partners),
-  // US email + the password the owner sets
+  // Staff login rule (lib/phone.ts staffLogin): India phone (password = phone, like partners);
+  // other countries an email + the password the owner sets, or the phone with its country code
   const handleAddCoach = async () => {
     if (!companyId) return
     const name = newCoach.full_name.trim()
-    const phone = newCoach.phone.trim()
-    const method = loginMethod(country ?? 'IN')
-    let email = '', password = ''
     if (!name) { setCoachMessage('Error: Enter the coach\'s name'); return }
-    if (method === 'email') {
-      email = newCoach.email.trim().toLowerCase()
-      password = newCoach.password
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setCoachMessage('Error: Enter a valid email: US coaches log in with email'); return }
-      if (password.length < 6) { setCoachMessage('Error: Password must be at least 6 characters'); return }
-    } else {
-      if (!/^\d{10}$/.test(phone)) { setCoachMessage('Error: Enter a valid 10-digit phone number'); return }
-      email = `${phone}@getcoachboard.in`
-      password = phone
-    }
+    const login = staffLogin(country, { phoneCountry: newCoach.phone_country || (country ?? 'IN'), phone: newCoach.phone, email: newCoach.email, password: newCoach.password })
+    if ('error' in login) { setCoachMessage('Error: ' + login.error); return }
+    const { email, password, phone, method } = login
     setSavingCoach(true)
     setCoachMessage('')
     const response = await fetch('/api/create-user', {
@@ -394,7 +401,7 @@ export default function CompanyAdminPage() {
     const result = await response.json()
     setSavingCoach(false)
     if (result.error) { setCoachMessage('Error: ' + result.error); return }
-    setNewCoach({ full_name: '', phone: '', email: '', password: '' })
+    setNewCoach({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
     setCoachMessage(method === 'email'
       ? `Coach added. They log in with ${email} and the password you set.`
       : 'Coach added. Default password = phone number.')
@@ -419,7 +426,7 @@ export default function CompanyAdminPage() {
     const name = editCoach.full_name.trim()
     const phone = editCoach.phone.trim()
     if (!name) { setEditCoachError('Enter the coach\'s name'); return }
-    if (editCoach.phoneLogin && !/^\d{10}$/.test(phone)) { setEditCoachError('Enter a valid 10-digit phone number: they log in with it'); return }
+    if (editCoach.phoneLogin && !splitE164(phone, country)) { setEditCoachError(`Enter a valid phone number (${phoneHint(country ?? 'IN')}): they log in with it`); return }
     setSavingEditCoach(true)
     setEditCoachError('')
     const response = await fetch('/api/update-coach', {
@@ -431,7 +438,8 @@ export default function CompanyAdminPage() {
     setSavingEditCoach(false)
     if (!response.ok || result.error) { setEditCoachError("Couldn't save: " + (result.error || response.status)); return }
     const old = coachById[editCoach.id]
-    const phoneChanged = editCoach.phoneLogin && old && (old.phone || '') !== phone
+    const samePhone = (a: string, b: string) => { const x = splitE164(a, country), y = splitE164(b, country); return x && y ? x.country === y.country && x.local === y.local : a === b }
+    const phoneChanged = editCoach.phoneLogin && old && !samePhone(old.phone || '', phone)
     showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : 'Coach saved ✓')
     setEditCoach(null)
     if (companyId) fetchCoaches(companyId)
@@ -460,7 +468,7 @@ export default function CompanyAdminPage() {
         ? Promise.resolve({ data: knownMemberships })
         : supabase
             .from('memberships')
-            .select('id, profile_id, plan_type, amount_paid, start_date, end_date, created_at')
+            .select('*') // * so memberships.currency is read once it exists
             .eq('company_id', cId),
     ])
     const ms = (membershipsResult.data || []) as Membership[] & { profile_id?: string }[]
@@ -527,6 +535,35 @@ export default function CompanyAdminPage() {
     setTimeout(() => setLogoSaved(false), 2000)
   }
 
+  // The new member's country, phone code and payment currency. Multi-country off: always the gym's own.
+  const baseCurrency = normalizeCurrency(currency)
+  const newClientPlace = (): { country: Country; phoneCountry: PhoneCountry; currency: string } => {
+    const home = country ?? 'IN'
+    if (!multiCountry) return { country: home, phoneCountry: home, currency: baseCurrency }
+    const c = normalizeCountry(newClient.country || home)
+    return {
+      country: c,
+      phoneCountry: (newClient.phone_country || c) as PhoneCountry,
+      currency: newClient.currency || defaultCurrencyFor(c),
+    }
+  }
+  // A country's own currency when the gym allows it, else the gym's base currency
+  const defaultCurrencyFor = (c: Country) => {
+    const own = COUNTRIES.find(x => x.code === c)?.currency
+    return own && allowedCurrencies.includes(own) ? own : baseCurrency
+  }
+
+  // How the new member will log in: an email, an Indian phone, or not at all (coach-run member, login can come later)
+  const newClientLogin = (): { kind: 'email' | 'phone'; email: string; shown: string } | { kind: 'none' } | { kind: 'bad-email' } => {
+    const place = newClientPlace()
+    const entered = newClient.email.trim()
+    if (entered) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entered) ? { kind: 'email', email: entered, shown: entered } : { kind: 'bad-email' }
+    }
+    const indianDigits = loginMethod(place.country) === 'phone' && place.phoneCountry === 'IN' ? validLocalDigits('IN', newClient.phone) : null
+    return indianDigits ? { kind: 'phone', email: loginEmailFor('IN', indianDigits), shown: indianDigits } : { kind: 'none' }
+  }
+
   const handleCreateClient = async () => {
     setSaving(true)
     setMessage('')
@@ -544,23 +581,20 @@ export default function CompanyAdminPage() {
       return
     }
 
-    // Login rule comes from the company's country (lib/locale.ts):
-    // India → email if given, else 10-digit phone ({phone}@getcoachboard.in)
-    // US → email only; phone is saved for contact, never used as a login
-    const method = loginMethod(country ?? 'IN')
-    const enteredEmail = newClient.email.trim()
-    const resolvedEmail = method === 'email'
-      ? (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(enteredEmail) ? enteredEmail : '')
-      : enteredEmail
-        ? enteredEmail
-        : /^\d{10}$/.test(newClient.phone.trim())
-          ? `${newClient.phone.trim()}@getcoachboard.in`
-          : ''
-
-    if (!resolvedEmail) {
-      setMessage(method === 'email'
-        ? 'Error: Enter the client\'s email — US clients log in with email'
-        : 'Error: Enter a valid email or 10-digit phone number')
+    // A login is optional: the coach can enter everything and share progress themselves.
+    // Login rule comes from the client's country (lib/locale.ts loginMethod; the gym's country unless multi-country):
+    // India → email if given, else the 10-digit phone (lib/phone.ts loginEmailFor)
+    // UAE / US / Canada → email if given; their phone is for contact only
+    // Neither → no login (newClientLogin)
+    const place = newClientPlace()
+    const login = newClientLogin()
+    if (login.kind === 'bad-email') {
+      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the member without a login')
+      setSaving(false)
+      return
+    }
+    if (login.kind !== 'none' && newClient.password.length < 6) {
+      setMessage('Error: Temporary password must be at least 6 characters')
       setSaving(false)
       return
     }
@@ -569,16 +603,18 @@ export default function CompanyAdminPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: resolvedEmail,
-        password: newClient.password,
+        ...(login.kind === 'none' ? { no_login: true } : { email: login.email, password: newClient.password }),
         full_name: newClient.full_name,
         company_id: companyId,
         role: 'client',
-        phone: newClient.phone,
+        // International format (+919876543210), lib/phone.ts
+        phone: clientPhoneValue(place.phoneCountry, newClient.phone),
         trainer_name: newClient.trainer_name,
         diet_plan: newClient.diet_plan,
         client_type: newClient.client_type,
-        primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null
+        primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
+        // Once the multi-country SQL has run: the client's country and default currency
+        ...(currencyColumns ? { country: place.country, currency: place.currency } : {})
       })
     })
 
@@ -596,7 +632,8 @@ export default function CompanyAdminPage() {
         plan_type: newClient.plan_type,
         amount_paid: parseFloat(newClient.amount_paid) || 0,
         start_date: newClient.start_date,
-        end_date: newClient.end_date
+        end_date: newClient.end_date,
+        ...(currencyColumns ? { currency: place.currency } : {})
       })
       if (mError) console.error('Membership insert error:', mError)
     }
@@ -620,7 +657,8 @@ export default function CompanyAdminPage() {
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
-      client_type: 'member', primary_coach_id: ''
+      client_type: 'member', primary_coach_id: '',
+      country: '', phone_country: '', currency: ''
     })
     setShowForm(false)
     setSaving(false)
@@ -646,10 +684,16 @@ export default function CompanyAdminPage() {
     return d >= 0 && d <= 7
   })
   const expiringSoonCount = expiringSoonClients.length
-  const expiringSoonRevenue = expiringSoonClients.reduce((sum, c) => {
-    const m = latestMembership(c.memberships)
-    return sum + (m ? Number(m.amount_paid) || 0 : 0)
-  }, 0)
+  // Money is added up per currency (D3): a membership counts in the currency it was paid in (base currency if not set).
+  // Only when more than one currency has amounts is a figure shown as "₹48,000 · AED 3,200"; otherwise exactly as before.
+  const amountOf = (m: Membership) => Number(m.amount_paid) || 0
+  const currencyOf = (m: Membership) => m.currency
+  const byCurrency = (ms: Membership[]) => groupByCurrency(ms, amountOf, currencyOf, currency)
+  // The one currency of a figure (the base currency when it has no amounts); null when it has several
+  const singleCurrency = (groups: { currency: string }[]) => groups.length > 1 ? null : (groups[0]?.currency ?? baseCurrency)
+  const expiringSoonMemberships = expiringSoonClients.map(c => latestMembership(c.memberships)).filter((m): m is Membership => !!m)
+  const expiringSoonByCurrency = byCurrency(expiringSoonMemberships)
+  const expiringSoonRevenue = expiringSoonMemberships.reduce((sum, m) => sum + amountOf(m), 0)
 
   const allMemberships = clients.flatMap(c => c.memberships)
   const now = new Date()
@@ -658,25 +702,30 @@ export default function CompanyAdminPage() {
   const lastMonth = thisMonth === 0 ? 11 : thisMonth - 1
   const lastMonthYear = thisMonth === 0 ? thisYear - 1 : thisYear
 
-  const thisMonthRevenue = allMemberships
+  const thisMonthMemberships = allMemberships
     .filter(m => { const d = new Date(m.start_date); return d.getMonth() === thisMonth && d.getFullYear() === thisYear })
-    .reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0)
+  const thisMonthRevenue = thisMonthMemberships.reduce((sum, m) => sum + amountOf(m), 0)
+  const thisMonthByCurrency = byCurrency(thisMonthMemberships)
 
-  const lastMonthRevenue = allMemberships
+  const lastMonthMemberships = allMemberships
     .filter(m => { const d = new Date(m.start_date); return d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear })
-    .reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0)
+  const lastMonthRevenue = lastMonthMemberships.reduce((sum, m) => sum + amountOf(m), 0)
 
-  const revenueChange = lastMonthRevenue === 0 ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+  // % vs last month only when both months are in the same single currency (amounts in different currencies don't add up)
+  const twoMonthCurrency = singleCurrency(byCurrency([...thisMonthMemberships, ...lastMonthMemberships]))
+  const revenueChange = lastMonthRevenue === 0 || twoMonthCurrency === null ? null : Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
 
   const monthlyRevenueTrend = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
     const m = d.getMonth()
     const y = d.getFullYear()
-    const revenue = allMemberships
+    const mems = allMemberships
       .filter(mem => { const md = new Date(mem.start_date); return md.getMonth() === m && md.getFullYear() === y })
-      .reduce((sum, mem) => sum + (Number(mem.amount_paid) || 0), 0)
-    return { label: formatDate(d, country, 'month'), revenue, isCurrentMonth: i === 5 }
+    const revenue = mems.reduce((sum, mem) => sum + amountOf(mem), 0)
+    return { label: formatDate(d, country, 'month'), revenue, groups: byCurrency(mems), mems, isCurrentMonth: i === 5 }
   })
+  // One currency across the 6 months: bars as before. Several: each month's amounts per currency, no bars.
+  const trendCurrency = singleCurrency(byCurrency(monthlyRevenueTrend.flatMap(t => t.mems)))
   const maxMonthlyRevenue = Math.max(...monthlyRevenueTrend.map(m => m.revenue), 1)
 
   const planColors: Record<string, string> = {
@@ -688,8 +737,10 @@ export default function CompanyAdminPage() {
       const d = new Date(m.start_date)
       return d.getMonth() === thisMonth && d.getFullYear() === thisYear && m.plan_type === plan
     })
-    return { plan, revenue: mems.reduce((sum, m) => sum + (Number(m.amount_paid) || 0), 0), count: mems.length }
+    return { plan, revenue: mems.reduce((sum, m) => sum + amountOf(m), 0), groups: byCurrency(mems), count: mems.length }
   }).filter(p => p.revenue > 0)
+  const thisMonthCurrency = singleCurrency(thisMonthByCurrency)
+  const thisMonthCount = thisMonthByPlan.reduce((sum, p) => sum + p.count, 0)
 
   const expiredClients = clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired')
   const ptCount = clients.filter(c => c.client_type === 'pt').length
@@ -965,7 +1016,11 @@ export default function CompanyAdminPage() {
           <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
           <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
           {expiringSoonRevenue > 0 && (
-            <p className="text-xs text-amber-700 mt-0.5">{formatMoney(expiringSoonRevenue, currency)} at risk</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {expiringSoonByCurrency.length > 1
+                ? formatMoneyByCurrency(expiringSoonByCurrency, currency)
+                : formatMoney(expiringSoonRevenue, currency === null ? null : singleCurrency(expiringSoonByCurrency))} at risk
+            </p>
           )}
         </div>
         <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
@@ -980,9 +1035,18 @@ export default function CompanyAdminPage() {
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">This Month</p>
             <span className={`text-gray-500 text-sm transition-transform inline-block ${showRevenueDrillIn ? 'rotate-180' : ''}`}>▾</span>
           </div>
-          <p className="text-3xl font-bold text-green-400">
-            {formatMoneyCompact(thisMonthRevenue, currency)}
-          </p>
+          {thisMonthCurrency !== null ? (
+            <p className="text-3xl font-bold text-green-400">
+              {formatMoneyCompact(thisMonthRevenue, currency === null ? null : thisMonthCurrency)}
+            </p>
+          ) : (
+            // Several currencies this month: one line each
+            <div className="text-green-400 font-bold leading-tight">
+              {thisMonthByCurrency.map(g => (
+                <p key={g.currency} className="text-xl">{formatMoneyCompact(g.amount, g.currency)}</p>
+              ))}
+            </div>
+          )}
           {revenueChange !== null ? (
             <p className={`text-xs mt-1 font-medium ${revenueChange >= 0 ? 'text-green-500' : 'text-red-400'}`}>
               {revenueChange >= 0 ? '↑' : '↓'} {Math.abs(revenueChange)}% vs last month
@@ -1007,16 +1071,19 @@ export default function CompanyAdminPage() {
                   {formatDate(now, country, 'monthLong')} — by plan
                 </p>
                 <div className="space-y-2.5">
-                  {thisMonthByPlan.map(({ plan, revenue, count }) => {
-                    const pct = thisMonthRevenue > 0 ? Math.round((revenue / thisMonthRevenue) * 100) : 0
+                  {thisMonthByPlan.map(({ plan, revenue, groups, count }) => {
+                    // Several currencies: bar by number of payments (amounts in different currencies don't add up)
+                    const pct = thisMonthCurrency === null
+                      ? (thisMonthCount > 0 ? Math.round((count / thisMonthCount) * 100) : 0)
+                      : thisMonthRevenue > 0 ? Math.round((revenue / thisMonthRevenue) * 100) : 0
                     return (
                       <div key={plan} className="flex items-center gap-3">
                         <p className="text-xs text-gray-400 w-20 flex-shrink-0">{plan}</p>
                         <div className="flex-1 bg-gray-800 rounded-full h-2">
                           <div className={`h-2 rounded-full ${planColors[plan]}`} style={{ width: `${pct}%` }} />
                         </div>
-                        <p className="text-xs text-gray-400 text-right flex-shrink-0 w-28">
-                          {formatMoney(revenue, currency)} <span className="text-gray-600">({count})</span>
+                        <p className={`text-xs text-gray-400 text-right flex-shrink-0 ${groups.length > 1 ? 'w-40' : 'w-28'}`}>
+                          {groups.length > 1 ? formatMoneyByCurrency(groups, currency) : formatMoney(revenue, currency === null ? null : singleCurrency(groups))} <span className="text-gray-600">({count})</span>
                         </p>
                       </div>
                     )
@@ -1031,8 +1098,16 @@ export default function CompanyAdminPage() {
             <div className="border-t border-gray-800 pt-4">
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Last 6 months</p>
               <div className="space-y-2">
-                {monthlyRevenueTrend.map(({ label, revenue, isCurrentMonth }) => {
+                {monthlyRevenueTrend.map(({ label, revenue, groups, isCurrentMonth }) => {
                   const pct = Math.round((revenue / maxMonthlyRevenue) * 100)
+                  if (trendCurrency === null) return (
+                    <div key={label} className="flex items-center gap-3">
+                      <p className={`text-xs w-8 flex-shrink-0 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>{label}</p>
+                      <p className={`text-xs flex-1 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>
+                        {groups.length ? formatMoneyByCurrency(groups, currency, true) : '—'}
+                      </p>
+                    </div>
+                  )
                   return (
                     <div key={label} className="flex items-center gap-3">
                       <p className={`text-xs w-8 flex-shrink-0 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>{label}</p>
@@ -1041,7 +1116,7 @@ export default function CompanyAdminPage() {
                       </div>
                       <p className={`text-xs text-right flex-shrink-0 w-20 ${isCurrentMonth ? 'text-green-400 font-medium' : 'text-gray-500'}`}>
                         {revenue > 0
-                          ? formatMoneyCompact(revenue, currency)
+                          ? formatMoneyCompact(revenue, currency === null ? null : trendCurrency)
                           : '—'}
                       </p>
                     </div>
@@ -1432,8 +1507,8 @@ export default function CompanyAdminPage() {
                   <ul className="space-y-2 mb-3">
                     {coaches.map(c => {
                       const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
-                      // India coaches log in with their phone ({phone}@getcoachboard.in); US coaches with email
-                      const phoneLogin = !c.email || c.email.endsWith('@getcoachboard.in')
+                      // Phone logins (lib/phone.ts loginEmailFor) vs email logins
+                      const phoneLogin = !c.email || isPhoneLogin(c.email)
                       if (editCoach?.id === c.id) return (
                         <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
                           <div className="grid grid-cols-2 gap-2">
@@ -1441,12 +1516,12 @@ export default function CompanyAdminPage() {
                               value={editCoach.full_name}
                               onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
                               className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
-                            <input type="tel" placeholder={phoneLogin ? 'Phone (10 digits)' : 'Phone (optional)'} aria-label="Phone"
+                            <input type="tel" placeholder={phoneLogin ? `Phone (${phoneHint(country ?? 'IN')})` : 'Phone (optional)'} aria-label="Phone"
                               value={editCoach.phone}
                               onChange={e => setEditCoach({ ...editCoach, phone: e.target.value })}
                               className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
                           </div>
-                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && (
+                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && !!splitE164(editCoach.phone, country) && splitE164(editCoach.phone, country)?.local !== splitE164(c.phone, country)?.local && (
                             <p className="text-[11px] text-amber-300">They log in with their phone: the new number becomes their login. Their password doesn&apos;t change.</p>
                           )}
                           {editCoachError && <p className="text-xs text-red-400">{editCoachError}</p>}
@@ -1467,7 +1542,7 @@ export default function CompanyAdminPage() {
                           <div className="min-w-0">
                             <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
                             <p className="text-xs text-gray-500 truncate">
-                              {c.email && !c.email.endsWith('@getcoachboard.in') ? c.email : c.phone}
+                              {c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, country)}
                               {!c.archived_at && ` · ${today} session${today === 1 ? '' : 's'} today`}
                             </p>
                           </div>
@@ -1493,23 +1568,30 @@ export default function CompanyAdminPage() {
                   <input type="text" placeholder="Coach name"
                     value={newCoach.full_name}
                     onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
-                    className={`${loginMethod(country ?? 'IN') === 'email' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
-                  {loginMethod(country ?? 'IN') === 'email' && (
+                    className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                  {(country ?? 'IN') !== 'IN' && (
                     <>
-                      <input type="email" placeholder="Email (used to log in)" autoComplete="off"
+                      <input type="email" placeholder="Email (or leave empty: phone login)" autoComplete="off"
                         value={newCoach.email}
                         onChange={e => setNewCoach({ ...newCoach, email: e.target.value })}
                         className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                      <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
-                        value={newCoach.password}
-                        onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
-                        className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      {newCoach.email.trim() && (
+                        <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                          value={newCoach.password}
+                          onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
+                          className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      )}
                     </>
                   )}
-                  <input type="tel" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Phone (optional)' : 'Phone (10 digits)'}
-                    value={newCoach.phone}
-                    onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
-                    className="bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  <div className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}flex gap-2 min-w-0`}>
+                    <CountryCodePicker value={newCoach.phone_country || (country ?? 'IN')}
+                      onChange={c => setNewCoach({ ...newCoach, phone_country: c })} className="py-2" />
+                    <input type="tel"
+                      placeholder={(country ?? 'IN') !== 'IN' && newCoach.email.trim() ? 'Phone (optional)' : `Phone (${phoneHint(newCoach.phone_country || (country ?? 'IN'))})`}
+                      value={newCoach.phone}
+                      onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
+                      className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  </div>
                 </div>
                 {coachMessage && (
                   <p className={`text-xs mb-2 ${coachMessage.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{coachMessage}</p>
@@ -1519,9 +1601,9 @@ export default function CompanyAdminPage() {
                   {savingCoach ? 'Adding...' : '+ Add coach'}
                 </button>
                 <p className="text-xs text-gray-600 mt-1.5">
-                  {loginMethod(country ?? 'IN') === 'email'
-                    ? 'Coaches log in with their email and the password you set.'
-                    : 'Coaches log in with their phone. Default password is their phone number.'}
+                  {(country ?? 'IN') === 'IN'
+                    ? 'Coaches log in with their phone. Default password is their phone number.'
+                    : 'With an email, coaches log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.'}
                 </p>
               </div>
             )}
@@ -1719,13 +1801,14 @@ export default function CompanyAdminPage() {
                   }[status]
 
                   const handleAction = () => {
-                    const phone = client.phone?.replace(/\D/g, '')
-                    if (status === 'expiring' && phone?.length === 10) {
+                    // Country code + number for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts)
+                    const wa = waDigits(client.phone, country)
+                    if (status === 'expiring' && wa) {
                       const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? formatDate(m.end_date, country, 'dayMonth') : ''}. Renew now to keep going! 💪`
-                      window.open(`https://wa.me/${dialCode(country ?? 'IN')}${phone}?text=${encodeURIComponent(msg)}`, '_blank')
-                    } else if (status === 'expired' && phone?.length === 10) {
+                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
+                    } else if (status === 'expired' && wa) {
                       const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
-                      window.open(`https://wa.me/${dialCode(country ?? 'IN')}${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else {
                       openClient(client.id)
                     }
@@ -1771,7 +1854,7 @@ export default function CompanyAdminPage() {
                               </p>
                             ) : (
                               <p className="text-xs text-gray-500">
-                                {client.phone || client.email}
+                                {displayPhone(client.phone, country) || shownEmail(client.email)}
                                 {/* PT plan progress this week, on the second line so the row stays phone-width */}
                                 {trainModule && client.client_type === 'pt' && (() => {
                                   const a = weekAdherence[client.id]
@@ -1791,7 +1874,7 @@ export default function CompanyAdminPage() {
                       </td>
                       <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
                       <td className="hidden sm:table-cell px-4 py-4 text-sm font-medium text-white">
-                        {m ? formatMoney(Number(m.amount_paid), currency) : '—'}
+                        {m ? formatMoney(Number(m.amount_paid), currency === null ? null : (m.currency || currency)) : '—'}
                       </td>
                       <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
                         {m ? `${fmtDate(m.start_date, country)} → ${fmtDate(m.end_date, country)}` : '—'}
@@ -1866,15 +1949,37 @@ export default function CompanyAdminPage() {
                   value={newClient.full_name}
                   onChange={e => setNewClient({ ...newClient, full_name: e.target.value })}
                   className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="tel" placeholder={phonePlaceholder(country ?? 'IN')}
-                  value={newClient.phone}
-                  onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
-                  className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <input type="email" placeholder={loginMethod(country ?? 'IN') === 'email' ? 'Email (required — used to log in)' : 'Email (optional)'}
+                {multiCountry && (
+                  // Multi-country gyms: the member's own country (sets the phone code, currency and how they log in)
+                  <div className="col-span-2">
+                    <label className="text-xs text-gray-500 mb-1 block">Country</label>
+                    <select value={newClientPlace().country}
+                      onChange={e => setNewClient({ ...newClient, country: normalizeCountry(e.target.value), phone_country: '', currency: '' })}
+                      className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {multiCountry ? (
+                  <div className="col-span-2 flex gap-2">
+                    <CountryCodePicker value={newClientPlace().phoneCountry}
+                      onChange={c => setNewClient({ ...newClient, phone_country: c })} className="py-2.5" />
+                    <input type="tel" placeholder={phonePlaceholder(newClientPlace().phoneCountry)}
+                      value={newClient.phone}
+                      onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
+                      className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  </div>
+                ) : (
+                  <input type="tel" placeholder={phonePlaceholder(country ?? 'IN')}
+                    value={newClient.phone}
+                    onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
+                    className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                )}
+                <input type="email" placeholder="Email (optional)"
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
-                  className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                <div className="col-span-2 relative">
+                  className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
                   <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
                     value={newClient.password}
                     onChange={e => setNewClient({ ...newClient, password: e.target.value })}
@@ -1886,15 +1991,16 @@ export default function CompanyAdminPage() {
                       : <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     }
                   </button>
-                </div>
+                </div>}
                 <p className="col-span-2 -mt-1 text-xs text-gray-500">
-                  {newClient.email.trim()
-                    ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.email.trim()}</span></>
-                    : loginMethod(country ?? 'IN') === 'email'
-                      ? 'Client logs in with email — required for US clients. Phone is for contact only.'
-                      : /^\d{10}$/.test(newClient.phone.trim())
-                      ? <>Client logs in with: <span className="text-gray-300 font-medium">{newClient.phone.trim()}</span></>
-                      : 'Client logs in with phone (10 digits) or email'}
+                  {(() => {
+                    const l = newClientLogin()
+                    if (l.kind === 'email' || l.kind === 'phone') return <>Client logs in with: <span className="text-gray-300 font-medium">{l.shown}</span></>
+                    if (l.kind === 'bad-email') return <span className="text-amber-400">Check the email, or leave it empty for no login</span>
+                    return loginMethod(newClientPlace().country) === 'phone'
+                      ? 'No login: you enter their sessions and share progress. Add an email or a 10-digit +91 phone to give them a login.'
+                      : 'No login: you enter their sessions and share progress. Add an email to give them a login (phone is for contact only).'
+                  })()}
                 </p>
                 <select
                   value={newClient.plan_type}
@@ -1905,10 +2011,25 @@ export default function CompanyAdminPage() {
                   <option>6 Months</option>
                   <option>1 Year</option>
                 </select>
-                <input type="number" placeholder={currency ? `Amount paid (${currencySymbol(currency)})` : 'Amount paid'}
-                  value={newClient.amount_paid}
-                  onChange={e => setNewClient({ ...newClient, amount_paid: e.target.value })}
-                  className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                {multiCountry ? (
+                  // Currency of this payment (and the member's default), from the gym's allowed currencies
+                  <div className="flex gap-2 min-w-0">
+                    <select aria-label="Currency" value={newClientPlace().currency}
+                      onChange={e => setNewClient({ ...newClient, currency: e.target.value })}
+                      className="shrink-0 bg-gray-800 text-white rounded-lg px-2 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      {CURRENCIES.filter(c => allowedCurrencies.includes(c.code)).map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                    </select>
+                    <input type="number" placeholder={`Amount (${currencySymbol(newClientPlace().currency)})`}
+                      value={newClient.amount_paid}
+                      onChange={e => setNewClient({ ...newClient, amount_paid: e.target.value })}
+                      className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  </div>
+                ) : (
+                  <input type="number" placeholder={currency ? `Amount paid (${currencySymbol(currency)})` : 'Amount paid'}
+                    value={newClient.amount_paid}
+                    onChange={e => setNewClient({ ...newClient, amount_paid: e.target.value })}
+                    className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                )}
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
                   <input type="date"

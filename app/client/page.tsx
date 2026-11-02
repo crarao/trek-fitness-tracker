@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { formatMoney } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, daysUntil, localDateIso } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
@@ -53,7 +54,7 @@ export default function ClientPage() {
   const [sessions, setSessions] = useState<Session[]>([])
   // Gym without the client app (companies.client_module_enabled off): a simple membership screen;
   // the coach still logs the training from their side
-  const [membership, setMembership] = useState<{ plan_type: string; start_date: string; end_date: string } | null>(null)
+  const [membership, setMembership] = useState<{ plan_type: string; start_date: string; end_date: string; amount_paid?: number | null; currency?: string | null } | null>(null)
   const [feedback, setFeedback] = useState<Feedback[]>([])
   const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
@@ -143,7 +144,7 @@ const [profileMessage, setProfileMessage] = useState('')
     if (prof?.companies && !prof.companies.client_module_enabled) {
       const { data: ms } = await supabase
         .from('memberships')
-        .select('plan_type, start_date, end_date')
+        .select('*') // * so the payment's currency is read once db/2026-11-01-multi-country.md has run
         .eq('profile_id', user.id)
         .order('start_date', { ascending: false })
         .limit(1)
@@ -466,6 +467,10 @@ const handleChangePassword = async () => {
             {membership ? (
               <>
                 <p className="text-lg font-semibold">{membership.plan_type}</p>
+                {Number(membership.amount_paid) > 0 && (
+                  // In the currency it was paid in (gym's currency for older entries)
+                  <p className="text-sm text-gray-400">{formatMoney(Number(membership.amount_paid), membership.currency || profile.companies?.currency || 'INR')}</p>
+                )}
                 <p className="text-sm text-gray-400 mt-1">
                   {formatDate(membership.start_date, country, 'medium')} → {formatDate(membership.end_date, country, 'medium')}
                 </p>

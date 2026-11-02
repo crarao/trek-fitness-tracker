@@ -159,6 +159,6 @@ export function normalizePhone(raw: string | null | undefined, country: Country)
   if (country === 'IN' && digits.length > 10 && (digits.startsWith('91') || digits.startsWith('0'))) {
     return digits.slice(-10)
   }
-  if (country === 'US' && digits.length === 11 && digits.startsWith('1')) return digits.slice(1)
+  if ((country === 'US' || country === 'CA') && digits.length === 11 && digits.startsWith('1')) return digits.slice(1)
   return digits
 }
