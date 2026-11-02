@@ -33,6 +33,14 @@ export type CompanyUsage = {
 
 const DAY = 86400000
 const daysSince = (iso: string, now: number) => Math.floor((now - new Date(iso).getTime()) / DAY)
+// Calendar days between two moments in the viewer's local time (IST for Anand), so a gym
+// added last night reads "1 day ago" this morning, not "today" (a 24h count would say 0).
+const midnight = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime() }
+const calendarDaysSince = (iso: string, now: number) => Math.round((midnight(now) - midnight(new Date(iso).getTime())) / DAY)
+
+// Trial-ending nudges ("Convert to paid" / "Call, or let it lapse") only in the last few days,
+// so a gym that joined yesterday isn't told its trial is about to lapse.
+export const TRIAL_NUDGE_DAYS = 5
 
 export function healthFor(lastWorkDays: number | null): Health {
   if (lastWorkDays == null || lastWorkDays > 15) return 'dormant'
@@ -74,7 +82,7 @@ export function companyUsage(
     health: healthFor(lastWorkDays),
     daysLeft: until == null ? null : until + 1,
     status: company.is_trial ? 'trial' : 'paid',
-    ageDays: Math.max(0, daysSince(company.created_at, now)),
+    ageDays: Math.max(0, calendarDaysSince(company.created_at, now)),
   }
 }
 
@@ -108,7 +116,7 @@ export function actionsFor(u: CompanyUsage): Action[] {
     out.push(using
       ? { kind: 'collect', usage: u, tone: 'warn', action: 'Collect payment', reason: `${what} ended ${plural(ago, 'day')} ago · still in use (${work})` }
       : { kind: 'deactivate', usage: u, tone: 'bad', action: 'Deactivate', reason: `${what} ended ${plural(ago, 'day')} ago · not in use` })
-  } else if (u.status === 'trial' && u.daysLeft != null && u.daysLeft <= 14) {
+  } else if (u.status === 'trial' && u.daysLeft != null && u.daysLeft <= TRIAL_NUDGE_DAYS) {
     out.push(using
       ? { kind: 'convert', usage: u, tone: 'good', action: 'Convert to paid', reason: `Trial ends in ${plural(u.daysLeft, 'day')} · ${work}` }
       : { kind: 'lapse', usage: u, tone: 'bad', action: 'Call, or let it lapse', reason: `Trial ends in ${plural(u.daysLeft, 'day')} · not in use` })
@@ -136,6 +144,22 @@ const ORDER: ActionKind[] = ['collect', 'convert', 'lapse', 'deactivate', 'check
 export const sortActions = (list: Action[]) =>
   [...list].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)
     || (a.usage.daysLeft ?? 999) - (b.usage.daysLeft ?? 999))
+
+// One card per gym: keep its most urgent action (list must already be sorted) and mention
+// the rest on the same card, so a gym never shows up twice with conflicting advice.
+export function onePerGym(sorted: Action[]): Action[] {
+  const byGym = new Map<string, Action>()
+  const extra = new Map<string, string[]>()
+  for (const a of sorted) {
+    const id = a.usage.company.id
+    if (!byGym.has(id)) { byGym.set(id, a); continue }
+    extra.set(id, [...(extra.get(id) || []), a.action])
+  }
+  return [...byGym.values()].map(a => {
+    const more = extra.get(a.usage.company.id)
+    return more ? { ...a, reason: `${a.reason} · then: ${more.join(', ')}` } : a
+  })
+}
 
 // Companies table: least healthy first, then by most recent work
 const HEALTH_RANK: Record<Health, number> = { dormant: 0, quiet: 1, active: 2 }
