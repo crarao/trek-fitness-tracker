@@ -10,7 +10,7 @@ import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage,
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
-import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, sortUsage } from '@/lib/platform-usage'
+import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, onePerGym, sortUsage } from '@/lib/platform-usage'
 
 type Company = {
   id: string
@@ -806,14 +806,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           const aiTotal = Object.values(aiThis).reduce((t, a) => ({ usd: t.usd + a.usd, calls: t.calls + a.calls }), { usd: 0, calls: 0 })
           const storageBytes = real.reduce((n, c) => n + (costs?.storage[c.id]?.bytes || 0), 0)
           const mb = (b: number) => b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`
-          const actions = sortActions([
+          const actions = onePerGym(sortActions([
             ...usage.flatMap(actionsFor),
             // AI cost high: no price per gym is stored yet, so a fixed ₹ line (lib/ai-pricing.ts)
             ...usage.filter(u => u.company.is_active && (aiThis[u.company.id]?.usd || 0) * USD_TO_INR > AI_COST_ALERT_INR).map(u => ({
               kind: 'ai-cost' as const, usage: u, tone: 'warn' as const, action: 'Review AI use',
               reason: `AI this month ${inr(aiThis[u.company.id].usd)} · ${aiThis[u.company.id].calls} uses (over ₹${AI_COST_ALERT_INR})`,
             })),
-          ])
+          ]))
           const live = usage.filter(u => u.company.is_active)
           const paying = live.filter(u => u.status === 'paid' && (u.daysLeft == null || u.daysLeft > 0)).length
           const trials = live.filter(u => u.status === 'trial' && (u.daysLeft == null || u.daysLeft > 0)).length
