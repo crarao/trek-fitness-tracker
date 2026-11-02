@@ -1,4 +1,4 @@
-# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 0, 0b, 1a run 2 Nov; Step 1b NOT RUN YET (after merge)
+# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; ✅ ALL STEPS RUN 2 NOV (0, 0b, 1a, 1b)
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
@@ -185,7 +185,9 @@ end $$;
 commit;
 ```
 
-### Step 1b — only after `multi-country` is merged and live on getcoachboard.com
+### Step 1b — ✅ RUN BY ANAND 2 NOV, after PR #88 was merged and live — do not run again
+
+Result: "Success. No rows returned".
 
 ```sql
 begin;
