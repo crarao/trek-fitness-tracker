@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { tenantSlugFromHost } from '@/lib/tenant'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
+import { type PhoneCountry, phoneCountry, validLocalDigits, loginEmailFor, phoneHint } from '@/lib/phone'
+import CountryCodePicker from '@/app/country-code-picker'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
 // The address and the remembered gym don't change while the page is open, so nothing to subscribe to
@@ -15,6 +17,10 @@ const noSubscribe = () => () => {}
 const REMEMBERED_GYM_KEY = 'coachboard-gym'
 const readRememberedGym = () => { try { return localStorage.getItem(REMEMBERED_GYM_KEY) } catch { return null } }
 const rememberGym = (slug: string) => { try { localStorage.setItem(REMEMBERED_GYM_KEY, slug) } catch { /* private mode */ } }
+// The country code picked at the last login on this device (default +91)
+const PHONE_CODE_KEY = 'coachboard-phone-code'
+const readPhoneCode = (): PhoneCountry => { try { return phoneCountry(localStorage.getItem(PHONE_CODE_KEY)) } catch { return 'IN' } }
+const rememberPhoneCode = (c: PhoneCountry) => { try { localStorage.setItem(PHONE_CODE_KEY, c) } catch { /* private mode */ } }
 const otherGymMessage = (gym: string | undefined) =>
   `This login isn't part of ${gym || 'this gym'}. Use your own gym's link, or sign in at getcoachboard.com/login.`
 
@@ -38,6 +44,11 @@ function LoginForm() {
   const companySlug = hostSlug || searchParams.get('company') || rememberedSlug
 
   const [identifier, setIdentifier] = useState('')
+  const savedPhoneCode = useSyncExternalStore(noSubscribe, readPhoneCode, () => 'IN' as PhoneCountry)
+  const [pickedPhoneCode, setPhoneCode] = useState<PhoneCountry | null>(null)
+  const phoneCode = pickedPhoneCode ?? savedPhoneCode
+  // Typing an @ means an email login: the country code doesn't apply
+  const isEmail = identifier.includes('@')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
@@ -104,20 +115,27 @@ function LoginForm() {
     )
   }
 
-  const toEmail = (input: string) => {
+  // Email as typed; a phone number becomes its login identifier (lib/phone.ts loginEmailFor).
+  // null = a phone number with the wrong number of digits for the picked country.
+  const toEmail = (input: string): string | null => {
     const cleaned = input.trim()
-    if (/^\d{10}$/.test(cleaned)) {
-      return `${cleaned}@getcoachboard.in`
-    }
-    return cleaned
+    if (cleaned.includes('@')) return cleaned
+    const local = validLocalDigits(phoneCode, cleaned)
+    return local ? loginEmailFor(phoneCode, local) : null
   }
 
   const handleLogin = async () => {
+    setTried(true)
+    const email = toEmail(identifier)
+    if (!email) {
+      setError(`Enter your email, or your phone number (${phoneHint(phoneCode)} after the country code)`)
+      return
+    }
     setLoading(true)
     setError('')
-    setTried(true)
+    if (!isEmail) rememberPhoneCode(phoneCode)
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email: toEmail(identifier), password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       // A turned-off coach is banned in Supabase Auth (set-coach-active)
@@ -235,14 +253,20 @@ function LoginForm() {
           <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 space-y-4">
             <div>
               <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Phone or Email</label>
-              <input
-                type="text"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
-                placeholder="9999999999 or you@example.com"
-              />
+              <div className="flex gap-2">
+                {!isEmail && (
+                  <CountryCodePicker value={phoneCode} onChange={setPhoneCode}
+                    className="rounded-xl focus:ring-orange-500 py-3" />
+                )}
+                <input
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
+                  placeholder={phoneCode === 'IN' ? '9999999999 or you@example.com' : 'Phone or you@example.com'}
+                />
+              </div>
             </div>
 
             <div>

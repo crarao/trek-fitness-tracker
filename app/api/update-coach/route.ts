@@ -1,10 +1,12 @@
 // Rename a coach or change their phone (ROADMAP #40). Owner, partners (own gym) or super admin.
 // POST { coachId, full_name, phone } → { success: true }
-// India coaches log in with their phone ({phone}@getcoachboard.in): a new phone changes their login too.
+// Coaches with a phone login (lib/phone.ts loginEmailFor) follow their phone: a new phone changes their login too.
+// The phone may be sent as local digits (the gym's own country) or as +<code><digits>.
 // Their password is not changed (it stays whatever it was, e.g. the old phone number).
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden } from '@/lib/auth-server'
+import { splitE164, loginEmailFor, isPhoneLogin, staffPhoneValue, PHONE_COUNTRIES, phoneCountry } from '@/lib/phone'
 
 export async function POST(request: Request) {
   const { caller, error: callerError } = await getCaller(STAFF)
@@ -28,16 +30,21 @@ export async function POST(request: Request) {
   if (!target || target.role !== 'coach') return forbidden()
   if (caller.role !== 'super_admin' && target.company_id !== caller.companyId) return forbidden()
 
-  // Phone login: the phone must stay a valid 10-digit number, and the login email follows it.
+  // Phone login: the phone must stay a valid number, and the login email follows it.
   // Done before the profile so a clash with another login leaves nothing half-changed.
+  const { data: company } = await supabaseAdmin.from('companies').select('country').eq('id', target.company_id).maybeSingle()
+  const home = phoneCountry(company?.country)
+  const parts = splitE164(newPhone, home)
   const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(coachId)
-  const phoneLogin = !!user?.email?.endsWith('@getcoachboard.in')
+  const phoneLogin = isPhoneLogin(user?.email)
   let loginEmail: string | null = null
+  let savedPhone = newPhone
+  if (parts) savedPhone = staffPhoneValue(parts.country, parts.local)
   if (phoneLogin) {
-    if (!/^\d{10}$/.test(newPhone)) {
-      return NextResponse.json({ error: 'Enter a valid 10-digit phone number: this coach logs in with it' }, { status: 400 })
+    if (!parts) {
+      return NextResponse.json({ error: `Enter a valid phone number (${PHONE_COUNTRIES[home].digits} digits): this coach logs in with it` }, { status: 400 })
     }
-    loginEmail = `${newPhone}@getcoachboard.in`
+    loginEmail = loginEmailFor(parts.country, parts.local)
     if (user!.email !== loginEmail) {
       const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(coachId, { email: loginEmail })
       if (authError) {
@@ -49,7 +56,7 @@ export async function POST(request: Request) {
 
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
-    .update({ full_name: name, phone: newPhone || null, ...(loginEmail ? { email: loginEmail } : {}) })
+    .update({ full_name: name, phone: savedPhone || null, ...(loginEmail ? { email: loginEmail } : {}) })
     .eq('id', coachId)
   if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
 

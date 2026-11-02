@@ -54,8 +54,10 @@ companies
   ├── partner_limit (default 2)       ← owner-level partner logins; super admin only
   ├── feedback_enabled, ai_insights_enabled, session_notes_enabled
   ├── client_module_enabled
-  ├── country (IN | US, default IN)   ← drives currency, date format, client login method
-  ├── currency (INR | USD)            ← set from country by super admin
+  ├── country (IN | AE | US | CA, default IN) ← HOME country: date format, phone code, client login method (Super Admin label "Home country")
+  ├── currency (INR | AED | USD | CAD) ← BASE currency, pre-filled from the country, super admin can change it; always in allowed_currencies (DB check)
+  ├── multi_country_enabled (bool, default false) ← super admin switch: clients from other countries / payments in other currencies (#75)
+  ├── allowed_currencies (text[], default {INR}) ← currencies the gym takes; base always included
   ├── business_type (gym | trek | pilates | yoga | cycling | general)
   ├── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
   ├── banner_has_branding (bool, default false) ← super admin switch: the uploaded banner already has the gym's name / logo, so the login shows it whole without name / tagline / logo on top (db/2026-10-31-banner-branding.md; readable logged out)
@@ -67,7 +69,8 @@ profiles (one per user, linked to a company)
   ├── client_type (member | pt)       ← PT = personal training client
   ├── archived_at (timestamptz null)  ← null = active, set = archived (for a coach: login turned off)
   ├── primary_coach_id → profiles     ← client's coach, picked from a dropdown (PT: primary coach; regular member: optional trainer). Soft link, never limits access; owner/partner set it. trainer_name = old free-text field, read-only now
-  ├── full_name, email, phone
+  ├── full_name, email, phone          ← clients: international format +919876543210 (db/2026-11-01-multi-country.md); staff: India 10 digits, others +<code><digits>
+  ├── country, currency (clients)      ← client's own country / default payment currency (= the gym's unless multi-country); clients can't change them
   └── fitness fields: goal, age, gender, height_cm, weight_kg,
       fitness_level, food_preference (Vegetarian | Non-Vegetarian | Eggetarian | Vegan | Jain),
       meals_per_day (smallint 2–6), available_days,
@@ -79,6 +82,7 @@ memberships (one row per plan period, multiple per profile)
   ├── company_id → companies
   ├── plan_type (1 Month | 3 Months | 6 Months | 1 Year)
   ├── amount_paid
+  ├── currency (not null, default INR) ← the currency it was paid in; NEVER changes once saved (trigger protect_membership_currency)
   ├── start_date, end_date
   └── created_at
 
@@ -146,6 +150,9 @@ exercises (exercise library, #74; never deleted: archived)
 | Coach home (today's training list) | `app/coach/page.tsx` |
 | Coach rules (today's rows, Before you start, covering) | `lib/coach-today.ts` (check: `scripts/check-coach-today.ts`) |
 | Company type helpers (`isGym`, `isCoachCompany`, `companyType`) | `lib/company-type.ts` |
+| Phones + phone logins: country table (IN / AE / US / CA), `loginEmailFor`, `validLocalDigits`, `toE164`, `splitE164`, `displayPhone`, `waDigits`, `staffLogin` (check: `scripts/check-phone.ts`) | `lib/phone.ts` |
+| Money: `formatMoney` (₹ / AED / $ / CA$), `groupByCurrency`, `formatMoneyByCurrency` | `lib/currency.ts` |
+| Country-code picker (login, Add member, staff logins) — the one shared component | `app/country-code-picker.tsx` |
 | Company slug rules (suggest from name, validate, reserved words, uniqueness check) | `lib/company-slug.ts` |
 | Branded login link `/login/<slug>` (forwards to `/login?company=<slug>`) | `app/login/[slug]/page.tsx` |
 | Gym subdomains: read the gym from the host (`tenantSlugFromHost`, `rootHost`, `gymAddress`) | `lib/tenant.ts` |
@@ -311,7 +318,13 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 **No server components.** Every page is `'use client'`. All Supabase queries run in the browser. Fine for now; reconsider when SEO or initial load performance matters.
 
-**Phone login convention.** Phone number logins are stored as `{10-digit-phone}@getcoachboard.in` in Supabase Auth. This is load-bearing — `update-client` API syncs the auth email when a phone number changes. Do not change the email format without a migration.
+**Phone login convention (login identifier rule, #75).** Phone logins are Supabase Auth emails built **only** by `loginEmailFor(country, localDigits)` in `lib/phone.ts` — never inline:
+- India (+91) → `9876543210@getcoachboard.in` (unchanged, no migration of existing users)
+- every other country → full digits with the country code: `971501234567@getcoachboard.in` (UAE), `15551234567@getcoachboard.in` (US / Canada)
+- Digits: IN 10, AE 9, US 10, CA 10. `isPhoneLogin(email)` tells phone logins from real emails.
+- **Clients:** `loginMethod(country)` (lib/locale.ts) is `'phone'` only for India; clients from anywhere else log in with email. A client's country = the gym's, or their own in a multi-country gym.
+- **Staff** (`staffLogin` in lib/phone.ts): India phone (password = number). Other countries: email + password, or with no email the phone + country code (password = number). Existing US staff keep their email logins.
+This is load-bearing — `update-client` (Indian numbers only) and `update-coach` sync the auth email when the phone changes. `scripts/check-phone.ts` fails if a page builds `@getcoachboard.in` inline.
 
 **Admin client instantiated ad-hoc.** `SUPABASE_SECRET_KEY` is used inline in each API route. No shared helper. Follow the same pattern when adding new privileged routes.
 
@@ -331,9 +344,11 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 
 **AI calls:** Claude Haiku via `@anthropic-ai/sdk`. Plans use `max_tokens: 300` (heading-only format). Insights use `max_tokens: 200`. Business type always passed as context.
 
-**Component structure:** Pages are monolithic `'use client'` files. No shared component library. Build inline per page.
+**Component structure:** Pages are monolithic `'use client'` files. No shared component library. Build inline per page. Exceptions, shared because several pages need the same control: `app/country-code-picker.tsx` (first shared component, #75), plus the plan builder pieces (`app/plan-editor.tsx`, `app/exercise-picker.tsx`, `app/plan-copy-sheet.tsx`, `app/plan-days.tsx`, `app/session-form.tsx`).
 
 **Country & dates:** Never hard-code `'en-IN'`, `'en'`, `toLocaleDateString()` or `new Date('YYYY-MM-DD')` for display. Use `lib/locale.ts` (`formatDate(value, country, style)`, `loginMethod`, `dialCode`, `phonePlaceholder`) with the company's `country`. Date-only DB values must go through `parseDate`/`formatDate` so they don't shift a day in US timezones. Money uses `lib/currency.ts`.
+
+**Multi-country & currencies (#75, `db/2026-11-01-multi-country.md`):** every amount is shown in its own row's currency (`memberships.currency`, falling back to the gym's `currency` for rows read before the SQL). Totals are added up per currency with `groupByCurrency` and shown as "₹48,000 · AED 3,200" only when more than one currency has amounts; a single-currency gym sees exactly the old figures (incl. % vs last month and trend bars). Never add amounts of different currencies together. Multi-country off ⇒ no new fields anywhere. Pickers offer only `allowed_currencies`; a currency removed later stays on saved rows and still displays. Renew carries the latest membership's currency forward (changeable in multi-country gyms); Correct never sends a currency. New columns are only sent once they exist (`'allowed_currencies' in company`), and memberships are read with `select('*')` so the app works before and after the SQL. Phones: read stored phones with `splitE164` / `displayPhone` / `waDigits` (both `+91…` and old 10-digit values work); WhatsApp links are India / US numbers only.
 
 **Company type (#60, `db/2026-10-30-company-type.md`):** `companies.company_type` is `gym` (default) or `coach` (an individual coach: one person). Always gate with `isGym(company)` / `isCoachCompany(company)` from `lib/company-type.ts`, never string comparisons; missing values count as `gym`. A `coach` company hides the Coaches section, Coach assignments / Coach activity cards, the primary-coach picker (Add member + client Profile tab), coach names on client cards, "by Coach X" / "covering" labels and the super admin's partner limit / Add partner. Leads, members, memberships, payments, plans, sessions and progress PDF stay. The server enforces it too: `create-user` refuses `coach` / `partner` logins, `set-coach-active` refuses turning a coach back on, and `update-client` refuses setting a primary coach. Switching a gym to `coach` deletes nothing: existing coach / partner logins stay (coaches can be turned off; partners removed by super admin). Separate from `business_type` and from #42 (in-gym vs online mode). Pages read the company with `companies(*)` so the column is picked up without breaking before its SQL ran.
 

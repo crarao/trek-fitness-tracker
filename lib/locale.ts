@@ -1,23 +1,30 @@
 // Country-driven formatting and rules. Set once per company (companies.country).
 // Every screen should use these helpers instead of hard-coding 'en-IN' / 'en'.
 
-export type Country = 'IN' | 'US'
+import { PHONE_COUNTRIES } from './phone'
+import type { Currency } from './currency'
 
-export const COUNTRIES: { code: Country; label: string; currency: 'INR' | 'USD' }[] = [
+// companies.country = the gym's home country; profiles.country = a client's own country (multi-country gyms)
+export type Country = 'IN' | 'AE' | 'US' | 'CA'
+
+export const COUNTRIES: { code: Country; label: string; currency: Currency }[] = [
   { code: 'IN', label: 'India', currency: 'INR' },
+  { code: 'AE', label: 'UAE', currency: 'AED' },
   { code: 'US', label: 'United States', currency: 'USD' },
+  { code: 'CA', label: 'Canada', currency: 'CAD' },
 ]
 
 // Anything unknown or empty is treated as India (the original default).
 export function normalizeCountry(value: string | null | undefined): Country {
-  return value === 'US' ? 'US' : 'IN'
+  return value === 'AE' || value === 'US' || value === 'CA' ? value : 'IN'
 }
 
-export function currencyForCountry(country: Country): 'INR' | 'USD' {
-  return country === 'US' ? 'USD' : 'INR'
+// The currency a country's gym starts with (super admin can pick another base currency)
+export function currencyForCountry(country: Country): Currency {
+  return COUNTRIES.find(c => c.code === country)?.currency ?? 'INR'
 }
 
-const LOCALE: Record<Country, string> = { IN: 'en-IN', US: 'en-US' }
+const LOCALE: Record<Country, string> = { IN: 'en-IN', AE: 'en-AE', US: 'en-US', CA: 'en-CA' }
 
 // Date-only values from Postgres ("2026-10-26") are calendar days, not moments in
 // time. `new Date("2026-10-26")` treats them as UTC midnight, which shows the
@@ -82,18 +89,20 @@ export function formatDate(
 
 // ---- Phone & login rules ----
 
-// India: clients log in with their 10-digit phone (stored as {phone}@getcoachboard.in).
-// US: clients log in with email; phone is for contact only. US numbers are also
-// 10 digits, so using them as logins would clash with Indian numbers.
+// How a CLIENT logs in, by the client's country (staff: lib/phone.ts staffLogin).
+// India: the 10-digit phone (stored as {phone}@getcoachboard.in, lib/phone.ts loginEmailFor).
+// Everyone else (UAE, US, Canada): email; their phone is for contact only.
 export function loginMethod(country: Country): 'phone' | 'email' {
-  return country === 'US' ? 'email' : 'phone'
+  return country === 'IN' ? 'phone' : 'email'
 }
 
-// Country calling code for WhatsApp links (wa.me/<code><number>)
+// Country calling code (91, 971, 1, 1)
 export function dialCode(country: Country): string {
-  return country === 'US' ? '1' : '91'
+  return PHONE_COUNTRIES[country].dial
 }
 
 export function phonePlaceholder(country: Country): string {
-  return country === 'US' ? 'Phone, e.g. 555 123 4567' : 'Phone number (10 digits)'
+  if (country === 'US' || country === 'CA') return 'Phone, e.g. 555 123 4567'
+  if (country === 'AE') return 'Phone, e.g. 50 123 4567'
+  return 'Phone number (10 digits)'
 }

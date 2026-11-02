@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, loginMethod, localDateIso, daysUntil } from '@/lib/locale'
+import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
+import { CURRENCIES, normalizeCurrency } from '@/lib/currency'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhoneLogin, displayPhone, phoneHint } from '@/lib/phone'
+import CountryCodePicker from '@/app/country-code-picker'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
@@ -32,7 +35,10 @@ type Company = {
   client_module_enabled: boolean
   pt_limit: number | null
   partner_limit?: number | null   // owner-level partner logins allowed (column added 30 Oct, default 2)
-  country: string | null
+  country: string | null          // home country (IN | AE | US | CA)
+  currency?: string | null        // base currency; always one of allowed_currencies
+  multi_country_enabled?: boolean | null  // clients from several countries / currencies (absent before db/2026-11-01-multi-country.md)
+  allowed_currencies?: string[] | null    // currencies this company takes payments in
   is_test?: boolean | null   // test account: left out of the Dashboard (column added 25 Oct; absent before the SQL)
   company_type?: string | null   // 'gym' | 'coach' (individual coach). lib/company-type.ts; absent before the SQL
   slug?: string | null   // branded login link getcoachboard.com/login/<slug>, lib/company-slug.ts
@@ -125,6 +131,10 @@ export default function AdminPage() {
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
+  currency: 'INR' as string,       // base currency, pre-filled from the country
+  multi_country_enabled: false,
+  allowed_currencies: ['INR'] as string[],
+  login_phone_country: 'IN' as PhoneCountry, // country code of a phone admin login
   company_type: 'gym' as CompanyType,
   slug: '',
   slugEdited: false, // admin typed in the slug field: stop following the company name
@@ -148,7 +158,7 @@ export default function AdminPage() {
   // Active coach logins of the company being edited (for the note when switching it to Individual coach)
   const [companyCoachCount, setCompanyCoachCount] = useState(0)
   // India: name + phone (phone is the login and default password). US: name + email login + password, phone optional
-  const [newPartner, setNewPartner] = useState({ full_name: '', phone: '', email: '', password: '' })
+  const [newPartner, setNewPartner] = useState<{ full_name: string; phone: string; email: string; password: string; phone_country: PhoneCountry | '' }>({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
   const [savingPartner, setSavingPartner] = useState(false)
   const [partnerMessage, setPartnerMessage] = useState('')
   const [partnerLimitInput, setPartnerLimitInput] = useState('')
@@ -307,23 +317,31 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   fetchAll()
 }
 
+  // The base currency is always allowed (DB check companies_base_currency_allowed backs this up)
+  const withBase = (allowed: string[] | null | undefined, base: string) => {
+    const list = (allowed || []).filter(c => CURRENCIES.some(x => x.code === c))
+    return list.includes(base) ? list : [base, ...list]
+  }
+
   const handleCreateCompany = async () => {
     setSaving(true)
     setMessage('')
 
-    // Admin Login field accepts an email or a 10-digit phone
+    // Admin Login field accepts an email or a phone number (with the picked country code, lib/phone.ts)
     const loginInput = newCompany.email.trim()
+    const asPhone = (raw: string) => {
+      const local = validLocalDigits(newCompany.login_phone_country, raw)
+      return local ? loginEmailFor(newCompany.login_phone_country, local) : ''
+    }
     const resolvedEmail = loginInput
-      ? (/^\d{10}$/.test(loginInput) ? `${loginInput}@getcoachboard.in` : loginInput)
-      : /^\d{10}$/.test(newCompany.phone.trim())
-        ? `${newCompany.phone.trim()}@getcoachboard.in`
-        : ''
+      ? (loginInput.includes('@') ? loginInput : asPhone(loginInput))
+      : asPhone(newCompany.phone)
 
     // Check everything BEFORE saving, so a bad input can't leave a company without a login
     const problem = !newCompany.name.trim()
       ? 'Enter the company name'
       : !resolvedEmail
-        ? 'Enter a valid email or 10-digit phone number for the admin login'
+        ? `Enter a valid email or phone number (${phoneHint(newCompany.login_phone_country)}) for the admin login`
         : newCompany.adminPassword.length < 6
           ? 'Admin password must be at least 6 characters'
           : !newCompany.trial_start || !newCompany.trial_end
@@ -353,7 +371,12 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     // Trial dates were shown on the form but not saved before (#33), so new companies looked expired
     const companyFields = {
       name: newCompany.name, email: resolvedEmail, phone: newCompany.phone,
-      country: newCompany.country, currency: currencyForCountry(newCompany.country),
+      country: newCompany.country, currency: newCompany.currency,
+      // Once db/2026-11-01-multi-country.md has run (the columns then come back with every company)
+      ...(companies.some(c => 'allowed_currencies' in c) ? {
+        multi_country_enabled: newCompany.multi_country_enabled,
+        allowed_currencies: withBase(newCompany.allowed_currencies, newCompany.currency),
+      } : {}),
       trial_start: newCompany.trial_start, trial_end: newCompany.trial_end, is_trial: true, is_active: true,
       slug: newCompany.slug,
       // Sent once the company_type column exists (or when it's an individual coach; the SQL must run first then)
@@ -400,6 +423,10 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   adminPassword: '', 
   phone: '',
   country: 'IN' as Country,
+  currency: 'INR' as string,       // base currency, pre-filled from the country
+  multi_country_enabled: false,
+  allowed_currencies: ['INR'] as string[],
+  login_phone_country: 'IN' as PhoneCountry, // country code of a phone admin login
   company_type: 'gym' as CompanyType,
   slug: '',
   slugEdited: false, // admin typed in the slug field: stop following the company name
@@ -461,6 +488,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       }
     }
     setSavingCompany(true)
+    const editBaseCurrency = normalizeCurrency(editingCompany.currency || currencyForCountry(normalizeCountry(editingCompany.country)))
     const { error } = await supabase
       .from('companies')
       .update({
@@ -482,7 +510,12 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         is_trial: editingCompany.is_trial,
         notes: editingCompany.notes || null,
         country: normalizeCountry(editingCompany.country),
-        currency: currencyForCountry(normalizeCountry(editingCompany.country)),
+        currency: editBaseCurrency,
+        // Once db/2026-11-01-multi-country.md has run
+        ...('allowed_currencies' in editingCompany ? {
+          multi_country_enabled: !!editingCompany.multi_country_enabled,
+          allowed_currencies: withBase(editingCompany.allowed_currencies, editBaseCurrency),
+        } : {}),
         // Only once the is_test column exists (its value then comes back with the company)
         ...('is_test' in editingCompany ? { is_test: !!editingCompany.is_test } : {}),
         // Only once the company_type column exists
@@ -573,21 +606,12 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   const handleAddPartner = async () => {
     if (!editingCompany) return
     const name = newPartner.full_name.trim()
-    const phone = newPartner.phone.trim()
-    // Login rule follows the company's country (lib/locale.ts), same as clients
-    const method = loginMethod(normalizeCountry(editingCompany.country))
-    let email = '', password = ''
     if (!name) { setPartnerMessage('Enter the partner\'s name'); return }
-    if (method === 'email') {
-      email = newPartner.email.trim().toLowerCase()
-      password = newPartner.password
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setPartnerMessage('Enter a valid email: US partners log in with email'); return }
-      if (password.length < 6) { setPartnerMessage('Password must be at least 6 characters'); return }
-    } else {
-      if (!/^\d{10}$/.test(phone)) { setPartnerMessage('Enter a valid 10-digit phone number'); return }
-      email = `${phone}@getcoachboard.in`
-      password = phone
-    }
+    // Staff login rule (lib/phone.ts staffLogin): India phone; other countries email + password, or phone with its code
+    const home = normalizeCountry(editingCompany.country)
+    const login = staffLogin(home, { phoneCountry: newPartner.phone_country || home, phone: newPartner.phone, email: newPartner.email, password: newPartner.password })
+    if ('error' in login) { setPartnerMessage(login.error); return }
+    const { email, password, phone, method } = login
     setSavingPartner(true)
     const response = await fetch('/api/create-user', {
       method: 'POST',
@@ -603,7 +627,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
     })
     const result = await response.json()
     if (result.error) { setPartnerMessage('Error: ' + result.error); setSavingPartner(false); return }
-    setNewPartner({ full_name: '', phone: '', email: '', password: '' })
+    setNewPartner({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
     setPartnerMessage(method === 'email'
       ? `Partner added! They log in with ${email} and the password you set.`
       : 'Partner added! Default password = phone number.')
@@ -1046,19 +1070,37 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Country <span className="normal-case text-gray-600">— sets currency, date format and how clients log in</span></label>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home country <span className="normal-case text-gray-600">— date format, phone code and how clients log in</span></label>
                   <select value={newCompany.country}
-                    onChange={(e) => setNewCompany({ ...newCompany, country: normalizeCountry(e.target.value) })}
+                    onChange={(e) => {
+                      const country = normalizeCountry(e.target.value)
+                      const currency = currencyForCountry(country)
+                      // Changing the country pre-fills the base currency (can be changed below)
+                      setNewCompany({ ...newCompany, country, currency, login_phone_country: country, allowed_currencies: withBase(newCompany.allowed_currencies.filter(c => c !== newCompany.currency), currency) })
+                    }}
                     className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
-                    {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label} ({c.currency})</option>)}
+                    {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
                   </select>
                 </div>
+                <CurrencySettings
+                  base={newCompany.currency}
+                  multi={newCompany.multi_country_enabled}
+                  allowed={newCompany.allowed_currencies}
+                  ready={companies.some(c => 'allowed_currencies' in c)}
+                  onChange={v => setNewCompany({ ...newCompany, ...v })} />
                 <div>
-                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Admin Login <span className="normal-case text-gray-600">— email or 10-digit phone, this becomes the login credential</span></label>
-                  <input type="text" placeholder="Email or phone number"
-                    value={newCompany.email}
-                    onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
-                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Admin Login <span className="normal-case text-gray-600">— email or phone (with its country code), this becomes the login credential</span></label>
+                  <div className="flex gap-2">
+                    {!newCompany.email.includes('@') && (
+                      <CountryCodePicker value={newCompany.login_phone_country}
+                        onChange={c => setNewCompany({ ...newCompany, login_phone_country: c })}
+                        className="rounded-xl focus:ring-orange-500 py-3" />
+                    )}
+                    <input type="text" placeholder="Email or phone number"
+                      value={newCompany.email}
+                      onChange={(e) => setNewCompany({ ...newCompany, email: e.target.value })}
+                      className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Contact Phone <span className="normal-case text-gray-600">— for records only, not a login</span></label>
@@ -1293,13 +1335,33 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                         </div>
 
                         <div>
-                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Country <span className="normal-case text-gray-600">— also sets currency</span></label>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home country <span className="normal-case text-gray-600">— pre-fills the base currency</span></label>
                           <select value={normalizeCountry(editingCompany.country)}
-                            onChange={e => setEditingCompany({ ...editingCompany, country: e.target.value })}
+                            onChange={e => {
+                              const country = normalizeCountry(e.target.value)
+                              const currency = currencyForCountry(country)
+                              const oldBase = normalizeCurrency(editingCompany.currency || currencyForCountry(normalizeCountry(editingCompany.country)))
+                              setEditingCompany({
+                                ...editingCompany, country, currency,
+                                ...('allowed_currencies' in editingCompany ? { allowed_currencies: withBase((editingCompany.allowed_currencies || []).filter(c => c !== oldBase), currency) } : {}),
+                              })
+                            }}
                             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
-                            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label} ({c.currency})</option>)}
+                            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
                           </select>
                         </div>
+                        <CurrencySettings
+                          compact
+                          base={normalizeCurrency(editingCompany.currency || currencyForCountry(normalizeCountry(editingCompany.country)))}
+                          multi={!!editingCompany.multi_country_enabled}
+                          allowed={editingCompany.allowed_currencies || []}
+                          ready={'allowed_currencies' in editingCompany}
+                          onChange={v => setEditingCompany({
+                            ...editingCompany,
+                            ...('currency' in v ? { currency: v.currency } : {}),
+                            ...('multi_country_enabled' in v ? { multi_country_enabled: v.multi_country_enabled } : {}),
+                            ...('allowed_currencies' in v ? { allowed_currencies: v.allowed_currencies } : {}),
+                          })} />
 
                         <div className="grid grid-cols-2 gap-3">
                           <div>
@@ -1546,8 +1608,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                     <p className="text-sm text-white">{p.full_name}</p>
                                     <p className="text-xs text-gray-500">
                                       {/* Shows what they log in with: email for US-style logins, else phone */}
-                                      {p.email && !p.email.endsWith('@getcoachboard.in') ? p.email : p.phone}
-                                      {p.email && !p.email.endsWith('@getcoachboard.in') && p.phone ? ` · ${p.phone}` : ''}
+                                      {p.email && !isPhoneLogin(p.email) ? p.email : displayPhone(p.phone, editingCompany.country)}
+                                      {p.email && !isPhoneLogin(p.email) && p.phone ? ` · ${displayPhone(p.phone, editingCompany.country)}` : ''}
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-3 shrink-0">
@@ -1566,37 +1628,48 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             </div>
                           )}
                           {!isCoachCompany(editingCompany) && (<>
-                          {loginMethod(normalizeCountry(editingCompany.country)) === 'email' ? (
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                              <input type="text" placeholder="Partner name"
-                                value={newPartner.full_name}
-                                onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
-                                className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                              <input type="email" placeholder="Email (used to log in)" autoComplete="off"
-                                value={newPartner.email}
-                                onChange={e => setNewPartner({ ...newPartner, email: e.target.value })}
-                                className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                              <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
-                                value={newPartner.password}
-                                onChange={e => setNewPartner({ ...newPartner, password: e.target.value })}
-                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                              <input type="tel" placeholder="Phone (optional)"
-                                value={newPartner.phone}
-                                onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
-                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                            </div>
-                          ) : (
-                          <div className="grid grid-cols-2 gap-2 mb-2">
-                              <input type="text" placeholder="Partner name"
-                                value={newPartner.full_name}
-                                onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
-                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                              <input type="tel" placeholder="Phone (10 digits)"
-                                value={newPartner.phone}
-                                onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
-                                className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
-                            </div>
-                          )}
+                          {(() => {
+                            const home = normalizeCountry(editingCompany.country)
+                            const pc = newPartner.phone_country || home
+                            const phoneBox = (extra: string, placeholder: string) => (
+                              <div className={`${extra}flex gap-2 min-w-0`}>
+                                <CountryCodePicker value={pc} onChange={c => setNewPartner({ ...newPartner, phone_country: c })}
+                                  className="rounded-xl focus:ring-orange-500 py-2" />
+                                <input type="tel" placeholder={placeholder}
+                                  value={newPartner.phone}
+                                  onChange={e => setNewPartner({ ...newPartner, phone: e.target.value })}
+                                  className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                              </div>
+                            )
+                            // Outside India: email + password, or leave the email empty for a phone login (D5)
+                            return home !== 'IN' ? (
+                              <div className="grid grid-cols-2 gap-2 mb-2">
+                                <input type="text" placeholder="Partner name"
+                                  value={newPartner.full_name}
+                                  onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
+                                  className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                                <input type="email" placeholder="Email (or leave empty: phone login)" autoComplete="off"
+                                  value={newPartner.email}
+                                  onChange={e => setNewPartner({ ...newPartner, email: e.target.value })}
+                                  className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                                {newPartner.email.trim() && (
+                                  <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                                    value={newPartner.password}
+                                    onChange={e => setNewPartner({ ...newPartner, password: e.target.value })}
+                                    className="col-span-2 bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                                )}
+                                {phoneBox('col-span-2 ', newPartner.email.trim() ? 'Phone (optional)' : `Phone (${phoneHint(pc)})`)}
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2 mb-2">
+                                <input type="text" placeholder="Partner name"
+                                  value={newPartner.full_name}
+                                  onChange={e => setNewPartner({ ...newPartner, full_name: e.target.value })}
+                                  className="bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                                {phoneBox('', `Phone (${phoneHint(pc)})`)}
+                              </div>
+                            )
+                          })()}
                           {partnerMessage && (
                             <p className={`text-xs mb-2 ${partnerMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>
                               {partnerMessage}
@@ -1610,8 +1683,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             <p className="text-xs text-amber-400 mt-1.5">Limit reached: raise the partner limit to add more</p>
                           )}
                           <p className="text-xs text-gray-600 mt-1.5">
-                            {loginMethod(normalizeCountry(editingCompany.country)) === 'email'
-                              ? 'US company: partners log in with their email and the password you set. They can change it in Settings.'
+                            {normalizeCountry(editingCompany.country) !== 'IN'
+                              ? 'With an email, partners log in with it and the password you set. Without one, they log in with their phone (with the country code) and the default password is their phone number. They can change it in Settings.'
                               : 'Default password is their phone number. They can change it after first login via Settings.'}
                           </p>
                           </>)}
@@ -1755,7 +1828,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 {c.full_name}
                                 {c.client_type === 'pt' && <span className="ml-1.5 text-[10px] bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full align-middle">PT</span>}
                               </p>
-                              <p className="text-xs text-gray-500 truncate">{c.email && !c.email.endsWith('@getcoachboard.in') ? c.email : c.phone || c.email}</p>
+                              <p className="text-xs text-gray-500 truncate">{c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, companies.find(co => co.id === c.company_id)?.country) || c.email}</p>
                             </div>
                             <span className={`text-xs shrink-0 ${stateCls[state]}`}>● {stateLabel[state]}</span>
                           </div>
@@ -1770,6 +1843,68 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           )
         })()}
       </div>
+    </div>
+  )
+}
+// Super admin: base currency, multi-country switch and the currencies a company takes payments in
+// (companies.currency / multi_country_enabled / allowed_currencies, db/2026-11-01-multi-country.md).
+// The base currency's box is always ticked and locked.
+function CurrencySettings({ base, multi, allowed, ready, compact, onChange }: {
+  base: string
+  multi: boolean
+  allowed: string[]
+  ready: boolean // the multi-country SQL has run
+  compact?: boolean
+  onChange: (v: { currency?: string; multi_country_enabled?: boolean; allowed_currencies?: string[] }) => void
+}) {
+  const pad = compact ? 'py-2.5' : 'py-3'
+  const allowedWithBase = allowed.includes(base) ? allowed : [base, ...allowed]
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Base currency <span className="normal-case text-gray-600">— the gym&apos;s own; dashboard totals start with it</span></label>
+        <select value={base}
+          onChange={e => onChange({ currency: e.target.value, allowed_currencies: [e.target.value, ...allowedWithBase.filter(c => c !== base && c !== e.target.value)] })}
+          className={`w-full bg-gray-800 text-white rounded-xl px-4 ${pad} outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm`}>
+          {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+        </select>
+      </div>
+      {ready ? (
+        <div className="bg-gray-800/50 border border-gray-800 rounded-xl px-4 py-3 space-y-3">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <span>
+              <span className="text-sm text-white block">Multi-country clients</span>
+              <span className="text-xs text-gray-500">Clients from other countries, payments in other currencies</span>
+            </span>
+            <input type="checkbox" checked={multi}
+              onChange={e => onChange({ multi_country_enabled: e.target.checked, allowed_currencies: allowedWithBase })}
+              className="w-4 h-4 accent-orange-500 shrink-0" />
+          </label>
+          {multi && (
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Currencies this gym takes</p>
+              <div className="grid grid-cols-2 gap-2">
+                {CURRENCIES.map(c => {
+                  const isBase = c.code === base
+                  return (
+                    <label key={c.code} className={`flex items-center gap-2 text-sm ${isBase ? 'text-gray-400' : 'text-gray-300 cursor-pointer'}`}>
+                      <input type="checkbox" disabled={isBase}
+                        checked={isBase || allowedWithBase.includes(c.code)}
+                        onChange={e => onChange({ allowed_currencies: e.target.checked
+                          ? [...allowedWithBase, c.code]
+                          : allowedWithBase.filter(x => x !== c.code) })}
+                        className="w-4 h-4 accent-orange-500" />
+                      {c.code}{isBase ? ' (base)' : ''}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-600">Multi-country needs the SQL first (db/2026-11-01-multi-country.md)</p>
+      )}
     </div>
   )
 }

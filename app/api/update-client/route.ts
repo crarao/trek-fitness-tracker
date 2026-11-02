@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, checkCanManageClient, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
+import { COUNTRIES } from '@/lib/locale'
+import { splitE164, loginEmailFor, isPhoneLogin } from '@/lib/phone'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -39,6 +41,36 @@ export async function POST(request: Request) {
     updates.primary_coach_id = body.primary_coach_id || null
   }
 
+  // Client's own country / currency (multi-country gyms only; sent only once db/2026-11-01-multi-country.md has run).
+  // Only the client's default changes: saved memberships keep the currency they were paid in (never touched here).
+  let company: Record<string, unknown> | null = null
+  const loadCompany = async () => {
+    if (company) return company
+    const { data: target } = await supabaseAdmin.from('profiles').select('company_id').eq('id', user_id).single()
+    if (target?.company_id) {
+      const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', target.company_id).maybeSingle()
+      company = co
+    }
+    return company
+  }
+  if ('country' in body || 'currency' in body) {
+    const co = await loadCompany()
+    if (!co?.multi_country_enabled) {
+      return NextResponse.json({ error: 'Multi-country is off for this gym' }, { status: 400 })
+    }
+    if ('country' in body) {
+      if (!COUNTRIES.some(c => c.code === body.country)) return NextResponse.json({ error: 'Unknown country' }, { status: 400 })
+      updates.country = body.country
+    }
+    if ('currency' in body) {
+      const allowed = Array.isArray(co.allowed_currencies) ? (co.allowed_currencies as string[]) : []
+      if (!allowed.includes(body.currency)) {
+        return NextResponse.json({ error: `This gym doesn't take payments in ${body.currency}` }, { status: 400 })
+      }
+      updates.currency = body.currency
+    }
+  }
+
   // Update profile row
   if (Object.keys(updates).length) {
     const { error: profileError } = await supabaseAdmin
@@ -49,13 +81,17 @@ export async function POST(request: Request) {
     if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
   }
 
-  // If phone changed and account is phone-based, update auth email to match
-  if (phone && /^\d{10}$/.test(phone.trim())) {
+  // If phone changed and account is phone-based, update auth email to match.
+  // Phones are stored as +919876543210 (old rows: 9876543210); the login identifier comes from lib/phone.ts.
+  // Only Indian numbers are client logins (lib/locale.ts loginMethod), so other numbers never move a login.
+  const co = phone ? await loadCompany() : null
+  const parts = phone ? splitE164(phone, (co?.country as string | null) ?? 'IN') : null
+  if (parts && parts.country === 'IN') {
     const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(user_id)
-    if (user?.email?.endsWith('@getcoachboard.in')) {
-      const newEmail = `${phone.trim()}@getcoachboard.in`
-      if (user.email !== newEmail) {
-        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, { email: newEmail })
+    if (isPhoneLogin(user?.email)) {
+      const newEmail = loginEmailFor(parts.country, parts.local)
+      if (user!.email !== newEmail) {
+        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user!.id, { email: newEmail })
         if (authError) return NextResponse.json({ error: 'Profile saved but auth email update failed: ' + authError.message }, { status: 400 })
       }
     }

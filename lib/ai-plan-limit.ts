@@ -1,6 +1,6 @@
 // Server only (#37): how many AI plans a client has had this calendar month, against the cap in
 // lib/ai-pricing.ts. Counted from ai_usage rows (feature 'plan', client_id = the member).
-// The month is the company's local month: India time for IN, US Eastern for US.
+// The month is the company's local month: India time for IN, Dubai for AE, Eastern for US / CA.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { AI_PLANS_PER_CLIENT_PER_MONTH } from './ai-pricing'
 import type { Country } from './locale'
@@ -11,7 +11,7 @@ export type AiPlanUsage = {
   resetsOn: string // 'YYYY-MM-DD', the 1st of next month (company's local date)
 }
 
-const TIME_ZONE: Record<Country, string> = { IN: 'Asia/Kolkata', US: 'America/New_York' }
+const TIME_ZONE: Record<Country, string> = { IN: 'Asia/Kolkata', AE: 'Asia/Dubai', US: 'America/New_York', CA: 'America/Toronto' }
 
 // Minutes the time zone is ahead of UTC at a given moment ("GMT+05:30" → 330)
 function offsetMinutes(timeZone: string, at: Date): number {

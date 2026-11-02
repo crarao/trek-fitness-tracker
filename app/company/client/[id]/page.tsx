@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
-import { formatMoney, currencySymbol } from '@/lib/currency'
-import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
+import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
+import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
+import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry } from '@/lib/phone'
+import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, orderPlansByWeek, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
@@ -47,6 +49,8 @@ type ClientProfile = {
   client_type: string | null
   archived_at: string | null
   primary_coach_id?: string | null   // usual coach (#40); a soft link, never limits who can train the client
+  country?: string | null    // client's own country / default currency (multi-country gyms, db/2026-11-01-multi-country.md)
+  currency?: string | null
 }
 
 // Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
@@ -60,6 +64,7 @@ type Membership = {
   start_date: string
   end_date: string
   created_at?: string
+  currency?: string | null // the currency it was paid in; never changes once saved
 }
 
 type Plan = {
@@ -176,7 +181,9 @@ export default function ClientDetailPage() {
     full_name: '', phone: '',
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
-    client_type: 'member'
+    client_type: 'member',
+    // Multi-country: the client's country, phone code and default currency; the renewal's currency
+    country: 'IN' as Country, phone_country: 'IN' as PhoneCountry, currency: '', membership_currency: ''
   })
   const [savingEdit, setSavingEdit] = useState(false)
   const [editMessage, setEditMessage] = useState('')
@@ -416,7 +423,7 @@ export default function ClientDetailPage() {
         }
         const { data: membershipsData } = await supabase
           .from('memberships')
-          .select('id, plan_type, amount_paid, start_date, end_date, created_at')
+          .select('*') // * so memberships.currency is read once it exists
           .eq('profile_id', clientId)
           .order('start_date', { ascending: false })
           .order('created_at', { ascending: false })
@@ -905,13 +912,27 @@ const handleResetPassword = async () => {
 
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
+  // Phone as saved: +<code><digits> (lib/phone.ts). Typed with a + : read as is; otherwise with the picked / home code.
+  const phoneToSave = () => {
+    const raw = editClientForm.phone.trim()
+    if (raw.startsWith('+')) {
+      const parts = splitE164(raw, country)
+      return parts ? toE164(parts.country, parts.local) : raw
+    }
+    return clientPhoneValue(multiCountry ? editClientForm.phone_country : editClientForm.phone_country || (country ?? 'IN'), raw)
+  }
+
   const handleEditClient = async () => {
     setSavingEdit(true)
     setEditMessage('')
     const response = await fetch('/api/update-client', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: clientId, full_name: editClientForm.full_name, phone: editClientForm.phone })
+      body: JSON.stringify({
+        user_id: clientId, full_name: editClientForm.full_name, phone: phoneToSave(),
+        // Multi-country gyms only: the client's own country and default currency (old payments keep theirs)
+        ...(multiCountry ? { country: editClientForm.country, currency: editClientForm.currency || baseCurrency } : {})
+      })
     })
     const result = await response.json()
     if (result.error) {
@@ -969,7 +990,9 @@ const handleResetPassword = async () => {
       plan_type: editClientForm.plan_type,
       amount_paid: parseFloat(editClientForm.amount_paid) || 0,
       start_date: editClientForm.start_date,
-      end_date: editClientForm.end_date
+      end_date: editClientForm.end_date,
+      // Carries the latest membership's currency forward unless changed (multi-country picker)
+      ...(currencyColumns ? { currency: editClientForm.membership_currency || renewalCurrency() } : {})
     })
     if (renewError) {
       setSavingMembership(false)
@@ -993,6 +1016,7 @@ const handleResetPassword = async () => {
     const latest = memberships[0]
     if (!latest) return
     setSavingMembership(true)
+    // Never sends a currency: a saved payment's currency can't change (trigger protect_membership_currency)
     const { error: correctError } = await supabase.from('memberships').update({
       plan_type: editClientForm.plan_type,
       amount_paid: parseFloat(editClientForm.amount_paid) || 0,
@@ -1069,6 +1093,16 @@ const handleResetPassword = async () => {
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
   const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
+  const baseCurrency = normalizeCurrency(currency)
+  // Multi-country gyms (super admin switch, db/2026-11-01-multi-country.md): client country / currency fields
+  const gym = (client as { companies?: { multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null } } | null)?.companies
+  const multiCountry = !!gym?.multi_country_enabled
+  const currencyColumns = !!gym && 'allowed_currencies' in gym
+  const allowedCurrencies = gym?.allowed_currencies?.length ? gym.allowed_currencies : [baseCurrency]
+  // A renewal's currency: the latest membership's, else the client's, else the gym's base currency
+  const renewalCurrency = () => memberships[0]?.currency || client?.currency || baseCurrency
+  // Every amount in its own row's currency
+  const moneyOf = (m: Membership) => formatMoney(Number(m.amount_paid), currency === null ? null : (m.currency || currency))
 
   // ---- Share progress on WhatsApp ----
   const company = (client as { companies?: { name?: string | null; business_type?: string | null } } | null)?.companies
@@ -1229,9 +1263,16 @@ const handleResetPassword = async () => {
           <button
             onClick={() => {
               const latest = memberships[0]
+              const parts = splitE164(client?.phone, country)
+              const clientCountry = normalizeCountry(client?.country || country)
               setEditClientForm({
                 full_name: client?.full_name || '',
-                phone: client?.phone || '',
+                // The number without its code (the code is in the picker / the gym's own); unreadable values as saved
+                phone: parts ? (multiCountry || parts.country === phoneCountry(country) ? parts.local : displayPhone(client?.phone, country)) : client?.phone || '',
+                phone_country: parts?.country ?? clientCountry,
+                country: clientCountry,
+                currency: client?.currency || baseCurrency,
+                membership_currency: '',
                 plan_type: latest?.plan_type || '1 Month',
                 amount_paid: latest?.amount_paid?.toString() || '',
                 // Opens in Renew mode: dates start after the current membership (or today)
@@ -1282,7 +1323,7 @@ const handleResetPassword = async () => {
               </div>
               <p className="text-xs text-gray-400">{client?.email}</p>
               {client?.phone && (
-                <p className="text-xs text-gray-400">{client?.phone}</p>
+                <p className="text-xs text-gray-400">{displayPhone(client?.phone, country)}</p>
               )}
             </div>
           </div>
@@ -1300,10 +1341,47 @@ const handleResetPassword = async () => {
               value={editClientForm.full_name}
               onChange={e => setEditClientForm({ ...editClientForm, full_name: e.target.value })}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
-            <input type="tel" placeholder="Phone number"
-              value={editClientForm.phone}
-              onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
-              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            {multiCountry && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Country</label>
+                  <select value={editClientForm.country}
+                    onChange={e => {
+                      const c = normalizeCountry(e.target.value)
+                      const own = COUNTRIES.find(x => x.code === c)?.currency
+                      setEditClientForm({ ...editClientForm, country: c, phone_country: c, currency: own && allowedCurrencies.includes(own) ? own : editClientForm.currency })
+                    }}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                    {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Currency (new payments)</label>
+                  <select value={editClientForm.currency || baseCurrency}
+                    onChange={e => setEditClientForm({ ...editClientForm, currency: e.target.value })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                    {CURRENCIES.filter(c => allowedCurrencies.includes(c.code) || c.code === editClientForm.currency).map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                  </select>
+                </div>
+                <p className="col-span-2 -mt-1 text-xs text-gray-500">Payments already saved keep the currency they were paid in.</p>
+              </div>
+            )}
+            {multiCountry ? (
+              <div className="flex gap-2">
+                <CountryCodePicker value={editClientForm.phone_country}
+                  onChange={c => setEditClientForm({ ...editClientForm, phone_country: c })}
+                  className="rounded-xl focus:ring-orange-500 py-2.5" />
+                <input type="tel" placeholder="Phone number"
+                  value={editClientForm.phone}
+                  onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
+                  className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+            ) : (
+              <input type="tel" placeholder="Phone number"
+                value={editClientForm.phone}
+                onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
+                className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            )}
             <label className="flex items-center gap-3 cursor-pointer py-1">
               <input type="checkbox"
                 checked={editClientForm.client_type === 'pt'}
@@ -1318,7 +1396,7 @@ const handleResetPassword = async () => {
               onClick={handleEditClient}
               disabled={savingEdit}
               className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
-              {savingEdit ? 'Saving...' : 'Save Name / Phone'}
+              {savingEdit ? 'Saving...' : multiCountry ? 'Save Details' : 'Save Name / Phone'}
             </button>
 
             {/* Membership */}
@@ -1357,10 +1435,29 @@ const handleResetPassword = async () => {
                   <option>6 Months</option>
                   <option>1 Year</option>
                 </select>
-                <input type="number" placeholder={currency ? `Amount paid (${currencySymbol(currency)})` : 'Amount paid'}
-                  value={editClientForm.amount_paid}
-                  onChange={e => setEditClientForm({ ...editClientForm, amount_paid: e.target.value })}
-                  className="bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                {(() => {
+                  // Renew: the latest payment's currency carried forward (picker in multi-country gyms).
+                  // Correct: always the current entry's own currency, never changed.
+                  const shown = membershipMode === 'correct' && memberships[0]
+                    ? (memberships[0].currency || currency)
+                    : (editClientForm.membership_currency || renewalCurrency())
+                  const picker = multiCountry && (membershipMode === 'renew' || !memberships[0])
+                  return (
+                    <div className="flex gap-2 min-w-0">
+                      {picker && (
+                        <select aria-label="Currency" value={shown || baseCurrency}
+                          onChange={e => setEditClientForm({ ...editClientForm, membership_currency: e.target.value })}
+                          className="shrink-0 bg-gray-800 text-white rounded-xl px-2 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                          {CURRENCIES.filter(c => allowedCurrencies.includes(c.code) || c.code === shown).map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                        </select>
+                      )}
+                      <input type="number" placeholder={shown ? `Amount paid (${currencySymbol(shown)})` : 'Amount paid'}
+                        value={editClientForm.amount_paid}
+                        onChange={e => setEditClientForm({ ...editClientForm, amount_paid: e.target.value })}
+                        className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600" />
+                    </div>
+                  )
+                })()}
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
                   <input type="date"
@@ -1459,7 +1556,7 @@ const handleResetPassword = async () => {
               <p className="text-2xl font-bold text-orange-500">{memberships[0]?.plan_type || '—'}</p>
               <p className="text-xs text-gray-500 mt-1">Current Plan</p>
               {memberships[0] && (
-                <p className="text-xs text-gray-600 mt-1">{formatMoney(Number(memberships[0].amount_paid), currency)}</p>
+                <p className="text-xs text-gray-600 mt-1">{moneyOf(memberships[0])}</p>
               )}
               {memberships[0] && (
                 <p className="text-xs text-gray-600 mt-1">
@@ -2201,7 +2298,7 @@ const handleResetPassword = async () => {
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-bold ${color}`}>{Math.abs(days)} {days < 0 ? 'days overdue' : 'days left'}</p>
-                      {!isCoach && <p className="text-xs text-gray-500">{formatMoney(Number(m.amount_paid), currency)}</p>}
+                      {!isCoach && <p className="text-xs text-gray-500">{moneyOf(m)}</p>}
                     </div>
                   </div>
                   <div className="w-full bg-gray-700 rounded-full h-1.5">
@@ -2216,7 +2313,7 @@ const handleResetPassword = async () => {
                 {memberships.slice(1).map(m => (
                   <div key={m.id} className="flex justify-between items-center text-xs text-gray-500">
                     <span>{m.plan_type} · {formatDate(m.start_date, country, 'monthYear')} – {formatDate(m.end_date, country, 'monthYear')}</span>
-                    <span>{formatMoney(Number(m.amount_paid), currency)}</span>
+                    <span>{moneyOf(m)}</span>
                   </div>
                 ))}
               </div>
@@ -2594,7 +2691,7 @@ const handleResetPassword = async () => {
           {/* Contact */}
           <div className="border-t border-gray-800 pt-4">
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
-            <p className="text-sm text-white">{client?.phone || '—'}</p>
+            <p className="text-sm text-white">{displayPhone(client?.phone, country) || '—'}</p>
             <p className="text-sm text-gray-400">{client?.email}</p>
           </div>
         </>

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
+import { COUNTRIES } from '@/lib/locale'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     }
   )
 
-const { email, password, full_name, company_id, role, phone, trainer_name, diet_plan, client_type, primary_coach_id } = await request.json()
+const { email, password, full_name, company_id, role, phone, trainer_name, diet_plan, client_type, primary_coach_id, country, currency } = await request.json()
 
   // Super admin can create any login. Gym staff can only add clients and coaches to their own gym.
   // Coaches don't count toward client_limit (that count filters role = 'client').
@@ -28,9 +29,26 @@ const { email, password, full_name, company_id, role, phone, trainer_name, diet_
   // Individual coach companies (companies.company_type = 'coach') have no coach or partner logins, for super admin too.
   // select('*') so this still works before the company_type column exists (then every company is a gym).
   let coachCompany = false
+  let companyRow: Record<string, unknown> | null = null
   if (company_id) {
     const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', company_id).maybeSingle()
     coachCompany = isCoachCompany(co)
+    companyRow = co
+  }
+
+  // Client's own country / currency (multi-country gyms, db/2026-11-01-multi-country.md). Sent only once that SQL has run.
+  // The currency must be one the gym allows (companies.allowed_currencies, set by super admin).
+  const clientPlace: { country?: string; currency?: string } = {}
+  if (role === 'client' && (country || currency)) {
+    if (country && !COUNTRIES.some(c => c.code === country)) {
+      return NextResponse.json({ error: 'Unknown country' }, { status: 400 })
+    }
+    const allowed = Array.isArray(companyRow?.allowed_currencies) ? (companyRow!.allowed_currencies as string[]) : null
+    if (currency && (!allowed || !allowed.includes(currency))) {
+      return NextResponse.json({ error: `This gym doesn't take payments in ${currency}` }, { status: 400 })
+    }
+    if (country) clientPlace.country = country
+    if (currency) clientPlace.currency = currency
   }
   if (coachCompany && (role === 'coach' || role === 'partner')) {
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
@@ -90,6 +108,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   trainer_name: trainer_name || null,
   diet_plan: diet_plan || null,
   client_type: client_type || 'member',
+  ...clientPlace,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
 })
 
