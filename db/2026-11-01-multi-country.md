@@ -1,4 +1,4 @@
-# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 1 NOT RUN YET
+# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 1a + 1b NOT RUN YET
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
@@ -7,14 +7,10 @@
 
 **Anand runs this; Claude does not.** Additive only: no `DROP`, no `DELETE`, no `TRUNCATE` (CLAUDE.md Rule #1), except the one country-rule drop in Step 0b, approved and run by Anand 2 Nov.
 
-**Order:**
-1. **Deploy the app change first** (branch `multi-country`). The new code reads phones in both formats
-   (`9876543210` and `+919876543210`) and only sends the new columns once they exist, so it is safe before the SQL.
-   The old code is *not* safe after the SQL: its WhatsApp Remind / Follow Up buttons need exactly 10 digits.
-2. Step 0 (check the live trigger) → Step 1 (the migration, one transaction) → Step 2 (phones left for review) → Step 3 (checks).
-
-Run Step 1 **once**: `add constraint` and `create trigger` stop with "already exists" on a second run
-(the whole transaction then rolls back, nothing half-done).
+**Order (revised 2 Nov, to test on the preview first):**
+1. Step 0 checks → Step 0b (done 2 Nov).
+2. **Step 1a** (safe with the old app live) → test everything on the preview.
+3. Merge `multi-country` into `main` (goes live) → **Step 1b** (phones) → Step 2 (phones left for review) → Step 3 (checks).
 
 What it does (decisions D1–D5 in `multi-country-plan.md`):
 - **companies:** `country` = home country, `currency` = base currency (both reused, nothing to sync).
@@ -85,7 +81,131 @@ and only if no company uses AE or CA.
 
 ---
 
-## Step 1 — migration (one transaction)
+## Step 1 — split in two (2 Nov), so the preview can be tested before production
+
+The preview (branch `multi-country`) and the live app (`main`) use the **same** Mumbai database. So Step 1 is in two parts:
+
+- **Step 1a — safe while the old code is live.** New columns, checks and triggers only; no phone changes.
+  After it, the preview shows all the multi-country screens. The live app keeps working: it never reads the new columns,
+  and a payment it saves without a currency gets the gym's own currency from a trigger (no `INR` default, which would
+  have been wrong for US gyms).
+  One thing to avoid until the merge: don't change a company's **Country** in the *live* super admin (getcoachboard.com):
+  the old screen sets the currency without the new allowed list, and the save is refused. Use the preview's super admin.
+- **Step 1b — only after `multi-country` is merged and live.** Client phones to `+91…` / `+1…` (the old app's
+  WhatsApp Remind / Follow Up needs exactly 10 digits, so this waits), and fills country / currency for clients added in between.
+
+Each part runs once. A second run stops with "already exists" and rolls back, nothing half-done.
+
+### Step 1a — run now (one transaction)
+
+```sql
+begin;
+
+-- 1. companies (D1: country/currency reused as home country / base currency)
+alter table public.companies
+  add column if not exists multi_country_enabled boolean not null default false,
+  add column if not exists allowed_currencies text[] not null default array['INR'];
+update public.companies set country = coalesce(country, 'IN'), currency = coalesce(currency, 'INR');
+update public.companies set allowed_currencies = array[currency]
+  where not (currency = any(allowed_currencies));
+alter table public.companies
+  add constraint companies_base_currency_allowed check (currency = any(allowed_currencies));
+
+-- 2. clients: own country and currency (filled from their gym). Phones are NOT changed here (Step 1b).
+alter table public.profiles
+  add column if not exists country text,
+  add column if not exists currency text;
+update public.profiles p set
+  country  = coalesce(p.country,  c.country,  'IN'),
+  currency = coalesce(p.currency, c.currency, 'INR')
+from public.companies c
+where c.id = p.company_id and p.role = 'client';
+
+-- 3. memberships (D2): currency from the gym; a payment saved without one gets the gym's currency
+alter table public.memberships add column if not exists currency text;
+update public.memberships m set currency = coalesce(c.currency, 'INR')
+  from public.companies c where c.id = m.company_id and m.currency is null;
+update public.memberships set currency = 'INR' where currency is null;
+
+create or replace function public.fill_membership_currency() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.currency is null then
+    select coalesce(c.currency, 'INR') into new.currency from public.companies c where c.id = new.company_id;
+    new.currency := coalesce(new.currency, 'INR');
+  end if;
+  return new;
+end $$;
+create trigger fill_membership_currency before insert on public.memberships
+  for each row execute function public.fill_membership_currency();
+alter table public.memberships alter column currency set not null;
+
+-- 4. a saved payment's currency never changes
+create or replace function public.protect_membership_currency() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if new.currency is distinct from old.currency then
+    raise exception 'A saved payment''s currency cannot be changed';
+  end if;
+  return new;
+end $$;
+create trigger protect_membership_currency before update on public.memberships
+  for each row execute function public.protect_membership_currency();
+
+-- Trigger functions aren't callable directly (same as #50 Step 2)
+revoke execute on function public.fill_membership_currency() from public, anon, authenticated;
+revoke execute on function public.protect_membership_currency() from public, anon, authenticated;
+
+-- 5. clients may not change their own country / currency.
+--    Latest version (db/2026-10-30-coach-view.md Step 4, matched live 2 Nov) with every check kept.
+create or replace function public.protect_profile_columns()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then return new; end if;
+  if public.get_my_role() = 'super_admin' then return new; end if;
+  if new.role is distinct from old.role
+     or new.company_id is distinct from old.company_id then
+    raise exception 'Not allowed to change role or company';
+  end if;
+  if public.get_my_role() in ('client', 'coach')
+     and (new.client_type is distinct from old.client_type
+          or new.archived_at is distinct from old.archived_at
+          or new.primary_coach_id is distinct from old.primary_coach_id
+          or new.country is distinct from old.country
+          or new.currency is distinct from old.currency) then
+    raise exception 'Not allowed to change membership type, archive status, primary coach, country or currency';
+  end if;
+  return new;
+end $$;
+
+commit;
+```
+
+### Step 1b — only after `multi-country` is merged and live on getcoachboard.com
+
+```sql
+begin;
+-- Clients added by the old app in between: fill country / currency from their gym
+update public.profiles p set
+  country  = coalesce(p.country,  c.country,  'IN'),
+  currency = coalesce(p.currency, c.currency, 'INR')
+from public.companies c
+where c.id = p.company_id and p.role = 'client' and (p.country is null or p.currency is null);
+
+-- Client phones that are exactly 10 digits → international format (US gyms +1, everyone else +91)
+update public.profiles p set
+  phone = '+' || case when c.country = 'US' then '1' else '91' end || p.phone
+from public.companies c
+where c.id = p.company_id and p.role = 'client' and p.phone ~ '^\d{10}$';
+commit;
+```
+
+---
+
+### Original single Step 1 (replaced by 1a + 1b above — do not run)
+
+Kept for the record. Differences: 1a has no `default 'INR'` on `memberships.currency` (the fill trigger takes the gym's
+currency instead), and the phone change moved to 1b.
 
 ```sql
 begin;
@@ -202,9 +322,9 @@ select case when phone ~ '^\+91\d{10}$' then '+91 + 10' when phone ~ '^\+1\d{10}
             when phone is null or phone = '' then 'none' else 'other' end as format, count(*)
 from public.profiles where role = 'client' group by 1 order by 1;
 
--- e) Triggers: expect protect_membership_currency on memberships (and protect_profile_columns on profiles)
+-- e) Triggers: expect fill_membership_currency + protect_membership_currency on memberships, protect_profile_columns on profiles
 select tgname, tgrelid::regclass from pg_trigger
-where tgname in ('protect_membership_currency', 'protect_profile_columns');
+where tgname in ('fill_membership_currency', 'protect_membership_currency', 'protect_profile_columns');
 
 -- f) The currency lock works (rolled back, changes nothing): expect ERROR "A saved payment's currency cannot be changed"
 begin;
@@ -228,7 +348,7 @@ update public.companies set multi_country_enabled = false;
 update public.profiles set phone = substring(phone from 4) where role = 'client' and phone ~ '^\+91\d{10}$';
 update public.profiles set phone = substring(phone from 3) where role = 'client' and phone ~ '^\+1\d{10}$';
 
--- 3. Currency lock off (function becomes a no-op; the trigger stays)
+-- 3. Currency lock off (functions become no-ops; the triggers stay). fill_membership_currency can stay as it is.
 create or replace function public.protect_membership_currency() returns trigger
 language plpgsql set search_path = public as $$
 begin

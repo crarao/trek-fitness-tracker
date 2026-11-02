@@ -82,7 +82,7 @@ memberships (one row per plan period, multiple per profile)
   ├── company_id → companies
   ├── plan_type (1 Month | 3 Months | 6 Months | 1 Year)
   ├── amount_paid
-  ├── currency (not null, default INR) ← the currency it was paid in; NEVER changes once saved (trigger protect_membership_currency)
+  ├── currency (not null) ← the currency it was paid in; filled from the gym's currency if not sent (trigger fill_membership_currency); NEVER changes once saved (trigger protect_membership_currency)
   ├── start_date, end_date
   └── created_at
 
