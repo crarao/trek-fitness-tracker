@@ -1,4 +1,4 @@
-# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 1a + 1b NOT RUN YET
+# 1 Nov 2026 — Multi-country clients & per-currency income — Step 0 + 0b run 2 Nov; Step 0, 0b, 1a run 2 Nov; Step 1b NOT RUN YET (after merge)
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
@@ -96,7 +96,11 @@ The preview (branch `multi-country`) and the live app (`main`) use the **same** 
 
 Each part runs once. A second run stops with "already exists" and rolls back, nothing half-done.
 
-### Step 1a — run now (one transaction)
+### Step 1a — ✅ RUN BY ANAND 2 NOV (Mumbai) — do not run again
+
+Check after: `companies.allowed_currencies` and `memberships.currency` exist, triggers `fill_membership_currency` +
+`protect_membership_currency` present (true / true / 2). The first attempt showed "Failed to fetch" (browser lost the
+connection; the check showed nothing had run), the second went through.
 
 ```sql
 begin;
