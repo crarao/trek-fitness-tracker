@@ -15,6 +15,7 @@ import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
+import { memberWord, isDojo } from '@/lib/labels'
 
 type Membership = {
   id: string
@@ -106,6 +107,9 @@ export default function CompanyAdminPage() {
   const [companyName, setCompanyName] = useState('')
   // Individual coach company (company_type = 'coach'): no coaches, coach assignment or "logged by" names
   const [coachCompany, setCoachCompany] = useState(false)
+  // companies.business_type (super admin): martial_arts = a dojo, "Students" instead of "Members" (lib/labels.ts)
+  const [businessType, setBusinessType] = useState<string | null>(null)
+  const mw = memberWord(businessType)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -222,12 +226,14 @@ export default function CompanyAdminPage() {
       client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
       currency: string | null; country: string | null; client_module_enabled: boolean | null
       company_type?: string | null
+      business_type?: string | null
       multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null // db/2026-11-01-multi-country.md
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
     setCoachCompany(isCoachCompany(company))
+    setBusinessType(company?.business_type ?? null)
     setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
@@ -589,7 +595,7 @@ export default function CompanyAdminPage() {
     const place = newClientPlace()
     const login = newClientLogin()
     if (login.kind === 'bad-email') {
-      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the member without a login')
+      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the ' + mw.one.toLowerCase() + ' without a login')
       setSaving(false)
       return
     }
@@ -638,7 +644,7 @@ export default function CompanyAdminPage() {
       if (mError) console.error('Membership insert error:', mError)
     }
 
-    setMessage('Member created successfully!')
+    setMessage(`${mw.one} created successfully!`)
     if (fromLead) {
       // Mark the enquiry Joined; the member is kept even if this fails
       const { data: updated, error: leadError } = await supabase
@@ -647,11 +653,11 @@ export default function CompanyAdminPage() {
         .eq('id', fromLead.id)
         .select('id')
       if (leadError) console.error('Lead update error:', leadError)
-      if (leadError || !updated?.length) showToast("Member added, but the enquiry wasn't updated", 'error')
-      else { showToast('Member added ✓ · enquiry marked Joined'); fetchLeadStats(companyId!) }
+      if (leadError || !updated?.length) showToast(`${mw.one} added, but the enquiry wasn't updated`, 'error')
+      else { showToast(`${mw.one} added ✓ · enquiry marked Joined`); fetchLeadStats(companyId!) }
       setFromLead(null)
     } else {
-      showToast('Member added ✓')
+      showToast(`${mw.one} added ✓`)
     }
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
@@ -914,7 +920,7 @@ export default function CompanyAdminPage() {
             <button
               onClick={() => { setShowForm(!showForm); setFromLead(null) }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
-              + Add Member
+              + Add {mw.one}
             </button>
           </div>
         </div>
@@ -1007,7 +1013,7 @@ export default function CompanyAdminPage() {
       {/* Stat cards */}
       <div className="px-4 sm:px-8 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Members</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
           <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
@@ -1663,7 +1669,7 @@ export default function CompanyAdminPage() {
               count: activeMemberships.filter(m => m.plan_type === plan).length
             })).filter(p => p.count > 0)
 
-            if (total === 0) return <p className="text-xs text-gray-600">No active members yet.</p>
+            if (total === 0) return <p className="text-xs text-gray-600">No active {mw.many.toLowerCase()} yet.</p>
 
             return (
               <div className="space-y-2.5">
@@ -1695,7 +1701,7 @@ export default function CompanyAdminPage() {
           {/* Table toolbar */}
           <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-3">
-              <h2 className="font-semibold text-white text-sm sm:text-base">Members — {companyName}</h2>
+              <h2 className="font-semibold text-white text-sm sm:text-base">{mw.many} — {companyName}</h2>
               <div className="flex gap-1 flex-wrap">
                 {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
                   <button key={f} onClick={() => setActiveFilter(f)}
@@ -1726,7 +1732,7 @@ export default function CompanyAdminPage() {
               </svg>
               <input
                 type="text"
-                placeholder="Search by name or phone..."
+                placeholder={isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
@@ -1744,7 +1750,7 @@ export default function CompanyAdminPage() {
 
           {loading ? (
             <div className="divide-y divide-gray-800" aria-busy="true">
-              <span className="sr-only" role="status">Loading members…</span>
+              <span className="sr-only" role="status">Loading {mw.many.toLowerCase()}…</span>
               {[0, 1, 2, 3, 4].map(i => (
                 <div key={i} className="px-4 sm:px-6 py-4 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-gray-800 animate-pulse shrink-0" />
@@ -1759,19 +1765,19 @@ export default function CompanyAdminPage() {
           ) : filteredClients.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
               {activeFilter === 'archived'
-                ? 'No archived members.'
+                ? `No archived ${mw.many.toLowerCase()}.`
                 : clients.length === 0
-                ? 'No members yet. Add your first one!'
+                ? `No ${mw.many.toLowerCase()} yet. Add your first one!`
                 : searchQuery.trim()
-                ? `No members match "${searchQuery}".`
-                : `No ${activeFilter} members.`}
+                ? `No ${mw.many.toLowerCase()} match "${searchQuery}".`
+                : `No ${activeFilter} ${mw.many.toLowerCase()}.`}
             </div>
           ) : (
             <div className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
-                  <th className="px-4 sm:px-6 py-3 text-left font-medium">Member</th>
+                  <th className="px-4 sm:px-6 py-3 text-left font-medium">{mw.one}</th>
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
                   <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
@@ -1935,7 +1941,7 @@ export default function CompanyAdminPage() {
           <div className="px-4 py-6 max-w-lg mx-auto">
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-white">New Member</h3>
+                <h3 className="font-semibold text-white">New {mw.one}</h3>
                 <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
               </div>
@@ -2082,7 +2088,7 @@ export default function CompanyAdminPage() {
               <div className="flex gap-2 mt-4">
                 <button onClick={handleCreateClient} disabled={saving}
                   className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
-                  {saving ? 'Creating...' : 'Create Member'}
+                  {saving ? 'Creating...' : `Create ${mw.one}`}
                 </button>
                 <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">

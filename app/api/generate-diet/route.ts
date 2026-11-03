@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       ? 'Use everyday foods easily found in US grocery stores. Use US units (oz, cups) alongside grams where helpful.'
       : 'Use simple Indian home-style foods (dal, roti, rice, sabzi, curd, paneer, eggs, seasonal fruit, etc.) that work across Indian regions. Use household measures (katori, roti count, cup) alongside grams.'
 
-    const prompt = `You are a sports nutrition coach writing a simple, practical one-day diet chart for a ${company?.business_type || 'gym'} client.
+    const prompt = `You are a sports nutrition coach writing a simple, practical one-day diet chart for a ${(company?.business_type || 'gym').replace(/_/g, ' ')} client.
 
 CLIENT PROFILE:
 Goal: ${p.goal || 'general fitness'}

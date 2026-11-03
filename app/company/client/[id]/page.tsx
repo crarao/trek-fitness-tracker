@@ -18,6 +18,7 @@ import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, pl
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
+import { memberWord, isDojo } from '@/lib/labels'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -1004,7 +1005,7 @@ const handleResetPassword = async () => {
     await supabase.from('profiles').update({ client_type: editClientForm.client_type }).eq('id', clientId)
     setSavingEdit(false)
     setEditMessage('Saved! ✓')
-    showToast('Member updated ✓')
+    showToast(`${memberWord((client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type).one} updated ✓`)
     loadData(['client'])
     setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }

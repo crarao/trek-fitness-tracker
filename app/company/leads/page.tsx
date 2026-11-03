@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { memberWord } from '@/lib/labels'
 import { type Country, normalizeCountry, formatDate, localDateIso, phonePlaceholder, dialCode } from '@/lib/locale'
 import {
   type Lead, followUpState, isOpen, isGymType, SOURCES, INTERESTS, LOST_REASONS,
@@ -350,7 +351,7 @@ export default function LeadsPage() {
                   {isOpen(editing) && (
                     <button type="button" data-nav onClick={() => router.push(`/company?fromLead=${editing.id}`)}
                       className="text-xs px-3 py-1.5 rounded-lg border border-green-700 text-green-400 hover:bg-green-900/30 transition font-medium">
-                      Convert to member
+                      Convert to {memberWord(businessType).one.toLowerCase()}
                     </button>
                   )}
                 </div>
@@ -408,7 +409,7 @@ export default function LeadsPage() {
                   onChange={e => setForm({ ...form, phone: e.target.value })} className={INPUT} />
                 {dupMember && (
                   <p className="text-xs text-amber-400 mt-1.5">
-                    Already a member: {dupMember.full_name}{' '}
+                    Already a {memberWord(businessType).one.toLowerCase()}: {dupMember.full_name}{' '}
                     <button type="button" data-nav onClick={() => router.push(`/company/client/${dupMember.id}`)}
                       className="underline text-amber-300 hover:text-amber-200">Open</button>
                   </p>

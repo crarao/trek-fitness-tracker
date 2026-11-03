@@ -15,7 +15,7 @@ const BY_WORDS: [RegExp, number][] = [
 
 // When the session has no day focus (logged from the normal Log form)
 const BY_BUSINESS: Record<string, number> = {
-  gym: 5, trek: 6, cycling: 7, pilates: 3.5, yoga: 3, general: 4.5,
+  gym: 5, trek: 6, cycling: 7, pilates: 3.5, yoga: 3, general: 4.5, martial_arts: 6,
 }
 
 export function effortMet(label: string | null | undefined, businessType: string | null | undefined): number {

@@ -24,3 +24,14 @@ export function businessTypeLabel(value: string | null | undefined): string {
   const t = businessType(value)
   return t === 'martial_arts' ? 'Martial arts' : BUSINESS_TYPES.find(b => b.value === t)!.label
 }
+
+// A dojo (martial arts school): Students, parent details, fee reminders to the parent
+export function isDojo(value: string | null | undefined): boolean {
+  return value === 'martial_arts'
+}
+
+// The visible word for a client on staff screens. Only words people read: never rename columns, routes, types or variables.
+// New UI must use this instead of hard-coding "Member".
+export function memberWord(value: string | null | undefined): { one: string; many: string } {
+  return isDojo(value) ? { one: 'Student', many: 'Students' } : { one: 'Member', many: 'Members' }
+}
