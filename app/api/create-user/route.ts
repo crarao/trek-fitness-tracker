@@ -81,6 +81,25 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     guardian.guardian_phone = parentPhone
     guardian.guardian_relation = relation || null
   }
+  // Short profile entered on the Add form (dojos: age, gender, medical conditions on one screen). Clients only, only when sent.
+  const clientBasics: { age?: number | null; gender?: string | null; medical_conditions?: string | null } = {}
+  if (role === 'client') {
+    if ('age' in body) {
+      const age = body.age === null || body.age === '' ? null : Number(body.age)
+      if (age !== null && (!Number.isInteger(age) || age < 1 || age > 120)) {
+        return NextResponse.json({ error: 'Enter an age between 1 and 120' }, { status: 400 })
+      }
+      clientBasics.age = age
+    }
+    if ('gender' in body) {
+      const gender = typeof body.gender === 'string' ? body.gender.trim() : ''
+      if (gender && !['Male', 'Female', 'Other'].includes(gender)) return NextResponse.json({ error: 'Unknown gender' }, { status: 400 })
+      clientBasics.gender = gender || null
+    }
+    if ('medical_conditions' in body) {
+      clientBasics.medical_conditions = typeof body.medical_conditions === 'string' && body.medical_conditions.trim() ? body.medical_conditions.trim() : null
+    }
+  }
   if (coachCompany && (role === 'coach' || role === 'partner')) {
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
   }
@@ -142,6 +161,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   client_type: role === 'client' && isDojo(companyRow?.business_type as string | null) ? 'pt' : client_type || 'member',
   ...clientPlace,
   ...guardian,
+  ...clientBasics,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
 })
 

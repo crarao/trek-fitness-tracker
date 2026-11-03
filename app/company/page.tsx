@@ -148,6 +148,8 @@ export default function CompanyAdminPage() {
     country: '', phone_country: '', currency: '',
     // Child with a parent (guardian columns only). child null = the default: ticked for a dojo (martial arts), else not
     child: null as boolean | null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
+    // Dojo: the short profile on the same screen (age, gender, medical conditions)
+    age: '', gender: '', medical_conditions: '',
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -647,6 +649,12 @@ export default function CompanyAdminPage() {
         phone: clientPhoneValue(place.phoneCountry, newClient.phone),
         trainer_name: newClient.trainer_name,
         diet_plan: dojo ? '' : newClient.diet_plan,
+        // Dojo: age, gender and medical conditions are entered here (one screen), not later on the Profile tab
+        ...(dojo ? {
+          age: newClient.age ? parseInt(newClient.age) : null,
+          gender: newClient.gender || null,
+          medical_conditions: newClient.medical_conditions.trim() || null,
+        } : {}),
         client_type: dojo ? 'pt' : newClient.client_type,
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
         // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
@@ -702,6 +710,7 @@ export default function CompanyAdminPage() {
       client_type: 'member', primary_coach_id: '',
       country: '', phone_country: '', currency: '',
       child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
+      age: '', gender: '', medical_conditions: '',
     })
     setShowForm(false)
     setSaving(false)
@@ -1321,7 +1330,7 @@ export default function CompanyAdminPage() {
                       <p className="text-[11px] text-gray-500 mb-1.5">Workout today, not done yet</p>
                       <div className="flex flex-wrap gap-2">
                         {dueToday.map(({ c, label }) => (
-                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=plans&day=today')}
+                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, dojo ? '?tab=sessions&log=today' : '?tab=plans&day=today')}
                             title={label}
                             className="text-xs px-2.5 py-1.5 rounded-lg border border-green-800 bg-gray-800 text-gray-200 hover:border-green-500">
                             {c.full_name.split(' ')[0]} <span className="text-green-300">Mark today</span>
@@ -1334,7 +1343,9 @@ export default function CompanyAdminPage() {
 
                 {/* THIS WEEK — each client's plan week (7 days from its start) */}
                 <div className="mt-3 border-t border-gray-800 pt-3">
-                  <p className="text-[11px] text-gray-500 uppercase tracking-wider">This week <span className="normal-case text-gray-600">(each client&apos;s plan week)</span></p>
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wider">This week <span className="normal-case text-gray-600">{dojo ? '(since Monday)' : <>(each client&apos;s plan week)</>}</span></p>
+                  {/* Dojo: no plans (attendance replaces them later), so no plan progress, missed days or "no plan" list */}
+                  {!dojo && <>
                   {weekTotals.planned === 0 ? (
                     <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT client'} has a plan for this week yet.</p>
                   ) : (
@@ -1377,6 +1388,8 @@ export default function CompanyAdminPage() {
                       </div>
                     </div>
                   )}
+                  </>}
+                  {dojo && byLogger.length === 0 && <p className="text-sm text-gray-400 mt-1">No sessions logged yet this week.</p>}
                   {!coachCompany && byLogger.length > 0 && (
                     <div className="mt-3">
                       <p className="text-[11px] text-gray-500 mb-1.5">Logged by · today / since Mon</p>
@@ -2077,6 +2090,28 @@ export default function CompanyAdminPage() {
                     </div>
                     <p className="col-span-2 -mt-1 text-xs text-gray-500">Fee reminders go to the parent on WhatsApp.</p>
                   </div>
+                )}
+                {dojo && (
+                  // Dojo: the whole student profile on one screen (Age, Gender, Medical); editable later on the Profile tab
+                  <>
+                    <input type="number" placeholder="Age" min={1} max={120} aria-label="Age"
+                      value={newClient.age}
+                      onChange={e => setNewClient({ ...newClient, age: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    <select value={newClient.gender} aria-label="Gender"
+                      onChange={e => setNewClient({ ...newClient, gender: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      <option value="">Gender</option>
+                      <option>Male</option>
+                      <option>Female</option>
+                      <option>Other</option>
+                    </select>
+                    <textarea placeholder="Medical conditions / injuries (optional)"
+                      value={newClient.medical_conditions}
+                      onChange={e => setNewClient({ ...newClient, medical_conditions: e.target.value })}
+                      rows={2}
+                      className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
+                  </>
                 )}
                 {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
                   <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"

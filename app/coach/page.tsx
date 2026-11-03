@@ -88,11 +88,13 @@ export default function CoachHomePage() {
     router.push('/login')
   }
 
-  // Plans tab, today's day open (the client page reads tab and day)
+  // Plans tab, today's day open (the client page reads tab and day). Dojo: no plans, so the Sessions tab with
+  // the Log session form open (stop-gap attendance until Build 3)
   const openClient = (id: string) => {
     if (openingId) return
     setOpeningId(id)
-    router.push(`/company/client/${id}?tab=plans&day=today`)
+    const dojoHome = isDojo((company as { business_type?: string | null } | null)?.business_type)
+    router.push(dojoHome ? `/company/client/${id}?tab=sessions&log=today` : `/company/client/${id}?tab=plans&day=today`)
     setTimeout(() => setOpeningId(prev => (prev === id ? null : prev)), 10000) // safety reset
   }
 
@@ -118,14 +120,16 @@ export default function CoachHomePage() {
   const bt = (company as { business_type?: string | null } | null)?.business_type
   const sw = staffWord(bt)
   const pw = ptWord(bt)
-  const who = isDojo(bt) ? 'students' : 'clients'
+  const dojo = isDojo(bt)
+  const who = dojo ? 'students' : 'clients'
   const coaches = staff.filter(s => s.role === 'coach')
-  const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today))
+  const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today, sw.one))
   const q = search.trim().toLowerCase()
   const shown = rows
     .filter(r => filter === 'all' || (filter === 'mine' ? r.isMine : !r.doneToday))
     .filter(r => !q || r.client.full_name.toLowerCase().includes(q) || (r.client.phone || '').includes(q))
-  const noPlansThisWeek = clients.length > 0 && rows.every(r => r.todayDay === 'no-plan')
+  // Dojo: no plans (attendance replaces them later), so never the "no plans" note
+  const noPlansThisWeek = !dojo && clients.length > 0 && rows.every(r => r.todayDay === 'no-plan')
   const counts: Record<Filter, number> = {
     all: rows.length,
     mine: rows.filter(r => r.isMine).length,
@@ -143,6 +147,7 @@ export default function CoachHomePage() {
   }
 
   const workoutText = (r: TodayRow) => {
+    if (dojo) return null
     if (r.todayDay === 'no-plan') return <span className="text-gray-500">No plan this week</span>
     if (r.todayDay === 'rest') return <span className="text-gray-500">Rest day</span>
     return <span className="text-gray-300">{r.todayDay.label}{r.workoutTime ? ` · ${r.workoutTime}` : ''}</span>
@@ -182,7 +187,7 @@ export default function CoachHomePage() {
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today <span className="normal-case text-gray-600">({pw})</span></h2>
           <p className="text-xs text-gray-500">
-            <span className="text-green-400 font-semibold">{rows.filter(r => r.doneToday).length}</span> trained today
+            <span className="text-green-400 font-semibold">{rows.filter(r => r.doneToday).length}</span> {dojo ? 'came today' : 'trained today'}
           </p>
         </div>
 
@@ -194,7 +199,7 @@ export default function CoachHomePage() {
           <>
             {/* Chips + search */}
             <div className="flex flex-wrap gap-2">
-              {([['all', `All ${pw}`], ['mine', `My ${who}`], ['not-yet', 'Not trained yet today']] as const).map(([key, label]) => (
+              {([['all', `All ${pw}`], ['mine', `My ${who}`], ['not-yet', dojo ? 'Not in yet today' : 'Not trained yet today']] as const).map(([key, label]) => (
                 <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
                   className={`text-xs px-3 py-1.5 rounded-full border transition ${filter === key ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                   {label} <span className={filter === key ? 'text-orange-100' : 'text-gray-500'}>{counts[key]}</span>
@@ -230,14 +235,14 @@ export default function CoachHomePage() {
                             <span className="text-xs text-orange-400">Opening…</span>
                           ) : r.doneToday ? (
                             <span className="text-xs text-green-400 font-medium">
-                              ✓ Done · by {r.doneToday.by}{r.doneToday.exercises ? ` · ${r.doneToday.exercises}` : ''}
+                              ✓ {dojo ? 'Came today' : 'Done'} · by {r.doneToday.by}{r.doneToday.exercises ? ` · ${r.doneToday.exercises}` : ''}
                             </span>
                           ) : (
-                            <span className="text-xs text-gray-500">Not yet</span>
+                            <span className="text-xs text-gray-500">{dojo ? 'Not yet · Log session' : 'Not yet'}</span>
                           )}
                         </div>
                       </div>
-                      <p className="text-xs mt-1.5 truncate">{workoutText(r)}</p>
+                      {!dojo && <p className="text-xs mt-1.5 truncate">{workoutText(r)}</p>}
                       {membershipTag(r.client.id) && <div className="mt-2">{membershipTag(r.client.id)}</div>}
                     </button>
                   </li>

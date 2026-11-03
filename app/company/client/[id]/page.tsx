@@ -126,6 +126,8 @@ export default function ClientDetailPage() {
   const searchParams = useSearchParams()
   const linkTab = searchParams.get('tab')
   const linkDay = searchParams.get('day')
+  // "?tab=sessions&log=today" (dojo sensei home): Sessions tab with the Log session form open
+  const linkLog = searchParams.get('log')
   const linkApplied = useRef(false)
 
   const [client, setClient] = useState<ClientProfile | null>(null)
@@ -224,6 +226,8 @@ export default function ClientDetailPage() {
   // Ticks per "planId:Day", kept on this device under "coach-ticks:<planId>:<Day>" so they never mix
   // with the client's own ticks ("cb-ticks") on a shared phone.
   const COACH_TICKS = 'coach-ticks:'
+  // Dojo "Log session" form on the Sessions tab (no plan): its key in markKey
+  const DOJO_LOG_KEY = 'dojo-log'
   const [coachTicks, setCoachTicks] = useState<Record<string, number[]>>(() => {
     if (typeof window === 'undefined') return {}
     const out: Record<string, number[]> = {}
@@ -345,6 +349,12 @@ export default function ClientDetailPage() {
   useEffect(() => {
     if (linkApplied.current || loading || !client) return
     linkApplied.current = true
+    // Dojo: no Plans tab (attendance replaces plans later): plan links open Sessions, "today" opens Log session
+    if (isDojo((client as { companies?: { business_type?: string | null } }).companies?.business_type) && (linkTab === 'plans' || linkTab === 'sessions')) {
+      setActiveTab('sessions')
+      if (linkLog === 'today' || linkDay === 'today') openMarkForm(DOJO_LOG_KEY)
+      return
+    }
     if (linkTab === 'sessions') { setActiveTab('sessions'); return } // owner dashboard → Today's sessions
     if (linkTab !== 'plans') return
     setActiveTab('plans')
@@ -557,7 +567,8 @@ export default function ClientDetailPage() {
   // "Mark done for <client>": saves a session for the client like the client's own Done ✓
   // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
   // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
-  const handleCoachLogDay = async (plan: Plan, day: PlanDay | null, label: string | null) => {
+  // plan null = a dojo session with no plan (Sessions tab → Log session; weekly_plan_id stays empty)
+  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null) => {
     setMarkError('')
     const minutes = parseInt(markForm.duration_minutes)
     if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return }
@@ -565,11 +576,11 @@ export default function ClientDetailPage() {
     setSavingMark(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setSavingMark(false); router.push('/login'); return }
-    const tickKey = day ? `${plan.id}:${day.day}` : ''
+    const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     const row: Record<string, unknown> = {
       client_id: clientId,
-      weekly_plan_id: plan.id,
+      weekly_plan_id: plan?.id ?? null,
       session_date: markForm.session_date,
       duration_minutes: minutes,
       notes: markForm.notes,
@@ -597,8 +608,8 @@ export default function ClientDetailPage() {
     closeMarkForm()
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
-    setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
-    showToast(`✓ ${day ? day.day : 'Session'} done for ${clientFirstName}`)
+    if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
+    showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
     loadData(['sessions'])
   }
 
@@ -1199,7 +1210,7 @@ const handleResetPassword = async () => {
   // "Log today's session" bar: today's workout day of this week's plan (or this week's text plan).
   // Hidden when there is nothing to log today (no plan this week, or today is a rest day).
   const todayLog = (() => {
-    if (client?.client_type !== 'pt' || !trainModule) return null
+    if (client?.client_type !== 'pt' || !trainModule || dojo) return null
     const cur = currentPlan(plans)
     if (!cur) return null
     const json = planJsonOf(cur)
@@ -1838,7 +1849,7 @@ const handleResetPassword = async () => {
 
       {/* Before you start (#40): what any staff member should know before training this PT client */}
       {client?.client_type === 'pt' && (() => {
-        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one)
         const primary = client.primary_coach_id ? staff.find(x => x.id === client.primary_coach_id)?.full_name : null
         const toggle = () => {
           const next = !bysOpen
@@ -1907,8 +1918,9 @@ const handleResetPassword = async () => {
       {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
         <div className="sticky top-0 z-30 bg-gray-950 mt-3 mb-4">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-2">
-          <div role="tablist" className="grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
-            {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
+          <div role="tablist" className={`grid ${dojo ? 'grid-cols-3' : 'grid-cols-4'} gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800`}>
+            {/* Dojo: no Plans tab (attendance with batches replaces it later; saved plans are kept) */}
+            {(dojo ? ['profile', 'sessions', 'progress'] as const : ['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
               <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
                 className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
@@ -1927,7 +1939,7 @@ const handleResetPassword = async () => {
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
 
         {/* PLANS TAB */}
-        {activeTab === 'plans' && (
+        {activeTab === 'plans' && !dojo && (
           <div>
 {(() => {
   const missing = [
@@ -2485,7 +2497,7 @@ const handleResetPassword = async () => {
           <div className="space-y-3">
             {/* Last trained (moved here from Before you start) */}
             {(() => {
-              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one)
               return (
                 <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
                   <p className="text-sm text-white">
@@ -2497,6 +2509,24 @@ const handleResetPassword = async () => {
                 </div>
               )
             })()}
+            {/* Dojo: no plans, so staff log a session here (stop-gap attendance until Build 3) */}
+            {dojo && (markKey === DOJO_LOG_KEY ? (
+              <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
+                {coveringBadge()}
+                <SessionForm mode="day" idPrefix="dojo-log" value={markForm} onChange={setMarkForm}
+                  feelingEnabled={!isCoach}
+                  country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
+                  notesLabel="Notes (optional)"
+                  error={markError} saving={savingMark} submitLabel={`Save session for ${clientFirstName}`}
+                  onSubmit={() => handleCoachLogDay(null, null, null)} onCancel={closeMarkForm}
+                  heading={<p className="text-xs font-semibold text-green-400">Session for {clientFirstName}</p>} />
+              </div>
+            ) : (
+              <button type="button" onClick={() => openMarkForm(DOJO_LOG_KEY)}
+                className="w-full min-h-[44px] bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-2xl text-sm text-orange-400 font-medium transition">
+                + Log session for {clientFirstName}
+              </button>
+            ))}
             {renderShare()}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
@@ -3121,6 +3151,17 @@ const handleResetPassword = async () => {
   </div>
 )}
       </div>
+      {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
+      {dojo && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
+            <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              Log today&apos;s session
+            </button>
+          </div>
+        </div>
+      )}
       {/* Log today's session: fixed at the bottom on every tab */}
       {todayLog && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">

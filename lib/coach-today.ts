@@ -39,14 +39,15 @@ export type TodayRow = {
 }
 
 // First name; a name saved as "Coach Ravi" gives "Ravi" (so labels don't read "Coach Coach")
-const firstName = (name: string | null | undefined) => (name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0] || ''
+const firstName = (name: string | null | undefined) => (name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0] || ''
 
-// "Coach Ravi" for a staff logger, "client" when the client logged it themselves
-export function loggedByLabel(s: CoachSession, names: Record<string, string>): string {
+// "Coach Ravi" for a staff logger, "client" when the client logged it themselves.
+// word: the staff word for the gym (lib/labels.ts staffWord: "Sensei" in a dojo); default "Coach"
+export function loggedByLabel(s: CoachSession, names: Record<string, string>, word = 'Coach'): string {
   const id = loggerOf(s)
   if (id === 'client') return 'client'
   const first = firstName(names[id])
-  return first ? `Coach ${first}` : 'Coach'
+  return first ? `${word} ${first}` : word
 }
 
 // "6/7" from a session's ticked exercises, or null
@@ -82,7 +83,8 @@ export function todayRows(
   sessions: CoachSession[],
   coaches: StaffMember[],
   me: string,
-  today: string
+  today: string,
+  word = 'Coach',   // staff word ("Sensei" in a dojo)
 ): TodayRow[] {
   const names = Object.fromEntries(coaches.map(c => [c.id, c.full_name]))
   return clients
@@ -98,7 +100,7 @@ export function todayRows(
         todayDay: todayDayOf(plan, mine, today),
         workoutTime: plan?.workout_time?.trim() || null,
         doneToday: latestToday
-          ? { by: loggedByLabel(latestToday, names), exercises: exercisesText(latestToday), minutes: latestToday.duration_minutes ?? null }
+          ? { by: loggedByLabel(latestToday, names, word), exercises: exercisesText(latestToday), minutes: latestToday.duration_minutes ?? null }
           : null,
         lastSessionDate: mine[0]?.session_date ?? null,
       }
@@ -140,7 +142,8 @@ export function beforeYouStart(
   client: CoachClient,
   sessions: CoachSession[],
   staffNames: Record<string, string>,
-  today: string
+  today: string,
+  word = 'Coach',   // staff word ("Sensei" in a dojo)
 ): BeforeYouStart {
   const mine = sessions.filter(s => s.client_id === client.id && s.session_date <= today).sort(newestFirst)
   const last = mine[0]?.session_date
@@ -153,7 +156,7 @@ export function beforeYouStart(
       exercises: exercisesText(s),
       minutes: s.duration_minutes ?? null,
       notes: s.notes?.trim() || null,
-      by: loggedByLabel(s, staffNames),
+      by: loggedByLabel(s, staffNames, word),
       covering: isCovering(s, client),
     })),
     totalSessions: mine.length,
