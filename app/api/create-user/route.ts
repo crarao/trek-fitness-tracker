@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
-import { NO_LOGIN_DOMAIN } from '@/lib/phone'
+import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164 } from '@/lib/phone'
+import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { randomUUID, randomBytes } from 'crypto'
 
 export async function POST(request: Request) {
@@ -22,8 +23,12 @@ const body = await request.json()
 const { full_name, company_id, role, phone, trainer_name, diet_plan, client_type, primary_coach_id, country, currency } = body
 // Client without a login (no_login: true): a placeholder nobody can sign in with, made here (lib/phone.ts NO_LOGIN_DOMAIN)
 const noLogin = body.no_login === true && role === 'client'
-const email: string = noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : body.email
-const password: string = noLogin ? randomBytes(24).toString('base64url') : body.password
+// Parent / guardian (clients only; sent only once db/2026-11-03-guardian.md has run). A child with no phone of their own
+// gets a generated login (lib/phone.ts generatedStudentLogin): the parent's phone is never a login, so siblings can share it.
+const hasGuardianFields = role === 'client' && ('guardian_phone' in body || 'guardian_name' in body || 'guardian_relation' in body)
+const childNoPhone = noLogin && hasGuardianFields && !!body.guardian_phone && !phone
+const email: string = childNoPhone ? generatedStudentLogin() : noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : body.email
+const password: string = childNoPhone ? randomBytes(12).toString('base64url') : noLogin ? randomBytes(24).toString('base64url') : body.password
 
   // Super admin can create any login. Gym staff can only add clients and coaches to their own gym.
   // Coaches don't count toward client_limit (that count filters role = 'client').
@@ -56,6 +61,24 @@ const password: string = noLogin ? randomBytes(24).toString('base64url') : body.
     }
     if (country) clientPlace.country = country
     if (currency) clientPlace.currency = currency
+  }
+  // Parent phone: validated here too (same rule as the form, lib/phone.ts), saved like phone (+<code><digits>)
+  const guardian: { guardian_name?: string | null; guardian_phone?: string | null; guardian_relation?: string | null } = {}
+  if (hasGuardianFields) {
+    const rawParent = typeof body.guardian_phone === 'string' ? body.guardian_phone.trim() : ''
+    let parentPhone: string | null = null
+    if (rawParent) {
+      const parts = splitE164(rawParent, (companyRow?.country as string | null) ?? 'IN')
+      if (!parts) return NextResponse.json({ error: 'Enter a valid parent phone number' }, { status: 400 })
+      parentPhone = toE164(parts.country, parts.local)
+    }
+    const relation = typeof body.guardian_relation === 'string' ? body.guardian_relation.trim() : ''
+    if (relation && !(GUARDIAN_RELATIONS as readonly string[]).includes(relation)) {
+      return NextResponse.json({ error: 'Relation must be Mother, Father or Guardian' }, { status: 400 })
+    }
+    guardian.guardian_name = typeof body.guardian_name === 'string' && body.guardian_name.trim() ? body.guardian_name.trim() : null
+    guardian.guardian_phone = parentPhone
+    guardian.guardian_relation = relation || null
   }
   if (coachCompany && (role === 'coach' || role === 'partner')) {
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
@@ -116,6 +139,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   diet_plan: diet_plan || null,
   client_type: client_type || 'member',
   ...clientPlace,
+  ...guardian,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
 })
 

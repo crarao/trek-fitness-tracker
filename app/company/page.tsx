@@ -16,6 +16,7 @@ import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type Lead
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo } from '@/lib/labels'
+import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 
 type Membership = {
   id: string
@@ -39,6 +40,10 @@ type Client = {
   primary_coach_id?: string | null
   country?: string | null  // client's own country / default currency (multi-country gyms)
   currency?: string | null
+  // Parent / guardian (db/2026-11-03-guardian.md): undefined before that SQL runs
+  guardian_name?: string | null
+  guardian_phone?: string | null
+  guardian_relation?: string | null
 }
 
 // Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
@@ -110,6 +115,8 @@ export default function CompanyAdminPage() {
   // companies.business_type (super admin): martial_arts = a dojo, "Students" instead of "Members" (lib/labels.ts)
   const [businessType, setBusinessType] = useState<string | null>(null)
   const mw = memberWord(businessType)
+  // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
+  const [guardianColumns, setGuardianColumns] = useState(false)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -135,7 +142,9 @@ export default function CompanyAdminPage() {
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member', primary_coach_id: '',
     // Multi-country only: the client's country, the phone's country code and the payment currency ('' = home / base)
-    country: '', phone_country: '', currency: ''
+    country: '', phone_country: '', currency: '',
+    // Child with a parent (guardian columns only). child null = the default: ticked for a dojo (martial arts), else not
+    child: null as boolean | null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -218,8 +227,9 @@ export default function CompanyAdminPage() {
     fetchClients(profile.company_id)
     fetchLeadStats(profile.company_id)
     fetchCoaches(profile.company_id)
-    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
-    if (fromLeadId) openFromLead(fromLeadId)
+    // Do the guardian columns exist yet? A column error before db/2026-11-03-guardian.md runs (then the fields stay hidden)
+    const guardianProbe = supabase.from('profiles').select('guardian_phone').limit(1)
+      .then(({ error }) => { setGuardianColumns(!error); return !error })
 
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
@@ -234,6 +244,8 @@ export default function CompanyAdminPage() {
     setCompanyName(company?.name || '')
     setCoachCompany(isCoachCompany(company))
     setBusinessType(company?.business_type ?? null)
+    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
+    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
     setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
@@ -252,7 +264,8 @@ export default function CompanyAdminPage() {
   }
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
-  const openFromLead = async (leadId: string) => {
+  // In a dojo the enquiry usually comes from a parent: its phone goes into Parent phone (Child starts ticked)
+  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>) => {
     const { data: lead, error } = await supabase
       .from('leads')
       .select('id, name, phone, source, interest, status')
@@ -263,10 +276,12 @@ export default function CompanyAdminPage() {
       if (error) console.error('Lead fetch error:', error)
       return
     }
+    const toParent = dojo && await guardianProbe
     setNewClient(prev => ({
       ...prev,
       full_name: lead.name || '',
-      phone: lead.phone || '',
+      phone: toParent ? '' : lead.phone || '',
+      guardian_phone: toParent ? lead.phone || '' : '',
       client_type: lead.interest === 'pt' ? 'pt' : 'member',
     }))
     setFromLead({ id: lead.id, name: lead.name, source: lead.source })
@@ -570,9 +585,21 @@ export default function CompanyAdminPage() {
     return indianDigits ? { kind: 'phone', email: loginEmailFor('IN', indianDigits), shown: indianDigits } : { kind: 'none' }
   }
 
+  // Child with parent details (only once the guardian columns exist): ticked by default for a dojo
+  const newClientChild = () => guardianColumns && (newClient.child ?? isDojo(businessType))
+  const newClientParentCountry = (): PhoneCountry => (newClient.guardian_phone_country || newClientPlace().phoneCountry) as PhoneCountry
+
   const handleCreateClient = async () => {
     setSaving(true)
     setMessage('')
+
+    // Child: the parent's phone is required (the student's own phone is optional)
+    const child = newClientChild()
+    if (child && !validLocalDigits(newClientParentCountry(), newClient.guardian_phone)) {
+      setMessage(`Error: Enter the parent's phone (${phoneHint(newClientParentCountry())})`)
+      setSaving(false)
+      return
+    }
 
     const { count } = await supabase
       .from('profiles')
@@ -619,6 +646,12 @@ export default function CompanyAdminPage() {
         diet_plan: newClient.diet_plan,
         client_type: newClient.client_type,
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
+        // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
+        ...(child ? {
+          guardian_name: newClient.guardian_name.trim(),
+          guardian_phone: clientPhoneValue(newClientParentCountry(), newClient.guardian_phone),
+          guardian_relation: newClient.guardian_relation,
+        } : {}),
         // Once the multi-country SQL has run: the client's country and default currency
         ...(currencyColumns ? { country: place.country, currency: place.currency } : {})
       })
@@ -664,7 +697,8 @@ export default function CompanyAdminPage() {
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
       client_type: 'member', primary_coach_id: '',
-      country: '', phone_country: '', currency: ''
+      country: '', phone_country: '', currency: '',
+      child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
     })
     setShowForm(false)
     setSaving(false)
@@ -840,7 +874,11 @@ export default function CompanyAdminPage() {
     .filter(c => {
       if (!searchQuery.trim()) return true
       const q = searchQuery.toLowerCase()
+      const qDigits = q.replace(/\D/g, '')
       return c.full_name.toLowerCase().includes(q) || (c.phone || '').includes(q)
+        // Parent name / phone (digits only, so "98765 43210" finds +919876543210)
+        || (c.guardian_name || '').toLowerCase().includes(q)
+        || (!!qDigits && (c.guardian_phone || '').replace(/\D/g, '').includes(qDigits))
     })
 
   if (trialInfo && !trialInfo.is_active) {
@@ -1859,6 +1897,10 @@ export default function CompanyAdminPage() {
                                 Opening…
                               </p>
                             ) : (
+                              <>
+                              {client.guardian_name && (
+                                <p className="text-xs text-gray-400">Parent: {client.guardian_name}</p>
+                              )}
                               <p className="text-xs text-gray-500">
                                 {displayPhone(client.phone, country) || shownEmail(client.email)}
                                 {/* PT plan progress this week, on the second line so the row stays phone-width */}
@@ -1874,6 +1916,7 @@ export default function CompanyAdminPage() {
                                   )
                                 })()}
                               </p>
+                              </>
                             )}
                           </div>
                         </div>
@@ -1966,6 +2009,9 @@ export default function CompanyAdminPage() {
                     </select>
                   </div>
                 )}
+                {newClientChild() && (
+                  <label className="col-span-2 -mb-2 text-xs text-gray-500">Student&apos;s phone (optional — only if they will log in)</label>
+                )}
                 {multiCountry ? (
                   <div className="col-span-2 flex gap-2">
                     <CountryCodePicker value={newClientPlace().phoneCountry}
@@ -1985,6 +2031,49 @@ export default function CompanyAdminPage() {
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                   className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                {guardianColumns && (
+                  // Parent / guardian (any business type; ticked by default only for a dojo). The parent's phone is
+                  // contact only, never a login, so siblings can share it.
+                  <label className="col-span-2 flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={newClientChild()}
+                      onChange={e => {
+                        const on = e.target.checked
+                        // From an enquiry: carry the phone across to the field that is now in use
+                        const move = fromLead && (on ? !newClient.guardian_phone : !newClient.phone)
+                        setNewClient({
+                          ...newClient, child: on,
+                          ...(move && on ? { guardian_phone: newClient.phone, phone: '' } : {}),
+                          ...(move && !on ? { phone: newClient.guardian_phone, guardian_phone: '' } : {}),
+                        })
+                      }}
+                      className="w-4 h-4 accent-orange-500" />
+                    <span className="text-sm text-gray-300">Child — add parent details</span>
+                  </label>
+                )}
+                {newClientChild() && (
+                  <div className="col-span-2 grid grid-cols-2 gap-3 border border-gray-800 rounded-lg p-3">
+                    <input type="text" placeholder="Parent name"
+                      value={newClient.guardian_name}
+                      onChange={e => setNewClient({ ...newClient, guardian_name: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    <select value={newClient.guardian_relation} aria-label="Relation"
+                      onChange={e => setNewClient({ ...newClient, guardian_relation: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      {GUARDIAN_RELATIONS.map(r => <option key={r}>{r}</option>)}
+                    </select>
+                    <div className="col-span-2 flex gap-2">
+                      {multiCountry && (
+                        <CountryCodePicker value={newClientParentCountry()}
+                          onChange={c => setNewClient({ ...newClient, guardian_phone_country: c })} className="py-2.5" />
+                      )}
+                      <input type="tel" placeholder={`Parent phone (${phoneHint(newClientParentCountry())})`} aria-label="Parent phone"
+                        value={newClient.guardian_phone}
+                        onChange={e => setNewClient({ ...newClient, guardian_phone: e.target.value })}
+                        className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    </div>
+                    <p className="col-span-2 -mt-1 text-xs text-gray-500">Fee reminders go to the parent on WhatsApp.</p>
+                  </div>
+                )}
                 {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
                   <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
                     value={newClient.password}

@@ -5,7 +5,8 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin } from '@/lib/phone'
+import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint } from '@/lib/phone'
+import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
@@ -18,7 +19,7 @@ import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, pl
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
-import { memberWord, isDojo } from '@/lib/labels'
+import { memberWord } from '@/lib/labels'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -52,6 +53,10 @@ type ClientProfile = {
   created_at?: string                // joined date (header "Joined Oct 2026")
   country?: string | null    // client's own country / default currency (multi-country gyms, db/2026-11-01-multi-country.md)
   currency?: string | null
+  // Parent / guardian (db/2026-11-03-guardian.md): undefined before that SQL runs
+  guardian_name?: string | null
+  guardian_phone?: string | null
+  guardian_relation?: string | null
 }
 
 // Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
@@ -210,7 +215,8 @@ export default function ClientDetailPage() {
     trainer_name: '', diet_plan: '',
     goal: '', age: '', gender: '', height_cm: '', weight_kg: '',
     fitness_level: '', food_preference: '', meals_per_day: '', available_days: '',
-    medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: ''
+    medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: '',
+    guardian_name: '', guardian_phone: '', guardian_relation: ''
   })
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
@@ -830,6 +836,36 @@ const handleSaveDiet = async () => {
 
 const handleSaveClientProfile = async () => {
   setSavingClientProfile(true)
+  // Parent / guardian: saved through update-client (checks the phone on the server), only once the columns exist
+  if (client && 'guardian_phone' in client) {
+    const raw = clientProfileForm.guardian_phone.trim()
+    let parentPhone = ''
+    if (raw) {
+      const parts = splitE164(raw.startsWith('+') ? raw : clientPhoneValue(phoneCountry(client.country || country), raw), country)
+      if (!parts) {
+        setSavingClientProfile(false)
+        showToast('Enter a valid parent phone number, or leave it empty', 'error')
+        return
+      }
+      parentPhone = toE164(parts.country, parts.local)
+    }
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: clientId,
+        guardian_name: clientProfileForm.guardian_name,
+        guardian_phone: parentPhone,
+        guardian_relation: clientProfileForm.guardian_relation,
+      })
+    })
+    const result = await response.json().catch(() => ({ error: "Couldn't save" }))
+    if (result.error) {
+      setSavingClientProfile(false)
+      showToast("Couldn't save parent details: " + result.error, 'error')
+      return
+    }
+  }
   const { error: profileError } = await supabase
     .from('profiles')
     .update({
@@ -2667,6 +2703,9 @@ const handleResetPassword = async () => {
                 medical_conditions: client?.medical_conditions || '',
                 emergency_contact_name: client?.emergency_contact_name || '',
                 emergency_contact_phone: client?.emergency_contact_phone || '',
+                guardian_name: client?.guardian_name || '',
+                guardian_phone: displayPhone(client?.guardian_phone, country),
+                guardian_relation: client?.guardian_relation || '',
               })
               setEditingClientProfile(true)
             }
@@ -2832,6 +2871,35 @@ const handleResetPassword = async () => {
             </div>
           </div>
 
+          {/* Parent / guardian (once db/2026-11-03-guardian.md has run): fee reminders and progress shares go to this phone */}
+          {client && 'guardian_phone' in client && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Parent / guardian</label>
+                <input type="text" placeholder="Name"
+                  value={clientProfileForm.guardian_name}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_name: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Relation</label>
+                <select value={clientProfileForm.guardian_relation}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_relation: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  <option value="">—</option>
+                  {GUARDIAN_RELATIONS.map(r => <option key={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Parent phone</label>
+                <input type="tel" placeholder={`Phone (${phoneHint(phoneCountry(client.country || country))}; another country: start with +)`}
+                  value={clientProfileForm.guardian_phone}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_phone: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+            </div>
+          )}
+
           {/* Trainer + Diet */}
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
@@ -2930,6 +2998,26 @@ const handleResetPassword = async () => {
             <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
             <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
           </div>
+
+          {/* Parent / guardian (dojo students; fee reminders and progress shares go here). Read-only for coaches too. */}
+          {client && (client.guardian_name || client.guardian_phone) && (() => {
+            const wa = waDigits(client.guardian_phone, country)
+            return (
+              <div className="border-t border-gray-800 pt-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Parent / guardian</p>
+                <p className="text-sm text-white">{client.guardian_name || '—'}{client.guardian_relation ? <span className="text-gray-400"> · {client.guardian_relation}</span> : null}</p>
+                {client.guardian_phone && (
+                  <p className="text-sm text-gray-400">
+                    {displayPhone(client.guardian_phone, country)}
+                    {wa && (
+                      <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer"
+                        className="ml-2 text-xs text-green-400 hover:text-green-300">WhatsApp</a>
+                    )}
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Trainer + Diet Plan */}
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
