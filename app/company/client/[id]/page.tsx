@@ -1153,6 +1153,29 @@ const handleResetPassword = async () => {
   // Train module on for this gym (Plans / Sessions / Progress tabs for PT clients)
   const trainModule = !!(client as { companies?: { client_module_enabled?: boolean | null } } | null)?.companies?.client_module_enabled
   const chartData = getChartData()
+  // "Log today's session" bar: today's workout day of this week's plan (or this week's text plan).
+  // Hidden when there is nothing to log today (no plan this week, or today is a rest day).
+  const todayLog = (() => {
+    if (client?.client_type !== 'pt' || !trainModule) return null
+    const cur = currentPlan(plans)
+    if (!cur) return null
+    const json = planJsonOf(cur)
+    if (!json) return { plan: cur, day: null as string | null, label: 'Log today\'s session' }
+    const d = json.days.find(x => x.day === todayWeekday())
+    if (!d || d.rest) return null
+    return { plan: cur, day: d.day as string | null, label: `Log today's session · ${d.focus || 'Workout'}` }
+  })()
+  const openTodayLog = () => {
+    if (!todayLog) return
+    const key = `${todayLog.plan.id}:${todayLog.day ?? ''}`
+    setActiveTab('plans')
+    setNewPlanSheetOpen(false)
+    if (todayLog.day) setCoachOpenDay(todayLog.day)
+    // A day already done asks before logging a second session (same as under the day)
+    if (todayLog.day && doneDayKeys(todayLog.plan.id, sessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
+    else openMarkForm(key)
+    setScrollToPlanId(todayLog.plan.id)
+  }
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
   const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
@@ -1854,7 +1877,7 @@ const handleResetPassword = async () => {
         </div>
       )}
 
-      <div className="max-w-2xl mx-auto px-6 pb-8">
+      <div className={`max-w-2xl mx-auto px-6 ${todayLog ? 'pb-32' : 'pb-8'}`}>
 
         {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
@@ -2447,14 +2470,14 @@ const handleResetPassword = async () => {
                           {!coachCompany && <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} min{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">
                             ✓ {session.plan_day}
                             {(() => {
                               const ex = session.exercises_done as ExercisesDone | null | undefined
-                              return ex && Array.isArray(ex.done) && ex.total ? <span className="text-gray-400"> · {ex.done.length} of {ex.total} exercises</span> : null
+                              return ex && Array.isArray(ex.done) && ex.total ? <span className="text-gray-400"> · {ex.done.length} of {ex.total} exercise{ex.total === 1 ? '' : 's'}</span> : null
                             })()}
                           </p>
                         )}
@@ -2524,7 +2547,7 @@ const handleResetPassword = async () => {
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wider">Plan this week</p>
                     {week ? (
-                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(week))}`}>{week.done} of {week.planned}</span> <span className="text-xs text-gray-500">days done</span></p>
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(week))}`}>{week.done} of {week.planned}</span> <span className="text-xs text-gray-500">day{week.planned === 1 ? '' : 's'} done</span></p>
                     ) : (
                       <p className="text-sm text-amber-400 mt-1">{cur ? 'Plan has no clear days' : 'No plan this week'}</p>
                     )}
@@ -2532,7 +2555,7 @@ const handleResetPassword = async () => {
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wider">Last 4 weeks</p>
                     {four ? (
-                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(four))}`}>{pct(four)}%</span> <span className="text-xs text-gray-500">{four.done} of {four.planned} days</span></p>
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(four))}`}>{pct(four)}%</span> <span className="text-xs text-gray-500">{four.done} of {four.planned} day{four.planned === 1 ? '' : 's'}</span></p>
                     ) : (
                       <p className="text-sm text-gray-500 mt-1">No plans yet</p>
                     )}
@@ -2995,6 +3018,17 @@ const handleResetPassword = async () => {
   </div>
 )}
       </div>
+      {/* Log today's session: fixed at the bottom on every tab */}
+      {todayLog && (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
+            <button type="button" onClick={openTodayLog}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              {todayLog.label}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
