@@ -124,7 +124,7 @@ export default function CoachHomePage() {
   const who = dojo ? 'students' : 'clients'
   const coaches = staff.filter(s => s.role === 'coach')
   const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today, sw.one,
-    dojo ? new Set(staff.filter(x => x.role === 'coach').map(x => x.id)) : undefined))
+    new Set(staff.filter(x => x.role === 'coach').map(x => x.id))))
   const q = search.trim().toLowerCase()
   const shown = rows
     .filter(r => filter === 'all' || (filter === 'mine' ? r.isMine : !r.doneToday))

@@ -43,7 +43,8 @@ const firstName = (name: string | null | undefined) => (name || '').trim().repla
 
 // "Coach Ravi" for a staff logger, "client" when the client logged it themselves.
 // word: the staff word for the gym (lib/labels.ts staffWord: "Sensei" in a dojo); default "Coach"
-// coachIds (dojo): only these loggers get the word; the owner / a partner shows by first name
+// coachIds: only these loggers (coach / sensei logins) get the word; the owner / a partner shows by first name.
+// Not passed = every staff logger gets the word (old behaviour)
 export function loggedByLabel(s: CoachSession, names: Record<string, string>, word = 'Coach', coachIds?: Set<string>): string {
   const id = loggerOf(s)
   if (id === 'client') return 'client'
@@ -87,7 +88,7 @@ export function todayRows(
   me: string,
   today: string,
   word = 'Coach',   // staff word ("Sensei" in a dojo)
-  coachIds?: Set<string>,   // dojo: only these get the word (see loggedByLabel)
+  coachIds?: Set<string>,   // coach logins: only these get the word (see loggedByLabel)
 ): TodayRow[] {
   const names = Object.fromEntries(coaches.map(c => [c.id, c.full_name]))
   return clients

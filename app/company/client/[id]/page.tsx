@@ -529,8 +529,8 @@ export default function ClientDetailPage() {
     const covering = isCovering(s.logged_by, { id: clientId, primary_coach_id: client?.primary_coach_id })
     const bt = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
     const word = staffWord(bt).one
-    // Dojo: only sensei logins read "by Sensei Ravi"; the owner / a partner shows by name
-    if (isDojo(bt) && staff.find(x => x.id === s.logged_by)?.role !== 'coach') return `by ${first || 'staff'}` + (covering ? ' (covering)' : '')
+    // Only coach / sensei logins read "by Coach Ravi"; the owner / a partner shows by name
+    if (staff.find(x => x.id === s.logged_by)?.role !== 'coach') return `by ${first || 'staff'}` + (covering ? ' (covering)' : '')
     return (first ? `by ${word} ${first}` : `by ${word.toLowerCase()}`) + (covering ? ' (covering)' : '')
   }
   const staffFirstName = (id: string | null | undefined) => (staff.find(x => x.id === id)?.full_name || '').trim().split(/\s+/)[0]
@@ -1852,7 +1852,7 @@ const handleResetPassword = async () => {
 
       {/* Before you start (#40): what any staff member should know before training this PT client */}
       {client?.client_type === 'pt' && (() => {
-        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, dojo ? new Set(staff.filter(x => x.role === 'coach').map(x => x.id)) : undefined)
+        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, new Set(staff.filter(x => x.role === 'coach').map(x => x.id)))
         const primary = client.primary_coach_id ? staff.find(x => x.id === client.primary_coach_id)?.full_name : null
         const toggle = () => {
           const next = !bysOpen
@@ -2500,7 +2500,7 @@ const handleResetPassword = async () => {
           <div className="space-y-3">
             {/* Last trained (moved here from Before you start) */}
             {(() => {
-              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, dojo ? new Set(staff.filter(x => x.role === 'coach').map(x => x.id)) : undefined)
+              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, new Set(staff.filter(x => x.role === 'coach').map(x => x.id)))
               return (
                 <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
                   <p className="text-sm text-white">

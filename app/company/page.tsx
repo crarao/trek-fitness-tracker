@@ -836,8 +836,8 @@ export default function CompanyAdminPage() {
     if (id === 'client') return 'Clients themselves'
     // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
     const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
-    // Dojo: only sensei logins read "Sensei Ravi"; the owner / a partner shows by name ("by DSKKA")
-    if (dojo && !coachById[id]) return first || 'staff'
+    // Only coach / sensei logins read "Coach Ravi"; the owner / a partner shows by name ("by Anand")
+    if (!coachById[id]) return first || 'staff'
     return first ? `${sw.one} ${first}` : sw.one
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
