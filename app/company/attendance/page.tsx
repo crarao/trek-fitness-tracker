@@ -12,7 +12,7 @@ import { memberWord } from '@/lib/labels'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen, sortBatches } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, monthRange, monthStats, statsText, batchesOn, addDays } from '@/lib/attendance'
 
-type Student = { id: string; full_name: string; branch_id: string | null; batch_id: string | null }
+type Student = { id: string; full_name: string; branch_id: string | null; batch_id: string | null; created_at?: string | null }
 
 export default function AttendanceMonthPage() {
   const router = useRouter()
@@ -47,7 +47,7 @@ export default function AttendanceMonthPage() {
       const [br, ba, people, att] = await Promise.all([
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
-        supabase.from('profiles').select('id, full_name, branch_id, batch_id').eq('company_id', cId)
+        supabase.from('profiles').select('id, full_name, branch_id, batch_id, created_at').eq('company_id', cId)
           .eq('role', 'client').is('archived_at', null).order('full_name'),
         supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId)
           .gte('class_date', range.from).lte('class_date', range.to).eq('present', true).limit(20000),
@@ -73,7 +73,7 @@ export default function AttendanceMonthPage() {
 
   // A student's line: "9 of 12 classes" + the share of their home batch's classes
   const line = (s: Student) => {
-    const st = monthStats({ profileId: s.id, homeBatch: s.batch_id ? batchById[s.batch_id] : null, rows, month, today })
+    const st = monthStats({ profileId: s.id, homeBatch: s.batch_id ? batchById[s.batch_id] : null, rows, month, today, since: s.created_at })
     const pctVal = st.scheduled ? Math.round((Math.min(st.attended, st.scheduled) / st.scheduled) * 100) : null
     return { text: statsText(st), pct: pctVal }
   }

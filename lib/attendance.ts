@@ -112,11 +112,14 @@ export function monthStats(opts: {
   rows: AttendanceRow[]
   month: string          // any date in the month
   today: string
+  since?: string | null  // the day they joined (profiles.created_at): classes before it aren't counted as missed
 }): { attended: number; scheduled: number | null; from: string; to: string } {
   const { from, to } = monthRange(opts.month)
   const until = to < opts.today ? to : opts.today
+  const joined = (opts.since || '').slice(0, 10)
+  const start = joined && joined > from ? joined : from
   const attended = attendedDates(opts.profileId, opts.rows, from, until).length
-  const scheduled = opts.homeBatch ? scheduledDates(opts.homeBatch.days, from, until).length : null
+  const scheduled = opts.homeBatch ? scheduledDates(opts.homeBatch.days, start, until).length : null
   return { attended, scheduled, from, to }
 }
 
@@ -136,6 +139,7 @@ export function buildAttendanceMessage(opts: {
   homeBatch: Pick<Batch, 'days' | 'name'> | null | undefined
   today: string
   month?: string        // any date in the month to report; default this month
+  since?: string | null // the day they joined (see monthStats)
   note?: string
   country: Country | null
 }): { text: string; toPhone: string | null; toLabel: string } {
@@ -144,7 +148,8 @@ export function buildAttendanceMessage(opts: {
   const kid = firstName(client.full_name)
   const greet = to.toParent ? firstName(client.guardian_name) || 'there' : kid || 'there'
   const monthOf = opts.month ?? opts.today
-  const stats = monthStats({ profileId: '__self', homeBatch: opts.homeBatch, rows: opts.rows.map(r => ({ ...r, profile_id: '__self' })), month: monthOf, today: opts.today })
+  const stats = monthStats({ profileId: '__self', homeBatch: opts.homeBatch, rows: opts.rows.map(r => ({ ...r, profile_id: '__self' })), month: monthOf, today: opts.today, since: opts.since })
+  const pastMonth = stats.to < opts.today
   const monthName = formatDate(stats.from, country, 'monthLong')
   const dates = attendedDates('__self', opts.rows.map(r => ({ ...r, profile_id: '__self' })), stats.from, stats.to < opts.today ? stats.to : opts.today)
   const out: string[] = []
@@ -152,7 +157,7 @@ export function buildAttendanceMessage(opts: {
   out.push(`${monthName}${opts.homeBatch?.name ? ` · ${opts.homeBatch.name}` : ''}`)
   out.push('', `✅ ${statsText(stats)} attended`)
   if (dates.length) out.push(`Last class: ${formatDate(dates[0], country, 'weekday')}`)
-  else out.push(`No classes attended yet this month. We hope to see ${to.toParent ? 'them' : 'you'} soon!`)
+  else out.push(pastMonth ? `No classes attended in ${monthName}.` : `No classes attended yet this month. We hope to see ${to.toParent ? 'them' : 'you'} soon!`)
   const note = (opts.note || '').trim()
   if (note) out.push('', note)
   out.push('', `🥋 — ${[firstName(opts.staffName), opts.companyName].filter(Boolean).join(', ')}`)

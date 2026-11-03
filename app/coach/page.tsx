@@ -10,7 +10,8 @@ import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { thisWeekMonday } from '@/lib/calories'
 import { staffWord, ptWord, isDojo } from '@/lib/labels'
-import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine } from '@/lib/batches'
+import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, batchWhen } from '@/lib/batches'
+import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attendance'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -26,6 +27,10 @@ export default function CoachHomePage() {
   const [company, setCompany] = useState<{ name: string; logo_url: string | null; country: Country; business_type: string | null } | null>(null)
   // Dojo: each student's branch / home batch (db/2026-11-03-branches-batches.md); empty before that SQL
   const [placement, setPlacement] = useState<Record<string, string>>({})
+  // Dojo attendance (#78): today's present rows (null = attendance not set up yet), and the gym's branches / batches
+  const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
+  const [dojoBranches, setDojoBranches] = useState<Branch[]>([])
+  const [dojoBatches, setDojoBatches] = useState<Batch[]>([])
   const [clients, setClients] = useState<CoachClient[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [plans, setPlans] = useState<CoachPlan[]>([])
@@ -97,6 +102,10 @@ export default function CoachHomePage() {
             return [p.id, homeBatchLine(branchById[p.branch_id || batch?.branch_id || ''], batch, country)]
           })
           .filter(([, line]) => line)))
+        setDojoBranches((br.data || []) as Branch[])
+        setDojoBatches((ba.data || []) as Batch[])
+        const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('class_date', today).eq('present', true)
+        setAttToday(att.error ? null : (att.data || []) as AttendanceRow[])
       }
     }
     setClients((clientsRes.data || []) as CoachClient[])
@@ -118,7 +127,8 @@ export default function CoachHomePage() {
     if (openingId) return
     setOpeningId(id)
     const dojoHome = isDojo(company?.business_type)
-    router.push(dojoHome ? `/company/client/${id}?tab=sessions&log=today` : `/company/client/${id}?tab=plans&day=today`)
+    // Dojo with attendance: the student's Attendance tab; before that, Sessions with Log session open
+    router.push(dojoHome ? (attToday ? `/company/client/${id}?tab=sessions` : `/company/client/${id}?tab=sessions&log=today`) : `/company/client/${id}?tab=plans&day=today`)
     setTimeout(() => setOpeningId(prev => (prev === id ? null : prev)), 10000) // safety reset
   }
 
@@ -145,20 +155,27 @@ export default function CoachHomePage() {
   const sw = staffWord(bt)
   const pw = ptWord(bt)
   const dojo = isDojo(bt)
+  // Attendance replaces logged sessions for "came today" once the attendance table exists
+  const attendanceMode = dojo && attToday !== null
+  const cameIds = new Set((attToday || []).map(r => r.profile_id))
+  const isDone = (r: TodayRow) => (attendanceMode ? cameIds.has(r.client.id) : !!r.doneToday)
+  const todaysBatches = attendanceMode
+    ? batchesOn(dojoBatches.filter(b => !dojoBranches.find(x => x.id === b.branch_id)?.is_archived), today)
+    : []
   const who = dojo ? 'students' : 'clients'
   const coaches = staff.filter(s => s.role === 'coach')
   const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today, sw.one,
     new Set(staff.filter(x => x.role === 'coach').map(x => x.id))))
   const q = search.trim().toLowerCase()
   const shown = rows
-    .filter(r => filter === 'all' || (filter === 'mine' ? r.isMine : !r.doneToday))
+    .filter(r => filter === 'all' || (filter === 'mine' ? r.isMine : !isDone(r)))
     .filter(r => !q || r.client.full_name.toLowerCase().includes(q) || (r.client.phone || '').includes(q))
   // Dojo: no plans (attendance replaces them later), so never the "no plans" note
   const noPlansThisWeek = !dojo && clients.length > 0 && rows.every(r => r.todayDay === 'no-plan')
   const counts: Record<Filter, number> = {
     all: rows.length,
     mine: rows.filter(r => r.isMine).length,
-    'not-yet': rows.filter(r => !r.doneToday).length,
+    'not-yet': rows.filter(r => !isDone(r)).length,
   }
 
   // Only when it matters: ends within 7 days, or already ended
@@ -209,10 +226,44 @@ export default function CoachHomePage() {
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
         {error && <p className="text-sm text-red-300 bg-red-950 border border-red-900 rounded-xl px-4 py-3">{error}</p>}
 
+        {/* Dojo: today's batches across every branch; tap one to take the roll call */}
+        {attendanceMode && (
+          <section className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today&apos;s batches</h2>
+              <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+            </div>
+            {todaysBatches.length === 0 ? (
+              <p className="text-sm text-gray-500 bg-gray-900 border border-gray-800 rounded-2xl px-4 py-3">No batches today.</p>
+            ) : (
+              <ul className="space-y-2">
+                {todaysBatches.map(b => {
+                  const came = (attToday || []).filter(a => a.batch_id === b.id).length
+                  const branchName = dojoBranches.find(x => x.id === b.branch_id)?.name
+                  return (
+                    <li key={b.id}>
+                      <button type="button" data-nav onClick={() => router.push(`/company/attendance/${b.id}`)}
+                        className={`w-full text-left bg-gray-900 border rounded-2xl px-4 py-3 transition hover:border-gray-600 ${came ? 'border-green-900/60' : 'border-gray-800'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{b.name}</p>
+                            <p className="text-[11px] text-gray-500 truncate">{[dojoBranches.filter(x => !x.is_archived).length > 1 ? branchName : '', batchWhen(b, country).split(' · ')[1] || ''].filter(Boolean).join(' · ')}</p>
+                          </div>
+                          <span className={`text-xs shrink-0 ${came ? 'text-green-400 font-semibold' : 'text-orange-400'}`}>{came ? `${came} came` : 'Take attendance'}</span>
+                        </div>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        )}
+
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today <span className="normal-case text-gray-600">({pw})</span></h2>
           <p className="text-xs text-gray-500">
-            <span className="text-green-400 font-semibold">{rows.filter(r => r.doneToday).length}</span> {dojo ? 'came today' : 'trained today'}
+            <span className="text-green-400 font-semibold">{rows.filter(isDone).length}</span> {dojo ? 'came today' : 'trained today'}
           </p>
         </div>
 
@@ -258,6 +309,10 @@ export default function CoachHomePage() {
                         <div className="text-right shrink-0">
                           {openingId === r.client.id ? (
                             <span className="text-xs text-orange-400">Opening…</span>
+                          ) : attendanceMode ? (
+                            cameIds.has(r.client.id)
+                              ? <span className="text-xs text-green-400 font-medium">✓ Came today · {(attToday || []).filter(a => a.profile_id === r.client.id).map(a => dojoBatches.find(b => b.id === a.batch_id)?.name).filter(Boolean).join(', ')}</span>
+                              : <span className="text-xs text-gray-500">Not yet</span>
                           ) : r.doneToday ? (
                             <span className="text-xs text-green-400 font-medium">
                               ✓ {dojo ? 'Came today' : 'Done'} · by {r.doneToday.by}{r.doneToday.exercises ? ` · ${r.doneToday.exercises}` : ''}

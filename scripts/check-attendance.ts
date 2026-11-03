@@ -53,6 +53,8 @@ check('Nov so far: attended (one per day) of scheduled', [ms.attended, ms.schedu
 check('statsText', statsText(ms), '3 of 5 classes')
 check('no home batch', statsText(monthStats({ profileId: 'a', homeBatch: null, rows: ishanRows, month: today, today })), '3 classes')
 check('past month counts to its end', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: '2026-10-15', today }).scheduled, 13)
+check('joined 1 Nov: October not counted as missed', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: '2026-10-15', today, since: '2026-11-01T09:00:00Z' }).scheduled, 0)
+check('joined 5 Nov: classes from then', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: today, today, since: '2026-11-05' }).scheduled, 3)
 
 console.log('\n5. buildAttendanceMessage')
 const withParent = buildAttendanceMessage({
@@ -66,6 +68,8 @@ const noParent = buildAttendanceMessage({
   client: { full_name: 'Sam Carter', phone: '+14155550134' }, companyName: 'Peak Dojo', rows: [], homeBatch: seniors, today, country: 'US',
 })
 console.log(noParent.text.split('\n').map(l => '      ' + l).join('\n'))
+const lastMonthMsg = buildAttendanceMessage({ client: { full_name: 'Sam Carter', phone: '+14155550134' }, companyName: 'Peak Dojo', rows: [], homeBatch: seniors, today, month: '2026-10-10', country: 'US' })
+check('past month, none: says the month', lastMonthMsg.text.includes('No classes attended in October.'), true)
 check('no parent → student, none yet', [noParent.toPhone, noParent.text.includes('We hope to see you soon!')], ['14155550134', true])
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
