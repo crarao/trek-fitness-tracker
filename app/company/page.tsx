@@ -18,6 +18,7 @@ import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
+import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
 
 type Membership = {
   id: string
@@ -129,6 +130,8 @@ export default function CompanyAdminPage() {
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
   const [branchFilter, setBranchFilter] = useState<string>('all')
+  // Dojo attendance (#78): today's present rows; null = attendance not set up yet (then sessions as before)
+  const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -290,6 +293,8 @@ export default function CompanyAdminPage() {
     setBranchList((br.data || []) as Branch[])
     setBatchList((ba.data || []) as Batch[])
     setBatchesOn(true)
+    const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId).eq('class_date', localDateIso()).eq('present', true)
+    setAttToday(att.error ? null : (att.data || []) as AttendanceRow[])
   }
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
@@ -761,6 +766,11 @@ export default function CompanyAdminPage() {
   }
   const branchById = Object.fromEntries(branchList.map(b => [b.id, b]))
   const batchById = Object.fromEntries(batchList.map(b => [b.id, b]))
+  // Dojo with attendance: the Training / Sensei activity cards (logged sessions) give way to the Attendance card
+  const attendanceMode = dojo && batchesOn && attToday !== null
+  const todaysBatches = attendanceMode
+    ? batchesMeetingOn(batchList.filter(b => !branchById[b.branch_id]?.is_archived), localDateIso())
+    : []
   // Chips: active branches, plus archived ones that still have students; "No branch" when someone has none
   const branchChips = dojo && batchesOn
     ? branchList.filter(b => !b.is_archived || clients.some(c => c.branch_id === b.id))
@@ -1282,7 +1292,7 @@ export default function CompanyAdminPage() {
                         </span>
                         <span className="text-xs text-gray-400 shrink-0">
                           <span className="text-lg font-bold text-white">{row.clients.length}</span> {dojo ? (row.clients.length === 1 ? 'student' : 'students') : `client${row.clients.length === 1 ? '' : 's'}`}
-                          {row.clients.length > 0 && <span className="text-gray-500"> · {trainedToday} trained today</span>}
+                          {row.clients.length > 0 && !attendanceMode && <span className="text-gray-500"> · {trainedToday} trained today</span>}
                         </span>
                       </div>
                       <div className="mt-1.5 h-1.5 rounded-full bg-gray-800 overflow-hidden">
@@ -1309,7 +1319,7 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {trainModule && ptCount > 0 && (
+      {trainModule && ptCount > 0 && !attendanceMode && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             {/* Collapsed by default: a one-line summary; tap for Today / This week */}
@@ -1453,7 +1463,7 @@ export default function CompanyAdminPage() {
 
       {/* Coach activity (#40): who trained whom, covering, and PT clients needing attention.
           Doesn't repeat the Training card (Today / This week / Missed / Per coach). */}
-      {trainModule && !coachCompany && ptCount > 0 && coaches.length > 0 && (
+      {trainModule && !coachCompany && ptCount > 0 && coaches.length > 0 && !attendanceMode && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
@@ -1575,6 +1585,33 @@ export default function CompanyAdminPage() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Attendance (dojos, #78): today's batches across branches, each opens its roll call; month view link */}
+      {attendanceMode && (
+        <div className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Attendance <span className="normal-case text-gray-600">· {formatDate(new Date(), country, 'weekday')}</span></p>
+              <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+            </div>
+            {todaysBatches.length === 0 ? <p className="text-sm text-gray-500">No batches today.</p> : (
+              <div className="flex flex-wrap gap-2">
+                {todaysBatches.map(b => {
+                  const came = (attToday || []).filter(a => a.batch_id === b.id).length
+                  return (
+                    <button key={b.id} type="button" data-nav onClick={() => router.push(`/company/attendance/${b.id}`)}
+                      className={`text-xs px-3 py-2 rounded-lg border bg-gray-800 hover:border-orange-600 ${came ? 'border-green-800 text-gray-100' : 'border-gray-700 text-gray-300'}`}>
+                      {branchList.filter(x => !x.is_archived).length > 1 ? `${branchById[b.branch_id]?.name} · ` : ''}{b.name}
+                      <span className="text-gray-500"> {batchWhen(b, country).split(' · ')[1] || ''}</span>
+                      <span className={came ? 'text-green-400 font-semibold' : 'text-orange-400'}> · {came ? `${came} came` : 'take attendance'}</span>
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>

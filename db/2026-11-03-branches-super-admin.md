@@ -1,7 +1,7 @@
-Ran on prod (Mumbai): —
+Ran on prod (Mumbai): ✅ 3 Nov 2026 (by Anand). Branches then added from Super Admin; owners see them read-only.
 Ran on dev: n/a (dev DB not set up yet)
 
-# 3 Nov 2026 — Only super admin adds / edits branches (pricing is per branch) — TO RUN BY ANAND
+# 3 Nov 2026 — Only super admin adds / edits branches (pricing is per branch) — ✅ RUN ON MUMBAI 3 NOV — do not run again
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new

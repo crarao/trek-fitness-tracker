@@ -8,6 +8,7 @@ import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, pa
 import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, batchWhen } from '@/lib/batches'
+import { type AttendanceRow, ATTENDANCE_COLUMNS, monthStats, statsText, monthRange, addDays, batchesOn as batchesMeetingOn, tapRow, buildAttendanceMessage } from '@/lib/attendance'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
@@ -229,6 +230,10 @@ export default function ClientDetailPage() {
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
   const [batchesOn, setBatchesOn] = useState(false)
+  // Dojo attendance (#78, db/2026-11-03-attendance.md): this student's rows; on once the table exists
+  const [attendanceOn, setAttendanceOn] = useState(false)
+  const [attRows, setAttRows] = useState<AttendanceRow[]>([])
+  const [savingAtt, setSavingAtt] = useState(false)
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
   // Coach marks a plan day done for the client (gym PT: the client trains in front of the coach).
@@ -473,6 +478,9 @@ export default function ClientDetailPage() {
             setBranchList((br.data || []) as Branch[])
             setBatchList((ba.data || []) as Batch[])
             setBatchesOn(true)
+            const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS)
+              .eq('profile_id', clientId).order('class_date', { ascending: false }).limit(1000)
+            if (!att.error) { setAttRows((att.data || []) as AttendanceRow[]); setAttendanceOn(true) }
           }
         }
       })(),
@@ -561,6 +569,8 @@ export default function ClientDetailPage() {
   // Dojo (business type martial_arts): "Sensei", every student is PT (no PT badge / checkbox), short profile (age, gender, medical, parent)
   const dojoType = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
   const dojo = isDojo(dojoType)
+  // Dojo with the attendance table: attendance replaces Log session (Sessions tab = Attendance, Progress counts classes)
+  const attendanceMode = dojo && attendanceOn
   const sw = staffWord(dojoType)
   // Shown near Mark done when a coach trains someone else's client (or a client with no primary coach)
   const coveringBadge = () => {
@@ -1293,6 +1303,15 @@ const handleResetPassword = async () => {
     return { plan: planForWeek(plans, weekStart), weekStart }
   }
   const shareMessage = () => {
+    // Dojo with attendance: classes attended this / last month instead of the session week
+    if (attendanceMode && client) {
+      const today = localDateIso()
+      return buildAttendanceMessage({
+        client, companyName: company?.name || '', staffName: coachName, rows: attRows,
+        homeBatch: batchList.find(b => b.id === client.batch_id) ?? null, today,
+        month: shareWeek === 'this' ? today : addDays(monthRange(today).from, -1), since: client.created_at ?? null, note: shareNote, country,
+      })
+    }
     const { plan, weekStart } = shareWeekPlan()
     return buildProgressMessage({
       client: (client || { full_name: '', phone: null }) as ShareClient,
@@ -1328,6 +1347,91 @@ const handleResetPassword = async () => {
     }
     setMakingPdf(false)
   }
+  // ---- Dojo attendance (#78) ----
+  const homeBatch = batchList.find(b => b.id === client?.batch_id) ?? null
+  const attendanceSummary = () => {
+    const today = localDateIso()
+    const since = client?.created_at ?? null
+    const thisMonth = monthStats({ profileId: clientId, homeBatch, rows: attRows, month: today, today, since })
+    const lastMonth = monthStats({ profileId: clientId, homeBatch, rows: attRows, month: addDays(monthRange(today).from, -1), today, since })
+    return { thisMonth, lastMonth }
+  }
+  const renderAttendanceSummary = () => {
+    const { thisMonth, lastMonth } = attendanceSummary()
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+          <p className="text-2xl font-bold text-orange-500">{statsText(thisMonth).replace(/ class(es)?$/, '')}</p>
+          <p className="text-xs text-gray-500 mt-1">Classes this month</p>
+        </div>
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+          <p className="text-2xl font-bold text-gray-300">{statsText(lastMonth).replace(/ class(es)?$/, '')}</p>
+          <p className="text-xs text-gray-500 mt-1">Last month</p>
+        </div>
+      </div>
+    )
+  }
+  // "Came today" for this student in their home batch (when it meets today), saved like a roll-call tap
+  const toggleCameToday = async () => {
+    if (!client || !homeBatch || !companyId) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const today = localDateIso()
+    const current = attRows.some(r => r.batch_id === homeBatch.id && r.class_date === today && r.present)
+    const row = tapRow({ batchId: homeBatch.id, date: today, student: { id: clientId, full_name: client.full_name, batch_id: client.batch_id }, companyId, current, markedBy: user.id })
+    setSavingAtt(true)
+    const { data, error } = await supabase.from('attendance')
+      .upsert(row, { onConflict: 'batch_id,profile_id,class_date' }).select(ATTENDANCE_COLUMNS)
+    setSavingAtt(false)
+    if (error || !data?.length) { showToast(error ? 'Could not save: ' + error.message : "Couldn't save: not allowed for this login", 'error'); return }
+    const saved = data[0] as AttendanceRow
+    setAttRows(rs => [saved, ...rs.filter(r => !(r.batch_id === saved.batch_id && r.class_date === saved.class_date))])
+    showToast(saved.present ? `✓ ${clientFirstName} came today` : `${clientFirstName} marked not here today`)
+  }
+  const renderAttendance = () => {
+    const today = localDateIso()
+    const meetsToday = homeBatch && batchesMeetingOn([homeBatch], today).length > 0
+    const cameToday = homeBatch ? attRows.some(r => r.batch_id === homeBatch.id && r.class_date === today && r.present) : false
+    const recent = attRows.filter(r => r.present).slice(0, 30)
+    const batchName = (id: string) => batchList.find(b => b.id === id)?.name || 'Class'
+    return (
+      <>
+        {renderAttendanceSummary()}
+        {homeBatch ? (
+          <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 space-y-3">
+            <p className="text-xs text-gray-500">Home batch: <span className="text-white">{homeBatch.name}</span>{batchWhen(homeBatch, country) ? ` · ${batchWhen(homeBatch, country)}` : ''}</p>
+            {meetsToday && (
+              <button type="button" onClick={toggleCameToday} disabled={savingAtt} aria-pressed={cameToday}
+                className={`w-full min-h-[48px] rounded-xl text-sm font-semibold transition disabled:opacity-50 ${cameToday ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-orange-500 hover:bg-orange-400 text-white'}`}>
+                {cameToday ? `✓ Came today (tap to undo)` : `Mark came today · ${homeBatch.name}`}
+              </button>
+            )}
+            <button type="button" data-nav onClick={() => router.push(`/company/attendance/${homeBatch.id}`)}
+              className="w-full text-sm text-gray-300 border border-gray-700 hover:border-gray-500 rounded-xl py-2">
+              Open {homeBatch.name} class list →
+            </button>
+          </div>
+        ) : (
+          <p className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 text-sm text-gray-400">No home batch yet: set it on the Profile tab. They can still be marked as a drop-in in any class.</p>
+        )}
+        <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Classes attended</p>
+          {recent.length === 0 ? <p className="text-sm text-gray-500">None yet.</p> : (
+            <ul className="space-y-1.5">
+              {recent.map(r => (
+                <li key={`${r.batch_id}-${r.class_date}`} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-white">{formatDate(r.class_date, country, 'weekday')}</span>
+                  <span className="text-gray-400 truncate">{batchName(r.batch_id)}{r.is_drop_in ? ' · drop-in' : ''}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {sessions.length > 0 && <p className="text-xs text-gray-500 uppercase tracking-wider pt-2">Sessions logged before attendance</p>}
+      </>
+    )
+  }
+
   const renderShare = () => {
     if (!shareOpen) return (
       <button type="button" onClick={() => setShareOpen(true)}
@@ -1348,7 +1452,7 @@ const handleResetPassword = async () => {
           {(['this', 'last'] as const).map(w => (
             <button key={w} type="button" onClick={() => setShareWeek(w)}
               className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${shareWeek === w ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              {w === 'this' ? 'This week' : 'Last week'}
+              {attendanceMode ? (w === 'this' ? 'This month' : 'Last month') : w === 'this' ? 'This week' : 'Last week'}
             </button>
           ))}
         </div>
@@ -1385,10 +1489,10 @@ const handleResetPassword = async () => {
             Copy text
           </button>
         </div>
-        <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
+        {!attendanceMode && <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
           className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
           {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
-        </button>
+        </button>}
       </div>
     )
   }
@@ -1965,7 +2069,7 @@ const handleResetPassword = async () => {
                 className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
                   : 'text-gray-400 hover:text-white'}`}>
-                {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
+                {tab === 'plans' ? 'Plans' : tab === 'sessions' ? (attendanceMode ? 'Attendance' : 'Sessions') : tab === 'progress' ? 'Progress' : 'Profile'}
               </button>
             ))}
           </div>
@@ -2535,8 +2639,9 @@ const handleResetPassword = async () => {
         {/* SESSIONS TAB */}
         {activeTab === 'sessions' && (
           <div className="space-y-3">
+            {attendanceMode && renderAttendance()}
             {/* Last trained (moved here from Before you start) */}
-            {(() => {
+            {!attendanceMode && (() => {
               const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, new Set(staff.filter(x => x.role === 'coach').map(x => x.id)))
               return (
                 <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
@@ -2550,7 +2655,7 @@ const handleResetPassword = async () => {
               )
             })()}
             {/* Dojo: no plans, so staff log a session here (stop-gap attendance until Build 3) */}
-            {dojo && (markKey === DOJO_LOG_KEY ? (
+            {dojo && !attendanceMode && (markKey === DOJO_LOG_KEY ? (
               <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
                 {coveringBadge()}
                 <SessionForm mode="day" idPrefix="dojo-log" value={markForm} onChange={setMarkForm}
@@ -2568,11 +2673,11 @@ const handleResetPassword = async () => {
               </button>
             ))}
             {renderShare()}
-            {sessions.length === 0 ? (
+            {sessions.length === 0 ? (attendanceMode ? null : (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 No sessions logged yet.
               </div>
-            ) : (
+            )) : (
               [...sessions].reverse().map(session => {
                 const fb = getFeedback(session.id)
                 return (
@@ -2638,7 +2743,13 @@ const handleResetPassword = async () => {
         )}
 
         {/* PROGRESS TAB */}
-        {activeTab === 'progress' && (
+        {activeTab === 'progress' && attendanceMode && (
+          <div className="space-y-4">
+            {renderAttendanceSummary()}
+            {renderShare()}
+          </div>
+        )}
+        {activeTab === 'progress' && !attendanceMode && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
@@ -3245,7 +3356,7 @@ const handleResetPassword = async () => {
 )}
       </div>
       {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
-      {dojo && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
+      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
