@@ -4,16 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
-import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
+import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
 import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
-import { weekStatus, orderPlansByWeek, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
-import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
+import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
-import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
@@ -49,6 +48,7 @@ type ClientProfile = {
   client_type: string | null
   archived_at: string | null
   primary_coach_id?: string | null   // usual coach (#40); a soft link, never limits who can train the client
+  created_at?: string                // joined date (header "Joined Oct 2026")
   country?: string | null    // client's own country / default currency (multi-country gyms, db/2026-11-01-multi-country.md)
   currency?: string | null
 }
@@ -108,6 +108,8 @@ function elapsedPct(startDate: string, endDate: string): number {
 
 // Local date as YYYY-MM-DD
 const formatIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// A date-only value plus n days, as YYYY-MM-DD
+const isoAdd = (iso: string, n: number) => { const d = parseDate(iso.slice(0, 10)); d.setDate(d.getDate() + n); return formatIso(d) }
 
 export default function ClientDetailPage() {
   const router = useRouter()
@@ -153,6 +155,13 @@ export default function ClientDetailPage() {
   // Compact plan cards: one expanded at a time; older plans behind "Show older"
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
   const [showAllPlans, setShowAllPlans] = useState(false)
+  // Plans tab: open ⋯ menu on a plan card, the selected day of each plan's 7-day strip (not this week's:
+  // that one is coachOpenDay), and the + New plan sheet
+  const [planMenuId, setPlanMenuId] = useState<string | null>(null)
+  const [selDay, setSelDay] = useState<Record<string, string>>({})
+  const [newPlanSheetOpen, setNewPlanSheetOpen] = useState(false)
+  const [sheetWeek, setSheetWeek] = useState('')   // "Week starts" in the + New plan sheet
+  const sheetDragY = useRef<number | null>(null)
   const manualFormRef = useRef<HTMLDivElement | null>(null)
   const aiPanelRef = useRef<HTMLDivElement | null>(null)
   const aiWorkingRef = useRef<HTMLDivElement | null>(null)
@@ -169,6 +178,9 @@ export default function ClientDetailPage() {
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [showResetPassword, setShowResetPassword] = useState(false)
+  // Header ⋯ menu and the goal chip (tap shows the full goal)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [goalOpen, setGoalOpen] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
@@ -275,6 +287,22 @@ export default function ClientDetailPage() {
   const [makingPdf, setMakingPdf] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Esc closes the + New plan sheet and the plan ⋯ menu
+  useEffect(() => {
+    if (!newPlanSheetOpen && !planMenuId) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setNewPlanSheetOpen(false); setPlanMenuId(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newPlanSheetOpen, planMenuId])
+
+  // Esc closes the header ⋯ menu
+  useEffect(() => {
+    if (!headerMenuOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setHeaderMenuOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [headerMenuOpen])
 
   // #37: load "3 of 5 AI plans used this month" (only shown when AI plans are on for the company)
   useEffect(() => {
@@ -564,7 +592,7 @@ export default function ClientDetailPage() {
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
-  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string; plan_json?: PlanJson | null }) => {
+  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string; plan_json?: PlanJson | null }, opts?: { toast?: string; errorToast?: boolean }) => {
     if (!plan.week_start || !plan.plan_details.trim()) {
       setPlanError('Pick a week and add plan details before saving.')
       return false
@@ -586,6 +614,7 @@ export default function ClientDetailPage() {
     setSaving(false)
     if (error) {
       setPlanError('Could not save the plan: ' + error.message)
+      if (opts?.errorToast) showToast('Could not save the plan: ' + error.message, 'error')
       return false
     }
     // Briefly highlight the new card so the coach sees where it went
@@ -594,9 +623,41 @@ export default function ClientDetailPage() {
       setScrollToPlanId(inserted.id)
       setTimeout(() => setHighlightPlanId(null), 4000)
     }
-    showToast(`✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
+    showToast(opts?.toast ?? `✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
     loadData(['plans'])
     return true
+  }
+
+  // Copy a plan's days to a new week (new row, so no days are done and no ticks carry over)
+  const copyPlanTo = (plan: Plan, start: string) => {
+    const json = planJsonOf(plan)
+    return insertPlan({
+      week_start: start,
+      plan_details: json ? planToText(json) : plan.plan_details,
+      workout_time: plan.workout_time || '',
+      plan_json: json,
+    }, { toast: `✓ Plan copied to week of ${formatDate(start, country, 'dayMonth')}`, errorToast: true })
+  }
+
+  // + New plan sheet. Week starts today when no plan covers today, else the day after this week's plan ends.
+  const openNewPlanSheet = () => {
+    const cur = currentPlan(plans)
+    setSheetWeek(cur ? isoAdd(cur.week_start, 7) : localToday())
+    setPlanError('')
+    setAiError('')
+    setPlanMenuId(null)
+    setNewPlanSheetOpen(true)
+  }
+  // The manual builder (day-by-day editor), for the week picked in the sheet
+  const openManualBuilder = (week: string) => {
+    setPlanError('')
+    setAiError('')
+    setShowGeneratedPlan(false)
+    setNewPlan(prev => ({ ...prev, week_start: week || prev.week_start || nextMonday() }))
+    // Start from the client's available days as workout days
+    setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days))
+    setNewPlanTextMode(false)
+    setShowPlanForm(true)
   }
 
   // Cleans a structured plan for saving; null (with an error shown) if it has no workout yet
@@ -1089,7 +1150,32 @@ const handleResetPassword = async () => {
   // #37: this client's AI plans for the month are used up (the server refuses a 6th as well)
   const aiPlansUsedUp = !!aiPlans && aiPlans.used >= aiPlans.limit
   const country: Country | null = client ? normalizeCountry((client as { companies?: { country?: string | null } }).companies?.country) : null
+  // Train module on for this gym (Plans / Sessions / Progress tabs for PT clients)
+  const trainModule = !!(client as { companies?: { client_module_enabled?: boolean | null } } | null)?.companies?.client_module_enabled
   const chartData = getChartData()
+  // "Log today's session" bar: today's workout day of this week's plan (or this week's text plan).
+  // Hidden when there is nothing to log today (no plan this week, or today is a rest day).
+  const todayLog = (() => {
+    if (client?.client_type !== 'pt' || !trainModule) return null
+    const cur = currentPlan(plans)
+    if (!cur) return null
+    const json = planJsonOf(cur)
+    if (!json) return { plan: cur, day: null as string | null, label: 'Log today\'s session' }
+    const d = json.days.find(x => x.day === todayWeekday())
+    if (!d || d.rest) return null
+    return { plan: cur, day: d.day as string | null, label: `Log today's session · ${d.focus || 'Workout'}` }
+  })()
+  const openTodayLog = () => {
+    if (!todayLog) return
+    const key = `${todayLog.plan.id}:${todayLog.day ?? ''}`
+    setActiveTab('plans')
+    setNewPlanSheetOpen(false)
+    if (todayLog.day) setCoachOpenDay(todayLog.day)
+    // A day already done asks before logging a second session (same as under the day)
+    if (todayLog.day && doneDayKeys(todayLog.plan.id, sessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
+    else openMarkForm(key)
+    setScrollToPlanId(todayLog.plan.id)
+  }
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
   const currency: string | null = client ? ((client as any).companies?.currency || 'INR') : null
@@ -1213,6 +1299,31 @@ const handleResetPassword = async () => {
     )
   }
 
+  // Edit member panel (opens in Renew mode)
+  const openEditClient = () => {
+    const latest = memberships[0]
+    const parts = splitE164(client?.phone, country)
+    const clientCountry = normalizeCountry(client?.country || country)
+    setEditClientForm({
+      full_name: client?.full_name || '',
+      // The number without its code (the code is in the picker / the gym's own); unreadable values as saved
+      phone: parts ? (multiCountry || parts.country === phoneCountry(country) ? parts.local : displayPhone(client?.phone, country)) : client?.phone || '',
+      phone_country: parts?.country ?? clientCountry,
+      country: clientCountry,
+      currency: client?.currency || baseCurrency,
+      membership_currency: '',
+      plan_type: latest?.plan_type || '1 Month',
+      amount_paid: latest?.amount_paid?.toString() || '',
+      // Opens in Renew mode: dates start after the current membership (or today)
+      start_date: renewalStartDate(),
+      end_date: '',
+      client_type: client?.client_type || 'member'
+    })
+    setMembershipMode('renew')
+    setMembershipMessage('')
+    setShowEditClient(!showEditClient)
+  }
+
   // Skeleton while loading, so the page appears instantly instead of a blank "Loading..."
   if (loading) return (
     <div className="min-h-screen bg-gray-950 text-white" aria-busy="true">
@@ -1238,6 +1349,82 @@ const handleResetPassword = async () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
+      {newPlanSheetOpen && client && (() => {
+        const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'
+        const aiOn = (client as { companies?: { ai_plans_enabled?: boolean | null } }).companies?.ai_plans_enabled !== false
+        const left = aiPlans ? Math.max(0, aiPlans.limit - aiPlans.used) : null
+        // Latest plan that has started (else the newest), for "Copy last week's plan"
+        const started = plans.filter(p => p.week_start.slice(0, 10) <= localToday()).sort((x, y) => y.week_start.localeCompare(x.week_start))
+        const source = started[0] ?? [...plans].sort((x, y) => y.week_start.localeCompare(x.week_start))[0]
+        const close = () => setNewPlanSheetOpen(false)
+        const option = 'w-full min-h-[64px] text-left rounded-2xl border px-4 py-3 transition disabled:opacity-50 disabled:cursor-not-allowed'
+        return (
+          <div className="fixed inset-0 z-[55] flex items-end justify-center" role="dialog" aria-modal="true" aria-labelledby="new-plan-title">
+            <div className="absolute inset-0 bg-black/70" onClick={close} aria-hidden="true" />
+            <div className="relative w-full max-w-2xl bg-gray-900 border-t border-gray-800 rounded-t-3xl shadow-2xl max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+              <div className="pt-2 pb-1 flex justify-center touch-none cursor-grab"
+                onTouchStart={e => { sheetDragY.current = e.touches[0].clientY }}
+                onTouchMove={e => { if (sheetDragY.current !== null && e.touches[0].clientY - sheetDragY.current > 80) { sheetDragY.current = null; close() } }}
+                onTouchEnd={() => { sheetDragY.current = null }}>
+                <span className="w-10 h-1.5 rounded-full bg-gray-700" aria-hidden="true" />
+              </div>
+              <div className="px-5 pb-6">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0 pt-2">
+                    <h2 id="new-plan-title" className="text-lg font-bold text-white">New plan for {first}</h2>
+                    {client.goal && <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">Goal: {client.goal}</p>}
+                  </div>
+                  <button type="button" onClick={close} aria-label="Close"
+                    className="w-11 h-11 -mr-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-lg">✕</button>
+                </div>
+
+                <label htmlFor="sheet-week" className="text-xs text-gray-500 mt-5 mb-1.5 block uppercase tracking-wider">Week starts</label>
+                <input id="sheet-week" type="date" value={sheetWeek} onChange={e => setSheetWeek(e.target.value)}
+                  className="w-full min-h-[44px] bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <p className="text-xs text-gray-400 mt-1">{sheetWeek ? `Covers ${formatDate(sheetWeek, country, 'weekday')} – ${formatDate(weekEnd(sheetWeek), country, 'weekday')} (7 days)` : 'Pick the first day of the plan'}</p>
+
+                <div className="space-y-2 mt-5">
+                  {aiOn && (
+                    <button type="button" disabled={!sheetWeek || aiPlansUsedUp || generatingPlan}
+                      onClick={() => { setAiPlanMeta(prev => ({ ...prev, week_start: sheetWeek })); close(); handleGeneratePlan() }}
+                      className={`${option} bg-purple-950/40 border-purple-800 hover:border-purple-500`}>
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-white">✨ Generate with AI</span>
+                        {left !== null && (
+                          <span className={`text-[11px] shrink-0 ${aiPlansUsedUp ? 'text-amber-400' : 'text-purple-300'}`}>
+                            {aiPlansUsedUp ? 'No AI plans left this month' : `${left} of ${aiPlans!.limit} left this month`}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-xs text-gray-400 mt-1">
+                        {aiPlansUsedUp && aiPlans
+                          ? `More from ${formatDate(aiPlans.resetsOn, country, 'dayMonth')}. Building a plan by hand still works.`
+                          : 'Uses goal, injuries and schedule from profile. You review before assigning.'}
+                      </span>
+                    </button>
+                  )}
+                  <button type="button" disabled={!sheetWeek || generatingPlan}
+                    onClick={() => { close(); openManualBuilder(sheetWeek) }}
+                    className={`${option} bg-gray-800/60 border-gray-700 hover:border-orange-500`}>
+                    <span className="block text-sm font-semibold text-white">✍️ Build manually</span>
+                    <span className="block text-xs text-gray-400 mt-1">Pick exercises from the list, set sets and reps per day.</span>
+                  </button>
+                </div>
+
+                {source && (
+                  <button type="button" disabled={!sheetWeek || saving}
+                    onClick={async () => { if (await copyPlanTo(source, sheetWeek)) close() }}
+                    className="w-full min-h-[44px] mt-3 text-sm text-orange-400 hover:text-orange-300 disabled:opacity-50">
+                    {saving ? 'Copying…' : 'Copy last week\'s plan instead'}
+                    <span className="block text-[11px] text-gray-500">From {formatDate(source.week_start.slice(0, 10), country, 'dayMonth')} – {formatDate(weekEnd(source.week_start), country, 'dayMonth')}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
@@ -1246,90 +1433,100 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
-      {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')}
-            className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
-            ← Back
-          </button>
-          {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
-          {!isCoach && (<>
-          {/* No login yet (coach-run member): nothing to reset */}
-          {!isNoLogin(client?.email) && <button
-            onClick={() => setShowResetPassword(!showResetPassword)}
-            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-            Reset Password
-          </button>}
-          <button
-            onClick={() => {
-              const latest = memberships[0]
-              const parts = splitE164(client?.phone, country)
-              const clientCountry = normalizeCountry(client?.country || country)
-              setEditClientForm({
-                full_name: client?.full_name || '',
-                // The number without its code (the code is in the picker / the gym's own); unreadable values as saved
-                phone: parts ? (multiCountry || parts.country === phoneCountry(country) ? parts.local : displayPhone(client?.phone, country)) : client?.phone || '',
-                phone_country: parts?.country ?? clientCountry,
-                country: clientCountry,
-                currency: client?.currency || baseCurrency,
-                membership_currency: '',
-                plan_type: latest?.plan_type || '1 Month',
-                amount_paid: latest?.amount_paid?.toString() || '',
-                // Opens in Renew mode: dates start after the current membership (or today)
-                start_date: renewalStartDate(),
-                end_date: '',
-                client_type: client?.client_type || 'member'
-              })
-              setMembershipMode('renew')
-              setMembershipMessage('')
-              setShowEditClient(!showEditClient)
-            }}
-            className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
-            Edit
-          </button>
-          {client?.archived_at ? (
-            <button
-              onClick={handleUnarchiveClient}
-              className="text-xs text-green-500 hover:text-green-400 border border-green-900 hover:border-green-500 px-3 py-1.5 rounded-lg transition">
-              Restore
-            </button>
-          ) : (
-            <button
-              onClick={handleArchiveClient}
-              className="text-xs text-gray-500 hover:text-amber-400 border border-gray-700 hover:border-amber-600 px-3 py-1.5 rounded-lg transition">
-              Archive
-            </button>
-          )}
-          <button
-            onClick={handleDeleteClient}
-            disabled={deletingClient}
-            className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
-            {deletingClient ? 'Deleting...' : 'Delete'}
-          </button>
-          </>)}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
-              <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
-                {client?.client_type === 'pt' && (
-                  <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
-                )}
-                {client?.archived_at && (
-                  <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
+      {/* Header: back, name, coach · joined, ⋯ member actions, goal + membership chips */}
+      {(() => {
+        const coachLabel = client?.primary_coach_id
+          ? (client.primary_coach_id === viewerId ? 'You' : staff.find(x => x.id === client.primary_coach_id)?.full_name || client?.trainer_name || 'Coach')
+          : client?.trainer_name || ''
+        const joined = client?.created_at ? formatDate(client.created_at, country, 'monthYear') : ''
+        const metaLine = [
+          !coachCompany && (coachLabel ? `Coach: ${coachLabel}` : 'No coach'),
+          joined && `Joined ${joined}`,
+        ].filter(Boolean).join(' · ')
+        const m = memberships[0]
+        const mDays = m ? daysLeftFromDate(m.end_date) : null
+        const mEnd = m ? formatDate(m.end_date, country, 'dayMonth') : ''
+        const mChip = m && mDays !== null
+          ? mDays < 0 ? { dot: 'bg-red-500', text: `Expired ${mEnd}`, cls: 'text-red-300 border-red-900' }
+            : mDays <= 11 ? { dot: 'bg-amber-500', text: `Expiring ${mEnd}`, cls: 'text-amber-300 border-amber-900' }
+            : { dot: 'bg-green-500', text: `Active till ${mEnd}`, cls: 'text-green-300 border-green-900' }
+          : null
+        const menuItem = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
+        return (
+          <div className="bg-gray-900 border-b border-gray-800">
+            <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-4">
+              <div className="flex items-start gap-2">
+                <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')} aria-label="Back"
+                  className="shrink-0 w-11 h-11 -ml-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl transition text-xl">
+                  ←
+                </button>
+                <div className="flex-1 min-w-0 pt-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h1 className="text-2xl font-bold text-white leading-tight break-words">{client?.full_name}</h1>
+                    {client?.client_type === 'pt' && (
+                      <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
+                    )}
+                    {client?.archived_at && (
+                      <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
+                    )}
+                  </div>
+                  {metaLine && <p className="text-xs text-gray-500 mt-0.5">{metaLine}</p>}
+                </div>
+                {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
+                {!isCoach && (
+                  <div className="relative shrink-0">
+                    <button type="button" onClick={() => setHeaderMenuOpen(o => !o)} aria-label="Member actions"
+                      aria-haspopup="menu" aria-expanded={headerMenuOpen}
+                      className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-xl leading-none">
+                      ⋯
+                    </button>
+                    {headerMenuOpen && (<>
+                      <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} aria-hidden="true" />
+                      <div role="menu" className="absolute right-0 top-12 z-50 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                        <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); openEditClient() }}
+                          className={`${menuItem} text-orange-400`}>Edit</button>
+                        {/* No login yet (coach-run member): nothing to reset */}
+                        {!isNoLogin(client?.email) && (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); setShowResetPassword(!showResetPassword) }}
+                            className={`${menuItem} text-gray-200`}>Reset password</button>
+                        )}
+                        {client?.archived_at ? (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); handleUnarchiveClient() }}
+                            className={`${menuItem} text-green-400`}>Restore</button>
+                        ) : (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); handleArchiveClient() }}
+                            className={`${menuItem} text-gray-200`}>Archive</button>
+                        )}
+                        <button role="menuitem" type="button" disabled={deletingClient} onClick={() => { setHeaderMenuOpen(false); handleDeleteClient() }}
+                          className={`${menuItem} text-red-400 border-t border-gray-800 disabled:opacity-50`}>{deletingClient ? 'Deleting...' : 'Delete'}</button>
+                      </div>
+                    </>)}
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-gray-400">{shownEmail(client?.email) || (isNoLogin(client?.email) ? 'No login' : '')}</p>
-              {client?.phone && (
-                <p className="text-xs text-gray-400">{displayPhone(client?.phone, country)}</p>
+              {(client?.goal || mChip) && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {client?.goal && (
+                    <button type="button" onClick={() => setGoalOpen(o => !o)} aria-expanded={goalOpen}
+                      aria-label={goalOpen ? 'Hide full goal' : 'Show full goal'}
+                      className={`min-h-[44px] text-left text-xs text-orange-200 bg-orange-950/60 border border-orange-900 rounded-xl px-3 py-2 transition hover:border-orange-700 ${goalOpen ? 'w-full' : 'max-w-full min-w-0'}`}>
+                      <span className={goalOpen ? 'whitespace-pre-wrap' : 'block truncate'}>
+                        <span className="text-orange-400">Goal:</span> {client.goal}
+                      </span>
+                    </button>
+                  )}
+                  {mChip && (
+                    <span className={`min-h-[44px] inline-flex items-center gap-2 text-xs bg-gray-950 border rounded-xl px-3 ${mChip.cls}`}>
+                      <span className={`w-2 h-2 rounded-full ${mChip.dot}`} aria-hidden="true" />
+                      {mChip.text}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
-        </div>
-      </div>
+        )
+      })()}
 
       {/* Edit Client Panel */}
       {showEditClient && !isCoach && (
@@ -1538,7 +1735,8 @@ const handleResetPassword = async () => {
   </div>
 )}
 
-      {/* Stats */}
+      {/* Stats (PT clients with the Train tabs see activities / minutes in Progress instead) */}
+      {!(client?.client_type === 'pt' && trainModule) && (
       <div className="max-w-2xl mx-auto px-6 pt-5 grid grid-cols-2 gap-3 mb-2">
         {client?.client_type === 'pt' ? (
           <>
@@ -1592,6 +1790,7 @@ const handleResetPassword = async () => {
           </>
         )}
       </div>
+      )}
 
       {/* Before you start (#40): what any staff member should know before training this PT client */}
       {client?.client_type === 'pt' && (() => {
@@ -1623,6 +1822,8 @@ const handleResetPassword = async () => {
                   {b.medical && (
                     <p className="text-amber-300 bg-amber-950/40 border border-amber-900 rounded-lg px-3 py-2">⚠ Medical / injuries: {b.medical}</p>
                   )}
+                  {/* Last sessions: shown here when there is no Sessions tab (Train module off); otherwise in Sessions */}
+                  {!trainModule && (<>
                   <p className="text-gray-400">
                     {b.daysSinceLast === null ? 'No sessions yet'
                       : b.daysSinceLast === 0 ? 'Last trained today'
@@ -1650,6 +1851,7 @@ const handleResetPassword = async () => {
                       See all {b.totalSessions} session{b.totalSessions === 1 ? '' : 's'} →
                     </button>
                   )}
+                  </>)}
                 </div>
               )}
             </div>
@@ -1659,21 +1861,23 @@ const handleResetPassword = async () => {
 
       {/* Tabs — PT members only, requires client module */}
       {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
-        <div className="max-w-2xl mx-auto px-6 mt-4">
-          <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
+        <div className="sticky top-0 z-30 bg-gray-950 mt-3 mb-4">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-2">
+          <div role="tablist" className="grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
             {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
+              <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
+                className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
                   : 'text-gray-400 hover:text-white'}`}>
                 {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
               </button>
             ))}
           </div>
+          </div>
         </div>
       )}
 
-      <div className="max-w-2xl mx-auto px-6 pb-8">
+      <div className={`max-w-2xl mx-auto px-6 ${todayLog ? 'pb-32' : 'pb-8'}`}>
 
         {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
@@ -1681,15 +1885,6 @@ const handleResetPassword = async () => {
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
           <div>
-<p className="text-xs text-gray-400 mb-3">
-  📅 Today is <span className="text-white font-medium">{formatDate(new Date(), country, 'weekday')}</span>. Each plan covers 7 days from its start date; the client can tick off days only during that week.
-</p>
-{client?.goal && (
-  <div className="bg-orange-950 border border-orange-900 rounded-2xl px-5 py-4 mb-4">
-    <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Client Goal</p>
-    <p className="text-sm text-orange-200">{client.goal}</p>
-  </div>
-)}
 {(() => {
   const missing = [
     !client?.goal && 'goal',
@@ -1710,46 +1905,6 @@ const handleResetPassword = async () => {
     </div>
   )
 })()}
-            <div className="mb-4">
-              <div className="flex flex-wrap justify-between items-center gap-2">
-                <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
-                <div className="flex flex-wrap gap-2">
-  {/* AI plans can be turned off per company by the super admin (companies.ai_plans_enabled) */}
-  {(client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
-  <button
-    onClick={handleGeneratePlan}
-    disabled={generatingPlan || aiPlansUsedUp}
-    className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
-    {generatingPlan ? '⏳ Creating…' : '✨ Create plan with AI'}
-  </button>
-  )}
-  <button onClick={() => {
-      setPlanError('')
-      setAiError('')
-      if (!showPlanForm) {
-        setShowGeneratedPlan(false)
-        setNewPlan(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
-        // Start from the client's available days as workout days
-        setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days))
-        setNewPlanTextMode(false)
-      }
-      setShowPlanForm(!showPlanForm)
-    }}
-    disabled={generatingPlan}
-    className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
-    {showPlanForm ? 'Close' : '✍️ Write plan manually'}
-  </button>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Create a weekly plan, review it, then pick the week to assign it to the client.</p>
-              {aiPlans && (client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
-                <p className={`text-xs mt-1 ${aiPlansUsedUp ? 'text-amber-400' : 'text-purple-300/80'}`}>
-                  {aiPlansUsedUp
-                    ? `All ${aiPlans.limit} AI plans used this month · more from ${formatDate(aiPlans.resetsOn, country, 'dayMonth')}. Writing a plan by hand still works.`
-                    : `${Math.min(aiPlans.used, aiPlans.limit)} of ${aiPlans.limit} AI plans used this month`}
-                </p>
-              )}
-            </div>
 {generatingPlan && (
   <div ref={aiWorkingRef} className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4">
   <style>{`
@@ -1894,16 +2049,57 @@ const handleResetPassword = async () => {
               </div>
             )}
 
-            {plans.length === 0 ? (
-              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
-                No plans assigned yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {(showAllPlans ? orderPlansByWeek(plans) : orderPlansByWeek(plans).slice(0, 6)).map(plan => (
-  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-4 bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
-    {editingPlan?.id === plan.id ? (
-      // Edit mode
+            {(() => {
+              const today = localToday()
+              const cur = currentPlan(plans)
+              const upcoming = plans.filter(p => p !== cur && weekStatus(p.week_start) === 'upcoming')
+                .sort((x, y) => x.week_start.localeCompare(y.week_start))
+              const past = plans.filter(p => p !== cur && weekStatus(p.week_start) !== 'upcoming')
+                .sort((x, y) => y.week_start.localeCompare(x.week_start))
+              const shownPast = showAllPlans ? past : past.slice(0, 6)
+              const s = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+              // ⋯ on a plan: Edit plan, Copy to next week, Delete plan (owner / partner only)
+              const renderPlanMenu = (plan: Plan, withNew = false) => {
+                const nextStart = isoAdd(plan.week_start, 7)
+                const item = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
+                return (
+                  <div className="relative shrink-0">
+                    <button type="button" onClick={e => { e.stopPropagation(); setPlanMenuId(planMenuId === plan.id ? null : plan.id) }}
+                      aria-label={`Plan actions for week of ${formatWeekStart(plan.week_start)}`} aria-haspopup="menu" aria-expanded={planMenuId === plan.id}
+                      className="w-11 h-11 -mr-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-xl leading-none">
+                      ⋯
+                    </button>
+                    {planMenuId === plan.id && (<>
+                      <div className="fixed inset-0 z-40" onClick={e => { e.stopPropagation(); setPlanMenuId(null) }} aria-hidden="true" />
+                      <div role="menu" className="absolute right-0 top-11 z-50 w-56 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                        {withNew && (
+                          <button role="menuitem" type="button" disabled={generatingPlan}
+                            onClick={e => { e.stopPropagation(); openNewPlanSheet() }}
+                            className={`${item} text-orange-400 border-b border-gray-800 disabled:opacity-50`}>+ New plan</button>
+                        )}
+                        <button role="menuitem" type="button"
+                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
+                          className={`${item} text-gray-100`}>Edit plan</button>
+                        <button role="menuitem" type="button" disabled={saving}
+                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); copyPlanTo(plan, nextStart) }}
+                          className={`${item} text-gray-100 disabled:opacity-50`}>Copy to next week <span className="ml-auto text-xs text-gray-500">{formatDate(nextStart, country, 'dayMonth')}</span></button>
+                        {!isCoach && (
+                          <button role="menuitem" type="button" disabled={deletingPlanId === plan.id}
+                            onClick={e => { e.stopPropagation(); setPlanMenuId(null); handleDeletePlan(plan.id) }}
+                            className={`${item} text-red-400 border-t border-gray-800 disabled:opacity-50`}>{deletingPlanId === plan.id ? 'Deleting…' : 'Delete plan'}</button>
+                        )}
+                      </div>
+                    </>)}
+                  </div>
+                )
+              }
+
+              // One plan: "This week" card (variant 'current', always open) or a row (tap to open its week)
+              const renderPlan = (plan: Plan, variant: 'current' | 'row') => {
+                const ring = highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'
+                if (editingPlan?.id === plan.id) return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl p-4 border ${ring}`}>
       <div className="space-y-3">
         <p className="text-xs text-gray-500 uppercase tracking-wider">Editing Plan</p>
         <input type="date"
@@ -1953,19 +2149,17 @@ const handleResetPassword = async () => {
           </button>
         </div>
       </div>
-    ) : (
-      // View mode: compact card, tap to expand
-      (() => {
-        const summary = summarizeAny(plan, plan.week_start)
-        const planJson = planJsonOf(plan)
-        const status = weekStatus(plan.week_start)
-        const open = expandedPlanId === plan.id
-        const done = doneDayKeys(plan.id, sessions)
-        const workoutLabels = summary.days.filter(d => !isRestDay(d))
-        const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
-        const isCurrent = status === 'current'
-        // Under an open day of this week's plan: "Mark done for <client>" → the session form.
-        // A day already done needs a confirm step before a second session is logged for it.
+                  </div>
+                )
+                const summary = summarizeAny(plan, plan.week_start)
+                const planJson = planJsonOf(plan)
+                const status = weekStatus(plan.week_start)
+                const done = doneDayKeys(plan.id, sessions)
+                const workoutLabels = summary.days.filter(d => !isRestDay(d))
+                const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
+                const isCurrent = status === 'current'
+                const open = variant === 'current' || expandedPlanId === plan.id
+                const start = plan.week_start.slice(0, 10)
         const renderMarkPanel = (day: PlanDay | null, label: string | null) => {
           const key = `${plan.id}:${day?.day ?? ''}`
           const isDone = !!day && done.has(day.day)
@@ -2044,108 +2238,221 @@ const handleResetPassword = async () => {
             </div>
           )
         }
-        return (
-      <>
-        <div className="flex justify-between items-start gap-3">
-          <button
-            onClick={() => setExpandedPlanId(open ? null : plan.id)}
-            aria-expanded={open}
-            className="flex-1 min-w-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
-              <p className="font-semibold text-sm">{formatDate(plan.week_start.slice(0, 10), country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}</p>
-              {status === 'current' && <span className="text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full">This week</span>}
-              {status === 'upcoming' && <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>}
-              {status === 'past' && <span className="text-[11px] text-gray-500">Past</span>}
-              {plan.workout_time && <span className="text-xs text-orange-400">⏰ {plan.workout_time}</span>}
-            </div>
-            <div className="pl-5 mt-1.5">
-              {summary.days.length > 0 ? (
-                <>
-                  <p className="text-xs text-gray-400">
-                    {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
-                    {summary.exercises > 0 ? ` · ${summary.exercises} exercises` : ''}
-                    {(doneCount > 0 || status === 'current') && (
-                      <span className={doneCount > 0 ? 'text-green-400 font-medium' : 'text-gray-500'}> · {doneCount} of {workoutLabels.length} done</span>
-                    )}
-                  </p>
-                  {!open && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {summary.days.map((d, i) => {
-                        const isDone = !isRestDay(d) && done.has(dayKey(d))
-                        return (
-                          <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${isRestDay(d) ? 'border-gray-800 text-gray-600' : isDone ? 'border-green-700 bg-green-950 text-green-300' : 'border-gray-700 text-gray-300'}`}>
-                            {isDone ? '✓ ' : ''}{d}
+                const allDone = workoutLabels.length > 0 && doneCount >= workoutLabels.length
+                const badge = status === 'upcoming'
+                  ? <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full shrink-0">Upcoming</span>
+                  : workoutLabels.length > 0
+                    ? <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${allDone ? 'text-green-300 bg-green-950 border-green-800' : 'text-orange-300 bg-orange-950/60 border-orange-900'}`}>{doneCount} of {workoutLabels.length} done</span>
+                    : null
+
+                // The open week: 7-day strip, legend, the selected day's exercises (text plans: the text)
+                const renderWeek = () => {
+                  if (!planJson) return (
+                    <div className="border-t border-gray-800 px-4 py-4 space-y-3">
+                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+                      {isCurrent && renderMarkPanel(null, null)}
+                    </div>
+                  )
+                  const days = daysInWeekOrder(planJson, start)
+                  const dates = days.map((_, i) => isoAdd(start, i))
+                  const todayIdx = dates.indexOf(today)
+                  const fallback = todayIdx >= 0 ? days[todayIdx].day : (days.find(d => !d.rest) ?? days[0]).day
+                  const chosen = variant === 'current' ? coachOpenDay : selDay[plan.id]
+                  const selIdx = Math.max(0, days.findIndex(d => d.day === (chosen && days.some(x => x.day === chosen) ? chosen : fallback)))
+                  const select = (day: string) => {
+                    if (variant === 'current') setCoachOpenDay(day)
+                    else setSelDay(prev => ({ ...prev, [plan.id]: day }))
+                    closeMarkForm()
+                  }
+                  const d = days[selIdx]
+                  const dayDone = !d.rest && done.has(d.day)
+                  const notes = dayDone ? doneNotesWithWho(plan.id)[d.day] : ''
+                  // What was ticked on the day (latest session for it); this week's days not yet done show the coach's ticks
+                  const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                  const ticks = saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
+                    : isCurrent && !dayDone ? coachTicks[`${plan.id}:${d.day}`] || [] : []
+                  const canTick = isCurrent && !d.rest && !dayDone
+                  const showTicks = canTick || ticks.length > 0
+                  return (
+                    <>
+                      <div className="px-3 pt-1 pb-3">
+                        <div className="grid grid-cols-7 gap-1">
+                          {days.map((x, i) => {
+                            const isDone = !x.rest && done.has(x.day)
+                            const isSel = i === selIdx
+                            const circle = isDone ? 'bg-green-600 border-2 border-green-600 text-white'
+                              : x.rest ? 'border border-gray-700 text-gray-500'
+                              : 'border-2 border-orange-500 text-orange-300'
+                            return (
+                              <button key={x.day} type="button" onClick={() => select(x.day)} aria-pressed={isSel}
+                                aria-label={`${formatDate(dates[i], country, 'weekday')}, ${x.rest ? 'Rest' : x.focus || 'Workout'}${isDone ? ', done' : ''}`}
+                                className="flex flex-col items-center gap-1 py-1 min-h-[44px] rounded-xl focus:outline-none focus-visible:bg-gray-800">
+                                <span className={`text-[11px] font-medium ${dates[i] === today ? 'text-orange-400' : 'text-gray-500'}`} aria-hidden="true">{x.day[0]}</span>
+                                <span aria-hidden="true"
+                                  className={`w-9 h-9 rounded-full grid place-items-center text-sm font-semibold ${circle} ${isSel ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900' : ''}`}>
+                                  {isDone ? '✓' : parseDate(dates[i]).getDate()}
+                                </span>
+                                <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${dates[i] === today ? 'bg-orange-500' : 'bg-transparent'}`} />
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2 text-[11px] text-gray-500" aria-hidden="true">
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-600" />Done</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border-2 border-orange-500" />Workout</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border border-gray-600" />Rest</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500" />Today</span>
+                        </div>
+                      </div>
+                      <div className="border-t border-gray-800 px-4 py-4 space-y-3">
+                        <div>
+                          <p className="text-xs text-gray-500">{formatDate(dates[selIdx], country, 'weekday')}</p>
+                          <p className={`text-base font-semibold mt-0.5 ${d.rest ? 'text-gray-300' : 'text-white'}`}>{d.rest ? 'Rest day' : d.focus || 'Workout'}</p>
+                          {dayDone && <p className="text-xs text-green-400 mt-1">✓ Done{notes ? ` · ${notes}` : ''}</p>}
+                        </div>
+                        {d.rest && <p className="text-sm text-gray-400">Rest and recovery. Nothing to log.</p>}
+                        {d.exercises.length > 0 && (
+                          <ol className={`divide-y divide-gray-800 rounded-xl border border-gray-800 ${d.rest ? 'opacity-70' : 'bg-gray-950/40'}`}>
+                            {d.rest && <li className="px-3 py-2 text-[11px] uppercase tracking-wider text-gray-500">Optional</li>}
+                            {d.exercises.map((e, i) => {
+                              const ticked = ticks.includes(i)
+                              const body = (
+                                <>
+                                  {showTicks && (
+                                    <span aria-hidden="true"
+                                      className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border grid place-items-center text-[11px] font-bold ${ticked ? 'bg-green-600 border-green-500 text-white' : 'border-gray-600 text-transparent'}`}>✓</span>
+                                  )}
+                                  <span className="flex-1 min-w-0">
+                                    <span className="flex items-baseline justify-between gap-3">
+                                      <span className={`text-sm ${ticked ? 'text-gray-400 line-through decoration-gray-600' : 'text-gray-100'}`}>{e.name}</span>
+                                      {exerciseDetail(e) && <span className="text-xs text-orange-300 shrink-0 text-right">{exerciseDetail(e)}</span>}
+                                    </span>
+                                    {e.note && <span className="block text-[11px] text-gray-500 mt-0.5">{e.note}</span>}
+                                  </span>
+                                </>
+                              )
+                              return (
+                                <li key={i}>
+                                  {canTick ? (
+                                    <button type="button" role="checkbox" aria-checked={ticked}
+                                      onClick={() => toggleCoachTick(plan.id, d.day, i)}
+                                      className="w-full min-h-[44px] flex items-start gap-3 text-left px-3 py-2.5">
+                                      {body}
+                                    </button>
+                                  ) : (
+                                    <div className="flex items-start gap-3 px-3 py-2">{body}</div>
+                                  )}
+                                </li>
+                              )
+                            })}
+                          </ol>
+                        )}
+                        {isCurrent && !d.rest && renderMarkPanel(d, dayLabel(d))}
+                        {planJson.note && <p className="text-[11px] text-gray-500">{planJson.note}</p>}
+                      </div>
+                    </>
+                  )
+                }
+
+                if (variant === 'current') return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl border transition-shadow duration-700 ${ring}`}>
+                    <div className="flex items-start gap-2 px-4 pt-3 pb-2">
+                      <div className="flex-1 min-w-0 pt-1">
+                        <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">This week</p>
+                        <p className="text-sm font-semibold text-white mt-0.5">
+                          {formatDate(start, country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}
+                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {plan.workout_time}</span>}
+                        </p>
+                      </div>
+                      <div className="pt-2">{badge}</div>
+                      {renderPlanMenu(plan, true)}
+                    </div>
+                    {renderWeek()}
+                  </div>
+                )
+                return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl border transition-shadow duration-700 ${ring}`}>
+                    <div className="flex items-center gap-2 pr-4">
+                      <button type="button" onClick={() => { setExpandedPlanId(open ? null : plan.id); closeMarkForm() }} aria-expanded={open}
+                        className="flex-1 min-w-0 min-h-[56px] text-left pl-4 py-3 flex items-center gap-3 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold text-white">
+                            {formatDate(start, country, 'dayMonth')} – {formatDate(weekEnd(plan.week_start), country, 'dayMonth')}
                           </span>
-                        )
-                      })}
+                          <span className="block text-xs text-gray-500 mt-0.5">
+                            {summary.days.length > 0
+                              ? `${s(summary.workoutDays, 'workout')}${summary.exercises > 0 ? ` · ${s(summary.exercises, 'exercise')}` : ''}`
+                              : 'Text plan'}
+                            {plan.workout_time ? ` · ⏰ ${plan.workout_time}` : ''}
+                          </span>
+                        </span>
+                        {badge}
+                        <span className="text-gray-500 text-xs" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                      </button>
+                      {open && renderPlanMenu(plan)}
+                    </div>
+                    {open && renderWeek()}
+                  </div>
+                )
+              }
+
+              const lastEnded = past[0] ? formatDate(weekEnd(past[0].week_start), country, 'weekday') : ''
+              return (
+                <div className="space-y-5">
+                  {upcoming.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider px-1">Upcoming</p>
+                      {upcoming.map(p => renderPlan(p, 'row'))}
                     </div>
                   )}
-                </>
-              ) : (
-                !open && <p className="text-xs text-gray-400 line-clamp-2">{summary.fallback.join(' ')}</p>
-              )}
-            </div>
-          </button>
-          <div className="flex gap-1.5 shrink-0">
-            <button
-              onClick={e => { e.stopPropagation(); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
-              aria-label={`Edit plan for week of ${formatWeekStart(plan.week_start)}`}
-              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 rounded-lg transition">
-              ✏️
-            </button>
-            {!isCoach && <button
-              onClick={e => { e.stopPropagation(); handleDeletePlan(plan.id) }}
-              disabled={deletingPlanId === plan.id}
-              aria-label={`Delete plan for week of ${formatWeekStart(plan.week_start)}`}
-              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 rounded-lg transition disabled:opacity-50">
-              {deletingPlanId === plan.id ? '…' : '🗑'}
-            </button>}
-          </div>
-        </div>
-        {open && (
-          <div className="border-t border-gray-800 pt-3 mt-3">
-            {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneNotesWithWho(plan.id)} compact
-                  ticks={Object.fromEntries(planJson.days.map(d => {
-                    // What was ticked on that day (latest session for the day); this week's days not yet done show the coach's ticks
-                    const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
-                    if (saved.length) return [d.day, tickedFromSaved(d, saved[saved.length - 1].exercises_done)]
-                    return [d.day, isCurrent && !done.has(d.day) ? coachTicks[`${plan.id}:${d.day}`] || [] : []]
-                  }).filter(([, list]) => (list as number[]).length))}
-                  {...(isCurrent ? {
-                    onTick: (d: string, i: number) => { if (!done.has(d)) toggleCoachTick(plan.id, d, i) },
-                    openDay: coachOpenDay,
-                    onToggle: (d: string | null) => { setCoachOpenDay(d); closeMarkForm() },
-                    renderOpen: (day: PlanDay, label: string) => (day.rest ? null : renderMarkPanel(day, label)),
-                  } : {})} />
-              : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
-          </div>
-        )}
-        {/* Older text-only plans: one "Mark done" for this week, saved without a plan day */}
-        {!planJson && isCurrent && (
-          <div className="border-t border-gray-800 pt-3 mt-3">{renderMarkPanel(null, null)}</div>
-        )}
-      </>
-        )
-      })()
-    )}
-  </div>
-))}
-                {plans.length > 6 && (
-                  <button onClick={() => setShowAllPlans(!showAllPlans)}
-                    className="w-full text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 py-2.5 rounded-xl transition">
-                    {showAllPlans ? 'Show fewer' : `Show older plans (${plans.length - 6})`}
-                  </button>
-                )}
-              </div>
-            )}
+                  {cur ? renderPlan(cur, 'current') : (
+                    <div className="bg-gray-900 rounded-2xl border border-gray-800 px-6 py-8 text-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 mx-auto text-gray-500" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                      </svg>
+                      <p className="text-base font-semibold text-white mt-3">No plan for this week</p>
+                      {lastEnded && <p className="text-xs text-gray-500 mt-1">Last plan ended {lastEnded}</p>}
+                      <button type="button" onClick={openNewPlanSheet} disabled={generatingPlan}
+                        className="mt-5 w-full sm:w-auto sm:px-10 min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50">
+                        + New plan
+                      </button>
+                    </div>
+                  )}
+                  {past.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider px-1">Past plans</p>
+                      {shownPast.map(p => renderPlan(p, 'row'))}
+                      {past.length > 6 && (
+                        <button onClick={() => setShowAllPlans(!showAllPlans)}
+                          className="w-full min-h-[44px] text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 rounded-xl transition">
+                          {showAllPlans ? 'Show fewer' : `Show older plans (${past.length - 6})`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 
         {/* SESSIONS TAB */}
         {activeTab === 'sessions' && (
           <div className="space-y-3">
+            {/* Last trained (moved here from Before you start) */}
+            {(() => {
+              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+              return (
+                <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
+                  <p className="text-sm text-white">
+                    {b.daysSinceLast === null ? 'No sessions yet'
+                      : b.daysSinceLast === 0 ? 'Last trained today'
+                      : `Last trained ${b.daysSinceLast} day${b.daysSinceLast === 1 ? '' : 's'} ago`}
+                  </p>
+                  {b.totalSessions > 0 && <p className="text-xs text-gray-500 shrink-0">{b.totalSessions} session{b.totalSessions === 1 ? '' : 's'}</p>}
+                </div>
+              )
+            })()}
             {renderShare()}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
@@ -2163,14 +2470,14 @@ const handleResetPassword = async () => {
                           {!coachCompany && <span className="text-xs font-normal text-gray-500"> · {loggedByText(session)}</span>}
                         </p>
                         {session.duration_minutes && (
-                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} mins{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{session.activity ? <span className="text-gray-300">{activityText(session.activity)} · </span> : null}{session.duration_minutes} min{sessionKcal(session) ? ` · ${kcalText(sessionKcal(session))} (est.)` : ''}</p>
                         )}
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">
                             ✓ {session.plan_day}
                             {(() => {
                               const ex = session.exercises_done as ExercisesDone | null | undefined
-                              return ex && Array.isArray(ex.done) && ex.total ? <span className="text-gray-400"> · {ex.done.length} of {ex.total} exercises</span> : null
+                              return ex && Array.isArray(ex.done) && ex.total ? <span className="text-gray-400"> · {ex.done.length} of {ex.total} exercise{ex.total === 1 ? '' : 's'}</span> : null
                             })()}
                           </p>
                         )}
@@ -2219,6 +2526,16 @@ const handleResetPassword = async () => {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
+                <p className="text-xs text-gray-500 mt-1">Total Activities</p>
+              </div>
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
+                <p className="text-xs text-gray-500 mt-1">Total Minutes</p>
+              </div>
+            </div>
             {renderShare()}
             {(() => {
               // Plan adherence: this week's plan and the last 4 weeks
@@ -2230,7 +2547,7 @@ const handleResetPassword = async () => {
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wider">Plan this week</p>
                     {week ? (
-                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(week))}`}>{week.done} of {week.planned}</span> <span className="text-xs text-gray-500">days done</span></p>
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(week))}`}>{week.done} of {week.planned}</span> <span className="text-xs text-gray-500">day{week.planned === 1 ? '' : 's'} done</span></p>
                     ) : (
                       <p className="text-sm text-amber-400 mt-1">{cur ? 'Plan has no clear days' : 'No plan this week'}</p>
                     )}
@@ -2238,7 +2555,7 @@ const handleResetPassword = async () => {
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wider">Last 4 weeks</p>
                     {four ? (
-                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(four))}`}>{pct(four)}%</span> <span className="text-xs text-gray-500">{four.done} of {four.planned} days</span></p>
+                      <p className="mt-1"><span className={`text-2xl font-bold ${pctColor(pct(four))}`}>{pct(four)}%</span> <span className="text-xs text-gray-500">{four.done} of {four.planned} day{four.planned === 1 ? '' : 's'}</span></p>
                     ) : (
                       <p className="text-sm text-gray-500 mt-1">No plans yet</p>
                     )}
@@ -2701,6 +3018,17 @@ const handleResetPassword = async () => {
   </div>
 )}
       </div>
+      {/* Log today's session: fixed at the bottom on every tab */}
+      {todayLog && (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
+            <button type="button" onClick={openTodayLog}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              {todayLog.label}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
