@@ -45,8 +45,26 @@ export function loginEmailFor(country: PhoneCountry, localDigits: string): strin
 }
 
 // True for logins made from a phone number (any country), false for real email logins
+// and for generated child logins (below), which share the domain but aren't phones.
 export function isPhoneLogin(email: string | null | undefined): boolean {
-  return !!email && email.endsWith(LOGIN_DOMAIN)
+  return !!email && email.endsWith(LOGIN_DOMAIN) && !isGeneratedLogin(email)
+}
+
+// Child students added with no phone of their own (Dojo Build 1, #53): the parent's phone is contact only, never a login,
+// so siblings can share it. The server (create-user) gives the child student-<8 random a–z / 0–9>@getcoachboard.in and a
+// random 16-character password nobody knows. Not a phone login (isPhoneLogin is false, so update-client never moves it)
+// and counts as "no login" on every screen (isNoLogin); Super Admin shows it as "No login (child)". Never shown anywhere.
+const GENERATED_LOGIN = /^student-[a-z0-9]{8}@getcoachboard\.in$/
+
+export function generatedStudentLogin(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  const bytes = new Uint8Array(8)
+  globalThis.crypto.getRandomValues(bytes)
+  return `student-${Array.from(bytes, b => chars[b % chars.length]).join('')}${LOGIN_DOMAIN}`
+}
+
+export function isGeneratedLogin(email: string | null | undefined): boolean {
+  return !!email && GENERATED_LOGIN.test(email)
 }
 
 // Clients added without a login (the coach enters everything and shares progress themselves).
@@ -56,7 +74,7 @@ export function isPhoneLogin(email: string | null | undefined): boolean {
 export const NO_LOGIN_DOMAIN = '@nologin.getcoachboard.in'
 
 export function isNoLogin(email: string | null | undefined): boolean {
-  return !!email && email.endsWith(NO_LOGIN_DOMAIN)
+  return !!email && (email.endsWith(NO_LOGIN_DOMAIN) || isGeneratedLogin(email))
 }
 
 // The email to show for a client: '' for a no-login placeholder
