@@ -4,16 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
-import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
+import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
 import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
-import { weekStatus, orderPlansByWeek, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
-import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday } from '@/lib/plan-structure'
+import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
+import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
-import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
@@ -109,6 +108,8 @@ function elapsedPct(startDate: string, endDate: string): number {
 
 // Local date as YYYY-MM-DD
 const formatIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// A date-only value plus n days, as YYYY-MM-DD
+const isoAdd = (iso: string, n: number) => { const d = parseDate(iso.slice(0, 10)); d.setDate(d.getDate() + n); return formatIso(d) }
 
 export default function ClientDetailPage() {
   const router = useRouter()
@@ -154,6 +155,11 @@ export default function ClientDetailPage() {
   // Compact plan cards: one expanded at a time; older plans behind "Show older"
   const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null)
   const [showAllPlans, setShowAllPlans] = useState(false)
+  // Plans tab: open ⋯ menu on a plan card, the selected day of each plan's 7-day strip (not this week's:
+  // that one is coachOpenDay), and the + New plan sheet
+  const [planMenuId, setPlanMenuId] = useState<string | null>(null)
+  const [selDay, setSelDay] = useState<Record<string, string>>({})
+  const [newPlanSheetOpen, setNewPlanSheetOpen] = useState(false)
   const manualFormRef = useRef<HTMLDivElement | null>(null)
   const aiPanelRef = useRef<HTMLDivElement | null>(null)
   const aiWorkingRef = useRef<HTMLDivElement | null>(null)
@@ -576,7 +582,7 @@ export default function ClientDetailPage() {
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
-  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string; plan_json?: PlanJson | null }) => {
+  const insertPlan = async (plan: { week_start: string; plan_details: string; workout_time: string; plan_json?: PlanJson | null }, opts?: { toast?: string; errorToast?: boolean }) => {
     if (!plan.week_start || !plan.plan_details.trim()) {
       setPlanError('Pick a week and add plan details before saving.')
       return false
@@ -598,6 +604,7 @@ export default function ClientDetailPage() {
     setSaving(false)
     if (error) {
       setPlanError('Could not save the plan: ' + error.message)
+      if (opts?.errorToast) showToast('Could not save the plan: ' + error.message, 'error')
       return false
     }
     // Briefly highlight the new card so the coach sees where it went
@@ -606,9 +613,20 @@ export default function ClientDetailPage() {
       setScrollToPlanId(inserted.id)
       setTimeout(() => setHighlightPlanId(null), 4000)
     }
-    showToast(`✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
+    showToast(opts?.toast ?? `✓ Plan assigned for week of ${formatDate(plan.week_start, country, 'dayMonth')}`)
     loadData(['plans'])
     return true
+  }
+
+  // Copy a plan's days to a new week (new row, so no days are done and no ticks carry over)
+  const copyPlanTo = (plan: Plan, start: string) => {
+    const json = planJsonOf(plan)
+    return insertPlan({
+      week_start: start,
+      plan_details: json ? planToText(json) : plan.plan_details,
+      workout_time: plan.workout_time || '',
+      plan_json: json,
+    }, { toast: `✓ Plan copied to week of ${formatDate(start, country, 'dayMonth')}`, errorToast: true })
   }
 
   // Cleans a structured plan for saving; null (with an error shown) if it has no workout yet
@@ -1737,9 +1755,6 @@ const handleResetPassword = async () => {
         {/* PLANS TAB */}
         {activeTab === 'plans' && (
           <div>
-<p className="text-xs text-gray-400 mb-3">
-  📅 Today is <span className="text-white font-medium">{formatDate(new Date(), country, 'weekday')}</span>. Each plan covers 7 days from its start date; the client can tick off days only during that week.
-</p>
 {(() => {
   const missing = [
     !client?.goal && 'goal',
@@ -1944,16 +1959,52 @@ const handleResetPassword = async () => {
               </div>
             )}
 
-            {plans.length === 0 ? (
-              <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
-                No plans assigned yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {(showAllPlans ? orderPlansByWeek(plans) : orderPlansByWeek(plans).slice(0, 6)).map(plan => (
-  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-4 bg-gray-900 rounded-2xl p-4 border transition-shadow duration-700 ${highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'}`}>
-    {editingPlan?.id === plan.id ? (
-      // Edit mode
+            {(() => {
+              const today = localToday()
+              const cur = currentPlan(plans)
+              const upcoming = plans.filter(p => p !== cur && weekStatus(p.week_start) === 'upcoming')
+                .sort((x, y) => x.week_start.localeCompare(y.week_start))
+              const past = plans.filter(p => p !== cur && weekStatus(p.week_start) !== 'upcoming')
+                .sort((x, y) => y.week_start.localeCompare(x.week_start))
+              const shownPast = showAllPlans ? past : past.slice(0, 6)
+              const s = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+              // ⋯ on a plan: Edit plan, Copy to next week, Delete plan (owner / partner only)
+              const renderPlanMenu = (plan: Plan) => {
+                const nextStart = isoAdd(plan.week_start, 7)
+                const item = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
+                return (
+                  <div className="relative shrink-0">
+                    <button type="button" onClick={e => { e.stopPropagation(); setPlanMenuId(planMenuId === plan.id ? null : plan.id) }}
+                      aria-label={`Plan actions for week of ${formatWeekStart(plan.week_start)}`} aria-haspopup="menu" aria-expanded={planMenuId === plan.id}
+                      className="w-11 h-11 -mr-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-xl leading-none">
+                      ⋯
+                    </button>
+                    {planMenuId === plan.id && (<>
+                      <div className="fixed inset-0 z-40" onClick={e => { e.stopPropagation(); setPlanMenuId(null) }} aria-hidden="true" />
+                      <div role="menu" className="absolute right-0 top-11 z-50 w-56 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                        <button role="menuitem" type="button"
+                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
+                          className={`${item} text-gray-100`}>Edit plan</button>
+                        <button role="menuitem" type="button" disabled={saving}
+                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); copyPlanTo(plan, nextStart) }}
+                          className={`${item} text-gray-100 disabled:opacity-50`}>Copy to next week <span className="ml-auto text-xs text-gray-500">{formatDate(nextStart, country, 'dayMonth')}</span></button>
+                        {!isCoach && (
+                          <button role="menuitem" type="button" disabled={deletingPlanId === plan.id}
+                            onClick={e => { e.stopPropagation(); setPlanMenuId(null); handleDeletePlan(plan.id) }}
+                            className={`${item} text-red-400 border-t border-gray-800 disabled:opacity-50`}>{deletingPlanId === plan.id ? 'Deleting…' : 'Delete plan'}</button>
+                        )}
+                      </div>
+                    </>)}
+                  </div>
+                )
+              }
+
+              // One plan: "This week" card (variant 'current', always open) or a row (tap to open its week)
+              const renderPlan = (plan: Plan, variant: 'current' | 'row') => {
+                const ring = highlightPlanId === plan.id ? 'border-green-500 ring-2 ring-green-500' : 'border-gray-800'
+                if (editingPlan?.id === plan.id) return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl p-4 border ${ring}`}>
       <div className="space-y-3">
         <p className="text-xs text-gray-500 uppercase tracking-wider">Editing Plan</p>
         <input type="date"
@@ -2003,19 +2054,17 @@ const handleResetPassword = async () => {
           </button>
         </div>
       </div>
-    ) : (
-      // View mode: compact card, tap to expand
-      (() => {
-        const summary = summarizeAny(plan, plan.week_start)
-        const planJson = planJsonOf(plan)
-        const status = weekStatus(plan.week_start)
-        const open = expandedPlanId === plan.id
-        const done = doneDayKeys(plan.id, sessions)
-        const workoutLabels = summary.days.filter(d => !isRestDay(d))
-        const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
-        const isCurrent = status === 'current'
-        // Under an open day of this week's plan: "Mark done for <client>" → the session form.
-        // A day already done needs a confirm step before a second session is logged for it.
+                  </div>
+                )
+                const summary = summarizeAny(plan, plan.week_start)
+                const planJson = planJsonOf(plan)
+                const status = weekStatus(plan.week_start)
+                const done = doneDayKeys(plan.id, sessions)
+                const workoutLabels = summary.days.filter(d => !isRestDay(d))
+                const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
+                const isCurrent = status === 'current'
+                const open = variant === 'current' || expandedPlanId === plan.id
+                const start = plan.week_start.slice(0, 10)
         const renderMarkPanel = (day: PlanDay | null, label: string | null) => {
           const key = `${plan.id}:${day?.day ?? ''}`
           const isDone = !!day && done.has(day.day)
@@ -2094,102 +2143,201 @@ const handleResetPassword = async () => {
             </div>
           )
         }
-        return (
-      <>
-        <div className="flex justify-between items-start gap-3">
-          <button
-            onClick={() => setExpandedPlanId(open ? null : plan.id)}
-            aria-expanded={open}
-            className="flex-1 min-w-0 text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-gray-500 text-xs w-3" aria-hidden="true">{open ? '▾' : '▸'}</span>
-              <p className="font-semibold text-sm">{formatDate(plan.week_start.slice(0, 10), country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}</p>
-              {status === 'current' && <span className="text-[11px] font-medium text-green-300 bg-green-950 border border-green-800 px-2 py-0.5 rounded-full">This week</span>}
-              {status === 'upcoming' && <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full">Upcoming</span>}
-              {status === 'past' && <span className="text-[11px] text-gray-500">Past</span>}
-              {plan.workout_time && <span className="text-xs text-orange-400">⏰ {plan.workout_time}</span>}
-            </div>
-            <div className="pl-5 mt-1.5">
-              {summary.days.length > 0 ? (
-                <>
-                  <p className="text-xs text-gray-400">
-                    {summary.workoutDays} workout day{summary.workoutDays === 1 ? '' : 's'}
-                    {summary.exercises > 0 ? ` · ${summary.exercises} exercises` : ''}
-                    {(doneCount > 0 || status === 'current') && (
-                      <span className={doneCount > 0 ? 'text-green-400 font-medium' : 'text-gray-500'}> · {doneCount} of {workoutLabels.length} done</span>
-                    )}
-                  </p>
-                  {!open && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {summary.days.map((d, i) => {
-                        const isDone = !isRestDay(d) && done.has(dayKey(d))
-                        return (
-                          <span key={i} className={`text-[11px] px-2 py-0.5 rounded-md border ${isRestDay(d) ? 'border-gray-800 text-gray-600' : isDone ? 'border-green-700 bg-green-950 text-green-300' : 'border-gray-700 text-gray-300'}`}>
-                            {isDone ? '✓ ' : ''}{d}
+                const allDone = workoutLabels.length > 0 && doneCount >= workoutLabels.length
+                const badge = status === 'upcoming'
+                  ? <span className="text-[11px] font-medium text-blue-300 bg-blue-950 border border-blue-800 px-2 py-0.5 rounded-full shrink-0">Upcoming</span>
+                  : workoutLabels.length > 0
+                    ? <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${allDone ? 'text-green-300 bg-green-950 border-green-800' : 'text-orange-300 bg-orange-950/60 border-orange-900'}`}>{doneCount} of {workoutLabels.length} done</span>
+                    : null
+
+                // The open week: 7-day strip, legend, the selected day's exercises (text plans: the text)
+                const renderWeek = () => {
+                  if (!planJson) return (
+                    <div className="border-t border-gray-800 px-4 py-4 space-y-3">
+                      <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>
+                      {isCurrent && renderMarkPanel(null, null)}
+                    </div>
+                  )
+                  const days = daysInWeekOrder(planJson, start)
+                  const dates = days.map((_, i) => isoAdd(start, i))
+                  const todayIdx = dates.indexOf(today)
+                  const fallback = todayIdx >= 0 ? days[todayIdx].day : (days.find(d => !d.rest) ?? days[0]).day
+                  const chosen = variant === 'current' ? coachOpenDay : selDay[plan.id]
+                  const selIdx = Math.max(0, days.findIndex(d => d.day === (chosen && days.some(x => x.day === chosen) ? chosen : fallback)))
+                  const select = (day: string) => {
+                    if (variant === 'current') setCoachOpenDay(day)
+                    else setSelDay(prev => ({ ...prev, [plan.id]: day }))
+                    closeMarkForm()
+                  }
+                  const d = days[selIdx]
+                  const dayDone = !d.rest && done.has(d.day)
+                  const notes = dayDone ? doneNotesWithWho(plan.id)[d.day] : ''
+                  // What was ticked on the day (latest session for it); this week's days not yet done show the coach's ticks
+                  const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                  const ticks = saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
+                    : isCurrent && !dayDone ? coachTicks[`${plan.id}:${d.day}`] || [] : []
+                  const canTick = isCurrent && !d.rest && !dayDone
+                  const showTicks = canTick || ticks.length > 0
+                  return (
+                    <>
+                      <div className="px-3 pt-1 pb-3">
+                        <div className="grid grid-cols-7 gap-1">
+                          {days.map((x, i) => {
+                            const isDone = !x.rest && done.has(x.day)
+                            const isSel = i === selIdx
+                            const circle = isDone ? 'bg-green-600 border-2 border-green-600 text-white'
+                              : x.rest ? 'border border-gray-700 text-gray-500'
+                              : 'border-2 border-orange-500 text-orange-300'
+                            return (
+                              <button key={x.day} type="button" onClick={() => select(x.day)} aria-pressed={isSel}
+                                aria-label={`${formatDate(dates[i], country, 'weekday')}, ${x.rest ? 'Rest' : x.focus || 'Workout'}${isDone ? ', done' : ''}`}
+                                className="flex flex-col items-center gap-1 py-1 min-h-[44px] rounded-xl focus:outline-none focus-visible:bg-gray-800">
+                                <span className={`text-[11px] font-medium ${dates[i] === today ? 'text-orange-400' : 'text-gray-500'}`} aria-hidden="true">{x.day[0]}</span>
+                                <span aria-hidden="true"
+                                  className={`w-9 h-9 rounded-full grid place-items-center text-sm font-semibold ${circle} ${isSel ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900' : ''}`}>
+                                  {isDone ? '✓' : parseDate(dates[i]).getDate()}
+                                </span>
+                                <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${dates[i] === today ? 'bg-orange-500' : 'bg-transparent'}`} />
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2 text-[11px] text-gray-500" aria-hidden="true">
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-600" />Done</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border-2 border-orange-500" />Workout</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full border border-gray-600" />Rest</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500" />Today</span>
+                        </div>
+                      </div>
+                      <div className="border-t border-gray-800 px-4 py-4 space-y-3">
+                        <div>
+                          <p className="text-xs text-gray-500">{formatDate(dates[selIdx], country, 'weekday')}</p>
+                          <p className={`text-base font-semibold mt-0.5 ${d.rest ? 'text-gray-300' : 'text-white'}`}>{d.rest ? 'Rest day' : d.focus || 'Workout'}</p>
+                          {dayDone && <p className="text-xs text-green-400 mt-1">✓ Done{notes ? ` · ${notes}` : ''}</p>}
+                        </div>
+                        {d.rest && <p className="text-sm text-gray-400">Rest and recovery. Nothing to log.</p>}
+                        {d.exercises.length > 0 && (
+                          <ol className={`divide-y divide-gray-800 rounded-xl border border-gray-800 ${d.rest ? 'opacity-70' : 'bg-gray-950/40'}`}>
+                            {d.rest && <li className="px-3 py-2 text-[11px] uppercase tracking-wider text-gray-500">Optional</li>}
+                            {d.exercises.map((e, i) => {
+                              const ticked = ticks.includes(i)
+                              const body = (
+                                <>
+                                  {showTicks && (
+                                    <span aria-hidden="true"
+                                      className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border grid place-items-center text-[11px] font-bold ${ticked ? 'bg-green-600 border-green-500 text-white' : 'border-gray-600 text-transparent'}`}>✓</span>
+                                  )}
+                                  <span className="flex-1 min-w-0">
+                                    <span className="flex items-baseline justify-between gap-3">
+                                      <span className={`text-sm ${ticked ? 'text-gray-400 line-through decoration-gray-600' : 'text-gray-100'}`}>{e.name}</span>
+                                      {exerciseDetail(e) && <span className="text-xs text-orange-300 shrink-0 text-right">{exerciseDetail(e)}</span>}
+                                    </span>
+                                    {e.note && <span className="block text-[11px] text-gray-500 mt-0.5">{e.note}</span>}
+                                  </span>
+                                </>
+                              )
+                              return (
+                                <li key={i}>
+                                  {canTick ? (
+                                    <button type="button" role="checkbox" aria-checked={ticked}
+                                      onClick={() => toggleCoachTick(plan.id, d.day, i)}
+                                      className="w-full min-h-[44px] flex items-start gap-3 text-left px-3 py-2.5">
+                                      {body}
+                                    </button>
+                                  ) : (
+                                    <div className="flex items-start gap-3 px-3 py-2">{body}</div>
+                                  )}
+                                </li>
+                              )
+                            })}
+                          </ol>
+                        )}
+                        {isCurrent && !d.rest && renderMarkPanel(d, dayLabel(d))}
+                        {planJson.note && <p className="text-[11px] text-gray-500">{planJson.note}</p>}
+                      </div>
+                    </>
+                  )
+                }
+
+                if (variant === 'current') return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl border transition-shadow duration-700 ${ring}`}>
+                    <div className="flex items-start gap-2 px-4 pt-3 pb-2">
+                      <div className="flex-1 min-w-0 pt-1">
+                        <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">This week</p>
+                        <p className="text-sm font-semibold text-white mt-0.5">
+                          {formatDate(start, country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}
+                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {plan.workout_time}</span>}
+                        </p>
+                      </div>
+                      <div className="pt-2">{badge}</div>
+                      {renderPlanMenu(plan)}
+                    </div>
+                    {renderWeek()}
+                  </div>
+                )
+                return (
+                  <div key={plan.id} id={`plan-${plan.id}`} className={`scroll-mt-20 bg-gray-900 rounded-2xl border transition-shadow duration-700 ${ring}`}>
+                    <div className="flex items-center gap-2 pr-4">
+                      <button type="button" onClick={() => { setExpandedPlanId(open ? null : plan.id); closeMarkForm() }} aria-expanded={open}
+                        className="flex-1 min-w-0 min-h-[56px] text-left pl-4 py-3 flex items-center gap-3 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold text-white">
+                            {formatDate(start, country, 'dayMonth')} – {formatDate(weekEnd(plan.week_start), country, 'dayMonth')}
                           </span>
-                        )
-                      })}
+                          <span className="block text-xs text-gray-500 mt-0.5">
+                            {summary.days.length > 0
+                              ? `${s(summary.workoutDays, 'workout')}${summary.exercises > 0 ? ` · ${s(summary.exercises, 'exercise')}` : ''}`
+                              : 'Text plan'}
+                            {plan.workout_time ? ` · ⏰ ${plan.workout_time}` : ''}
+                          </span>
+                        </span>
+                        {badge}
+                        <span className="text-gray-500 text-xs" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                      </button>
+                      {open && renderPlanMenu(plan)}
+                    </div>
+                    {open && renderWeek()}
+                  </div>
+                )
+              }
+
+              const lastEnded = past[0] ? formatDate(weekEnd(past[0].week_start), country, 'weekday') : ''
+              return (
+                <div className="space-y-5">
+                  {upcoming.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider px-1">Upcoming</p>
+                      {upcoming.map(p => renderPlan(p, 'row'))}
                     </div>
                   )}
-                </>
-              ) : (
-                !open && <p className="text-xs text-gray-400 line-clamp-2">{summary.fallback.join(' ')}</p>
-              )}
-            </div>
-          </button>
-          <div className="flex gap-1.5 shrink-0">
-            <button
-              onClick={e => { e.stopPropagation(); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
-              aria-label={`Edit plan for week of ${formatWeekStart(plan.week_start)}`}
-              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-orange-400 border border-gray-700 hover:border-orange-500 rounded-lg transition">
-              ✏️
-            </button>
-            {!isCoach && <button
-              onClick={e => { e.stopPropagation(); handleDeletePlan(plan.id) }}
-              disabled={deletingPlanId === plan.id}
-              aria-label={`Delete plan for week of ${formatWeekStart(plan.week_start)}`}
-              className="w-8 h-8 grid place-items-center text-sm text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500 rounded-lg transition disabled:opacity-50">
-              {deletingPlanId === plan.id ? '…' : '🗑'}
-            </button>}
-          </div>
-        </div>
-        {open && (
-          <div className="border-t border-gray-800 pt-3 mt-3">
-            {planJson
-              ? <PlanDays plan={planJson} weekStart={plan.week_start} done={done} doneNote={doneNotesWithWho(plan.id)} compact
-                  ticks={Object.fromEntries(planJson.days.map(d => {
-                    // What was ticked on that day (latest session for the day); this week's days not yet done show the coach's ticks
-                    const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
-                    if (saved.length) return [d.day, tickedFromSaved(d, saved[saved.length - 1].exercises_done)]
-                    return [d.day, isCurrent && !done.has(d.day) ? coachTicks[`${plan.id}:${d.day}`] || [] : []]
-                  }).filter(([, list]) => (list as number[]).length))}
-                  {...(isCurrent ? {
-                    onTick: (d: string, i: number) => { if (!done.has(d)) toggleCoachTick(plan.id, d, i) },
-                    openDay: coachOpenDay,
-                    onToggle: (d: string | null) => { setCoachOpenDay(d); closeMarkForm() },
-                    renderOpen: (day: PlanDay, label: string) => (day.rest ? null : renderMarkPanel(day, label)),
-                  } : {})} />
-              : <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{plan.plan_details}</p>}
-          </div>
-        )}
-        {/* Older text-only plans: one "Mark done" for this week, saved without a plan day */}
-        {!planJson && isCurrent && (
-          <div className="border-t border-gray-800 pt-3 mt-3">{renderMarkPanel(null, null)}</div>
-        )}
-      </>
-        )
-      })()
-    )}
-  </div>
-))}
-                {plans.length > 6 && (
-                  <button onClick={() => setShowAllPlans(!showAllPlans)}
-                    className="w-full text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 py-2.5 rounded-xl transition">
-                    {showAllPlans ? 'Show fewer' : `Show older plans (${plans.length - 6})`}
-                  </button>
-                )}
-              </div>
-            )}
+                  {cur ? renderPlan(cur, 'current') : (
+                    <div className="bg-gray-900 rounded-2xl border border-gray-800 px-6 py-8 text-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-10 h-10 mx-auto text-gray-500" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                      </svg>
+                      <p className="text-base font-semibold text-white mt-3">No plan for this week</p>
+                      {lastEnded && <p className="text-xs text-gray-500 mt-1">Last plan ended {lastEnded}</p>}
+                      <button type="button" onClick={() => { setPlanError(''); setAiError(''); setNewPlanSheetOpen(true) }} disabled={generatingPlan}
+                        className="mt-5 w-full sm:w-auto sm:px-10 min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50">
+                        + New plan
+                      </button>
+                    </div>
+                  )}
+                  {past.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wider px-1">Past plans</p>
+                      {shownPast.map(p => renderPlan(p, 'row'))}
+                      {past.length > 6 && (
+                        <button onClick={() => setShowAllPlans(!showAllPlans)}
+                          className="w-full min-h-[44px] text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 rounded-xl transition">
+                          {showAllPlans ? 'Show fewer' : `Show older plans (${past.length - 6})`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 
