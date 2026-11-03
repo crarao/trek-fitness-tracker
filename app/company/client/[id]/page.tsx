@@ -160,6 +160,8 @@ export default function ClientDetailPage() {
   const [planMenuId, setPlanMenuId] = useState<string | null>(null)
   const [selDay, setSelDay] = useState<Record<string, string>>({})
   const [newPlanSheetOpen, setNewPlanSheetOpen] = useState(false)
+  const [sheetWeek, setSheetWeek] = useState('')   // "Week starts" in the + New plan sheet
+  const sheetDragY = useRef<number | null>(null)
   const manualFormRef = useRef<HTMLDivElement | null>(null)
   const aiPanelRef = useRef<HTMLDivElement | null>(null)
   const aiWorkingRef = useRef<HTMLDivElement | null>(null)
@@ -285,6 +287,14 @@ export default function ClientDetailPage() {
   const [makingPdf, setMakingPdf] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Esc closes the + New plan sheet and the plan ⋯ menu
+  useEffect(() => {
+    if (!newPlanSheetOpen && !planMenuId) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setNewPlanSheetOpen(false); setPlanMenuId(null) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newPlanSheetOpen, planMenuId])
 
   // Esc closes the header ⋯ menu
   useEffect(() => {
@@ -627,6 +637,27 @@ export default function ClientDetailPage() {
       workout_time: plan.workout_time || '',
       plan_json: json,
     }, { toast: `✓ Plan copied to week of ${formatDate(start, country, 'dayMonth')}`, errorToast: true })
+  }
+
+  // + New plan sheet. Week starts today when no plan covers today, else the day after this week's plan ends.
+  const openNewPlanSheet = () => {
+    const cur = currentPlan(plans)
+    setSheetWeek(cur ? isoAdd(cur.week_start, 7) : localToday())
+    setPlanError('')
+    setAiError('')
+    setPlanMenuId(null)
+    setNewPlanSheetOpen(true)
+  }
+  // The manual builder (day-by-day editor), for the week picked in the sheet
+  const openManualBuilder = (week: string) => {
+    setPlanError('')
+    setAiError('')
+    setShowGeneratedPlan(false)
+    setNewPlan(prev => ({ ...prev, week_start: week || prev.week_start || nextMonday() }))
+    // Start from the client's available days as workout days
+    setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days))
+    setNewPlanTextMode(false)
+    setShowPlanForm(true)
   }
 
   // Cleans a structured plan for saving; null (with an error shown) if it has no workout yet
@@ -1295,6 +1326,82 @@ const handleResetPassword = async () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
+      {newPlanSheetOpen && client && (() => {
+        const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'
+        const aiOn = (client as { companies?: { ai_plans_enabled?: boolean | null } }).companies?.ai_plans_enabled !== false
+        const left = aiPlans ? Math.max(0, aiPlans.limit - aiPlans.used) : null
+        // Latest plan that has started (else the newest), for "Copy last week's plan"
+        const started = plans.filter(p => p.week_start.slice(0, 10) <= localToday()).sort((x, y) => y.week_start.localeCompare(x.week_start))
+        const source = started[0] ?? [...plans].sort((x, y) => y.week_start.localeCompare(x.week_start))[0]
+        const close = () => setNewPlanSheetOpen(false)
+        const option = 'w-full min-h-[64px] text-left rounded-2xl border px-4 py-3 transition disabled:opacity-50 disabled:cursor-not-allowed'
+        return (
+          <div className="fixed inset-0 z-[55] flex items-end justify-center" role="dialog" aria-modal="true" aria-labelledby="new-plan-title">
+            <div className="absolute inset-0 bg-black/70" onClick={close} aria-hidden="true" />
+            <div className="relative w-full max-w-2xl bg-gray-900 border-t border-gray-800 rounded-t-3xl shadow-2xl max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+              <div className="pt-2 pb-1 flex justify-center touch-none cursor-grab"
+                onTouchStart={e => { sheetDragY.current = e.touches[0].clientY }}
+                onTouchMove={e => { if (sheetDragY.current !== null && e.touches[0].clientY - sheetDragY.current > 80) { sheetDragY.current = null; close() } }}
+                onTouchEnd={() => { sheetDragY.current = null }}>
+                <span className="w-10 h-1.5 rounded-full bg-gray-700" aria-hidden="true" />
+              </div>
+              <div className="px-5 pb-6">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0 pt-2">
+                    <h2 id="new-plan-title" className="text-lg font-bold text-white">New plan for {first}</h2>
+                    {client.goal && <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">Goal: {client.goal}</p>}
+                  </div>
+                  <button type="button" onClick={close} aria-label="Close"
+                    className="w-11 h-11 -mr-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-lg">✕</button>
+                </div>
+
+                <label htmlFor="sheet-week" className="text-xs text-gray-500 mt-5 mb-1.5 block uppercase tracking-wider">Week starts</label>
+                <input id="sheet-week" type="date" value={sheetWeek} onChange={e => setSheetWeek(e.target.value)}
+                  className="w-full min-h-[44px] bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+                <p className="text-xs text-gray-400 mt-1">{sheetWeek ? `Covers ${formatDate(sheetWeek, country, 'weekday')} – ${formatDate(weekEnd(sheetWeek), country, 'weekday')} (7 days)` : 'Pick the first day of the plan'}</p>
+
+                <div className="space-y-2 mt-5">
+                  {aiOn && (
+                    <button type="button" disabled={!sheetWeek || aiPlansUsedUp || generatingPlan}
+                      onClick={() => { setAiPlanMeta(prev => ({ ...prev, week_start: sheetWeek })); close(); handleGeneratePlan() }}
+                      className={`${option} bg-purple-950/40 border-purple-800 hover:border-purple-500`}>
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-white">✨ Generate with AI</span>
+                        {left !== null && (
+                          <span className={`text-[11px] shrink-0 ${aiPlansUsedUp ? 'text-amber-400' : 'text-purple-300'}`}>
+                            {aiPlansUsedUp ? 'No AI plans left this month' : `${left} of ${aiPlans!.limit} left this month`}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-xs text-gray-400 mt-1">
+                        {aiPlansUsedUp && aiPlans
+                          ? `More from ${formatDate(aiPlans.resetsOn, country, 'dayMonth')}. Building a plan by hand still works.`
+                          : 'Uses goal, injuries and schedule from profile. You review before assigning.'}
+                      </span>
+                    </button>
+                  )}
+                  <button type="button" disabled={!sheetWeek || generatingPlan}
+                    onClick={() => { close(); openManualBuilder(sheetWeek) }}
+                    className={`${option} bg-gray-800/60 border-gray-700 hover:border-orange-500`}>
+                    <span className="block text-sm font-semibold text-white">✍️ Build manually</span>
+                    <span className="block text-xs text-gray-400 mt-1">Pick exercises from the list, set sets and reps per day.</span>
+                  </button>
+                </div>
+
+                {source && (
+                  <button type="button" disabled={!sheetWeek || saving}
+                    onClick={async () => { if (await copyPlanTo(source, sheetWeek)) close() }}
+                    className="w-full min-h-[44px] mt-3 text-sm text-orange-400 hover:text-orange-300 disabled:opacity-50">
+                    {saving ? 'Copying…' : 'Copy last week\'s plan instead'}
+                    <span className="block text-[11px] text-gray-500">From {formatDate(source.week_start.slice(0, 10), country, 'dayMonth')} – {formatDate(weekEnd(source.week_start), country, 'dayMonth')}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
@@ -1775,46 +1882,6 @@ const handleResetPassword = async () => {
     </div>
   )
 })()}
-            <div className="mb-4">
-              <div className="flex flex-wrap justify-between items-center gap-2">
-                <p className="text-xs text-gray-500">{plans.length} plans assigned</p>
-                <div className="flex flex-wrap gap-2">
-  {/* AI plans can be turned off per company by the super admin (companies.ai_plans_enabled) */}
-  {(client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
-  <button
-    onClick={handleGeneratePlan}
-    disabled={generatingPlan || aiPlansUsedUp}
-    className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
-    {generatingPlan ? '⏳ Creating…' : '✨ Create plan with AI'}
-  </button>
-  )}
-  <button onClick={() => {
-      setPlanError('')
-      setAiError('')
-      if (!showPlanForm) {
-        setShowGeneratedPlan(false)
-        setNewPlan(prev => ({ ...prev, week_start: prev.week_start || nextMonday() }))
-        // Start from the client's available days as workout days
-        setNewPlanJson(prev => prev ?? emptyPlan(client?.available_days))
-        setNewPlanTextMode(false)
-      }
-      setShowPlanForm(!showPlanForm)
-    }}
-    disabled={generatingPlan}
-    className="bg-orange-500 hover:bg-orange-400 text-white text-xs px-4 py-2 rounded-xl transition font-medium disabled:opacity-50">
-    {showPlanForm ? 'Close' : '✍️ Write plan manually'}
-  </button>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">Create a weekly plan, review it, then pick the week to assign it to the client.</p>
-              {aiPlans && (client as { companies?: { ai_plans_enabled?: boolean | null } } | null)?.companies?.ai_plans_enabled !== false && (
-                <p className={`text-xs mt-1 ${aiPlansUsedUp ? 'text-amber-400' : 'text-purple-300/80'}`}>
-                  {aiPlansUsedUp
-                    ? `All ${aiPlans.limit} AI plans used this month · more from ${formatDate(aiPlans.resetsOn, country, 'dayMonth')}. Writing a plan by hand still works.`
-                    : `${Math.min(aiPlans.used, aiPlans.limit)} of ${aiPlans.limit} AI plans used this month`}
-                </p>
-              )}
-            </div>
 {generatingPlan && (
   <div ref={aiWorkingRef} className="bg-gray-900 rounded-2xl p-5 border border-purple-800 mb-4">
   <style>{`
@@ -1970,7 +2037,7 @@ const handleResetPassword = async () => {
               const s = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
               // ⋯ on a plan: Edit plan, Copy to next week, Delete plan (owner / partner only)
-              const renderPlanMenu = (plan: Plan) => {
+              const renderPlanMenu = (plan: Plan, withNew = false) => {
                 const nextStart = isoAdd(plan.week_start, 7)
                 const item = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
                 return (
@@ -1983,6 +2050,11 @@ const handleResetPassword = async () => {
                     {planMenuId === plan.id && (<>
                       <div className="fixed inset-0 z-40" onClick={e => { e.stopPropagation(); setPlanMenuId(null) }} aria-hidden="true" />
                       <div role="menu" className="absolute right-0 top-11 z-50 w-56 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                        {withNew && (
+                          <button role="menuitem" type="button" disabled={generatingPlan}
+                            onClick={e => { e.stopPropagation(); openNewPlanSheet() }}
+                            className={`${item} text-orange-400 border-b border-gray-800 disabled:opacity-50`}>+ New plan</button>
+                        )}
                         <button role="menuitem" type="button"
                           onClick={e => { e.stopPropagation(); setPlanMenuId(null); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
                           className={`${item} text-gray-100`}>Edit plan</button>
@@ -2270,7 +2342,7 @@ const handleResetPassword = async () => {
                         </p>
                       </div>
                       <div className="pt-2">{badge}</div>
-                      {renderPlanMenu(plan)}
+                      {renderPlanMenu(plan, true)}
                     </div>
                     {renderWeek()}
                   </div>
@@ -2317,7 +2389,7 @@ const handleResetPassword = async () => {
                       </svg>
                       <p className="text-base font-semibold text-white mt-3">No plan for this week</p>
                       {lastEnded && <p className="text-xs text-gray-500 mt-1">Last plan ended {lastEnded}</p>}
-                      <button type="button" onClick={() => { setPlanError(''); setAiError(''); setNewPlanSheetOpen(true) }} disabled={generatingPlan}
+                      <button type="button" onClick={openNewPlanSheet} disabled={generatingPlan}
                         className="mt-5 w-full sm:w-auto sm:px-10 min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50">
                         + New plan
                       </button>
