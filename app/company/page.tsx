@@ -10,13 +10,13 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol, groupByCurrency, formatMoneyByCurrency, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, waDigits, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo } from '@/lib/labels'
-import { GUARDIAN_RELATIONS } from '@/lib/guardian'
+import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
 
 type Membership = {
   id: string
@@ -1845,14 +1845,15 @@ export default function CompanyAdminPage() {
                   }[status]
 
                   const handleAction = () => {
-                    // Country code + number for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts)
-                    const wa = waDigits(client.phone, country)
-                    if (status === 'expiring' && wa) {
-                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? formatDate(m.end_date, country, 'dayMonth') : ''}. Renew now to keep going! 💪`
-                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
-                    } else if (status === 'expired' && wa) {
-                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
-                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
+                    // To the parent when a valid parent phone is set, else the member (lib/guardian.ts). Country code + number
+                    // for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts). No parent: as always.
+                    const to = reminderRecipient(client, country)
+                    if ((status === 'expiring' || status === 'expired') && to.waDigits) {
+                      const msg = reminderText({
+                        status, memberFirst: client.full_name.split(' ')[0], parentFirst: to.greetName,
+                        companyName, endDate: m?.end_date, businessType, toParent: to.toParent, country,
+                      })
+                      window.open(`https://wa.me/${to.waDigits}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else {
                       openClient(client.id)
                     }

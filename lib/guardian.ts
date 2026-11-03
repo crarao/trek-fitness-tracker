@@ -52,7 +52,7 @@ export function reminderText(opts: {
   endDate: string | null | undefined   // 'YYYY-MM-DD' (latest membership)
   businessType?: string | null
   toParent: boolean
-  country: Country
+  country: Country | null
 }): string {
   const emoji = opts.businessType === 'martial_arts' ? '🥋' : '💪'
   const date = opts.endDate ? formatDate(opts.endDate, opts.country, 'dayMonth') : ''
