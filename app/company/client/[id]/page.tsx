@@ -3038,14 +3038,14 @@ const handleResetPassword = async () => {
             {client && (
               <div>
                 {!coachCompany && (<>
-                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{client.client_type === 'pt' ? `Primary ${sw.one.toLowerCase()}` : 'Trainer'}</label>
+                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{client.client_type === 'pt' || dojo ? `Primary ${sw.one.toLowerCase()}` : 'Trainer'}</label>
                 {isCoach ? (
                   <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || sw.one) : `No primary ${sw.one.toLowerCase()}`}</p>
                 ) : (
                 <select id="primary-coach" value={client.primary_coach_id || ''} disabled={savingPrimaryCoach}
                   onChange={e => handleSavePrimaryCoach(e.target.value)}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-50">
-                  <option value="">{client.client_type === 'pt' ? `No primary ${sw.one.toLowerCase()}` : 'No trainer'}</option>
+                  <option value="">{client.client_type === 'pt' || dojo ? `No primary ${sw.one.toLowerCase()}` : 'No trainer'}</option>
                   {staff.filter(x => x.role === 'coach' && (!x.archived_at || x.id === client.primary_coach_id)).map(x => (
                     <option key={x.id} value={x.id}>{x.full_name}{x.archived_at ? ' (login off)' : ''}</option>
                   ))}
