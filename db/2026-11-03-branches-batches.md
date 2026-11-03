@@ -1,7 +1,7 @@
-Ran on prod (Mumbai): —
+Ran on prod (Mumbai): ✅ 3 Nov 2026 (by Anand)
 Ran on dev: n/a (dev DB not set up yet)
 
-# 3 Nov 2026 — Branches & batches (Dojo Build 2, ROADMAP #77) — TO RUN BY ANAND
+# 3 Nov 2026 — Branches & batches (Dojo Build 2, ROADMAP #77) — ✅ RUN ON MUMBAI 3 NOV — do not run again
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
@@ -162,6 +162,10 @@ Expect it to contain `new.country is distinct from old.country` and `primary_coa
 If it looks different, stop and send it to Claude.
 
 ## Step 2 — checks
+
+**Run by Anand 3 Nov on Mumbai, all as expected:** (a) 8 rules, `iso branches|batches select/insert/update/delete`,
+all `{authenticated}`; (b) grants: `authenticated` INSERT / SELECT / UPDATE on both tables, nothing for `anon`;
+(c) `profiles.branch_id` and `batch_id` exist; (d) `protect_profile_columns()` contains `batch_id` → true.
 
 ```sql
 -- a) RLS on and four rules on each table
