@@ -7,6 +7,7 @@ import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/li
 import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
 import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
+import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, batchWhen } from '@/lib/batches'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
@@ -57,6 +58,9 @@ type ClientProfile = {
   guardian_name?: string | null
   guardian_phone?: string | null
   guardian_relation?: string | null
+  // Branch and home batch (db/2026-11-03-branches-batches.md): undefined before that SQL runs
+  branch_id?: string | null
+  batch_id?: string | null
 }
 
 // Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
@@ -218,8 +222,13 @@ export default function ClientDetailPage() {
     goal: '', age: '', gender: '', height_cm: '', weight_kg: '',
     fitness_level: '', food_preference: '', meals_per_day: '', available_days: '',
     medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: '',
-    guardian_name: '', guardian_phone: '', guardian_relation: ''
+    guardian_name: '', guardian_phone: '', guardian_relation: '',
+    branch_id: '', batch_id: ''
   })
+  // Dojo branches & batches (db/2026-11-03-branches-batches.md): loaded with the client; empty / off before the SQL
+  const [branchList, setBranchList] = useState<Branch[]>([])
+  const [batchList, setBatchList] = useState<Batch[]>([])
+  const [batchesOn, setBatchesOn] = useState(false)
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
   // Coach marks a plan day done for the client (gym PT: the client trains in front of the coach).
@@ -453,6 +462,19 @@ export default function ClientDetailPage() {
           .single()
         setClient(clientData)
         if (clientData?.company_id) setCompanyId(clientData.company_id)
+        // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
+        const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
+        if (clientData?.company_id && isDojo(bt)) {
+          const [br, ba] = await Promise.all([
+            supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', clientData.company_id).order('name'),
+            supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', clientData.company_id),
+          ])
+          if (!br.error && !ba.error) {
+            setBranchList((br.data || []) as Branch[])
+            setBatchList((ba.data || []) as Batch[])
+            setBatchesOn(true)
+          }
+        }
       })(),
       want('memberships') && (async () => {
         // Coaches: plan and dates only, from pt_membership_status() (no amounts, no history)
@@ -855,6 +877,21 @@ const handleSaveDiet = async () => {
 
 const handleSaveClientProfile = async () => {
   setSavingClientProfile(true)
+  // Dojo branch / home batch: through update-client (checks gym and branch on the server), only when changed
+  if (dojo && batchesOn && client && 'batch_id' in client
+      && ((clientProfileForm.branch_id || null) !== (client.branch_id || null) || (clientProfileForm.batch_id || null) !== (client.batch_id || null))) {
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: clientId, branch_id: clientProfileForm.branch_id || null, batch_id: clientProfileForm.batch_id || null })
+    })
+    const result = await response.json().catch(() => ({ error: "Couldn't save" }))
+    if (result.error) {
+      setSavingClientProfile(false)
+      showToast("Couldn't save the batch: " + result.error, 'error')
+      return
+    }
+  }
   // Parent / guardian: saved through update-client (checks the phone on the server), only once the columns exist
   if (client && 'guardian_phone' in client) {
     const raw = clientProfileForm.guardian_phone.trim()
@@ -2746,6 +2783,8 @@ const handleResetPassword = async () => {
                 guardian_name: client?.guardian_name || '',
                 guardian_phone: displayPhone(client?.guardian_phone, country),
                 guardian_relation: client?.guardian_relation || '',
+                branch_id: client?.branch_id || '',
+                batch_id: client?.batch_id || '',
               })
               setEditingClientProfile(true)
             }
@@ -2885,6 +2924,38 @@ const handleResetPassword = async () => {
           </div>
 
           </>}
+
+          {/* Dojo: branch and home batch (the student can still attend any batch) */}
+          {dojo && batchesOn && branchList.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Branch</label>
+                <select value={clientProfileForm.branch_id}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, branch_id: e.target.value, batch_id: '' })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  <option value="">—</option>
+                  {branchList.filter(b => !b.is_archived || b.id === client?.branch_id).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}{b.is_archived ? ' (archived)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home batch</label>
+                <select value={clientProfileForm.batch_id}
+                  onChange={e => {
+                    const batch = batchList.find(b => b.id === e.target.value)
+                    setClientProfileForm({ ...clientProfileForm, batch_id: e.target.value, ...(batch ? { branch_id: batch.branch_id } : {}) })
+                  }}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  <option value="">—</option>
+                  {sortBatches(batchList.filter(b => (!b.is_archived || b.id === client?.batch_id)
+                    && (!clientProfileForm.branch_id || b.branch_id === clientProfileForm.branch_id))).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}{batchWhen(b, country) ? ` (${batchWhen(b, country)})` : ''}{b.is_archived ? ' (archived)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Medical Conditions */}
           <div>
@@ -3031,6 +3102,25 @@ const handleResetPassword = async () => {
               </div>
             </div>
           )}
+
+          {/* Dojo: branch and home batch */}
+          {dojo && batchesOn && (client?.branch_id || client?.batch_id) && (() => {
+            const batch = batchList.find(b => b.id === client?.batch_id)
+            const branch = branchList.find(b => b.id === (client?.branch_id || batch?.branch_id))
+            return (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Branch</p>
+                  <p className="text-sm text-white">{branch ? `${branch.name}${branch.is_archived ? ' (archived)' : ''}` : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Home batch</p>
+                  <p className="text-sm text-white">{batch ? `${batch.name}${batch.is_archived ? ' (archived)' : ''}` : '—'}</p>
+                  {batch && batchWhen(batch, country) && <p className="text-xs text-gray-400">{batchWhen(batch, country)}</p>}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Medical Conditions */}
           <div>

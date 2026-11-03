@@ -5,6 +5,7 @@ import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
 import { splitE164, loginEmailFor, isPhoneLogin, toE164 } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
+import { checkPlacement } from '@/lib/placement-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -93,6 +94,17 @@ export async function POST(request: Request) {
     } else {
       updates.guardian_phone = null
     }
+  }
+
+  // Branch and home batch (dojos, db/2026-11-03-branches-batches.md; sent only once those tables exist).
+  // Must be in the client's gym, the batch at the branch; a saved archived value may be kept, not newly picked.
+  if ('branch_id' in body || 'batch_id' in body) {
+    const { data: target } = await supabaseAdmin.from('profiles').select('*').eq('id', user_id).single()
+    const t = target as { company_id?: string | null; branch_id?: string | null; batch_id?: string | null } | null
+    const placed = await checkPlacement(supabaseAdmin, t?.company_id, body.branch_id || null, body.batch_id || null, t ?? undefined)
+    if ('error' in placed) return NextResponse.json({ error: placed.error }, { status: 400 })
+    updates.branch_id = placed.branch_id
+    updates.batch_id = placed.batch_id
   }
 
   // Update profile row. .select() so a save that touched no row (wrong id) shows as an error, not "Saved"

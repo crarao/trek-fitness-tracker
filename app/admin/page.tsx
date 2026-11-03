@@ -9,7 +9,8 @@ import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhone
 import CountryCodePicker from '@/app/country-code-picker'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
-import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel } from '@/lib/labels'
+import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel, isDojo } from '@/lib/labels'
+import BranchesEditor from '@/app/branches-editor'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
@@ -100,6 +101,15 @@ type Partner = {
 export default function AdminPage() {
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
+  // Active branches per company (#77; pricing is per branch). Empty before the branches SQL
+  const [branchCounts, setBranchCounts] = useState<Record<string, number>>({})
+  const fetchBranchCounts = async () => {
+    const { data, error } = await supabase.from('branches').select('company_id, is_archived')
+    if (error) return
+    const n: Record<string, number> = {}
+    for (const b of (data || []) as { company_id: string; is_archived: boolean }[]) if (!b.is_archived) n[b.company_id] = (n[b.company_id] || 0) + 1
+    setBranchCounts(n)
+  }
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'clients' | 'requests'>('dashboard')
@@ -231,6 +241,7 @@ export default function AdminPage() {
       .select('*')
       .order('created_at', { ascending: false })
     setCompanies(companiesData || [])
+    fetchBranchCounts()
 
     const { data: clientsData } = await supabase
       .from('profiles')
@@ -1180,6 +1191,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             {company.name}
                             {company.is_test && <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">TEST</span>}
                             <span className={`ml-2 align-middle text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${isCoachCompany(company) ? 'text-sky-300 bg-sky-950 border border-sky-900' : 'text-gray-400 bg-gray-800 border border-gray-700'}`}>{companyTypeLabel(company).toUpperCase()} · {businessTypeLabel(company.business_type).toUpperCase()}</span>
+                            {(isDojo(company.business_type) || branchCounts[company.id] > 0) && (
+                              <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded text-orange-300 bg-orange-950/60 border border-orange-900">
+                                {branchCounts[company.id] || 0} BRANCH{(branchCounts[company.id] || 0) === 1 ? '' : 'ES'}
+                              </span>
+                            )}
                           </p>
                           <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
@@ -1360,6 +1376,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </select>
                           <p className="text-xs text-gray-500 mt-1">Martial arts: Students instead of Members, parent details, fee reminders go to the parent.</p>
                         </div>
+
+                        {/* Branches (dojos, #77): super admin only, pricing is per branch. Saves straight away (not with Save Changes) */}
+                        {isDojo(editingCompany.business_type) && (
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Branches <span className="normal-case text-gray-600">— save straight away</span></label>
+                            <BranchesEditor companyId={editingCompany.id} onSaved={(text, kind) => { showToast(text, kind); fetchBranchCounts() }} />
+                          </div>
+                        )}
 
                         <div>
                           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home country <span className="normal-case text-gray-600">— pre-fills the base currency</span></label>

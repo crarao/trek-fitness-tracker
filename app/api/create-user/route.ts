@@ -6,6 +6,7 @@ import { COUNTRIES } from '@/lib/locale'
 import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164 } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { isDojo } from '@/lib/labels'
+import { checkPlacement } from '@/lib/placement-server'
 import { randomUUID, randomBytes } from 'crypto'
 
 export async function POST(request: Request) {
@@ -100,6 +101,14 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
       clientBasics.medical_conditions = typeof body.medical_conditions === 'string' && body.medical_conditions.trim() ? body.medical_conditions.trim() : null
     }
   }
+  // Branch and home batch (dojos, db/2026-11-03-branches-batches.md; sent only once those tables exist).
+  // Both must belong to this gym, and the batch to the branch; a batch alone sets its branch.
+  const placement: { branch_id?: string | null; batch_id?: string | null } = {}
+  if (role === 'client' && ('branch_id' in body || 'batch_id' in body)) {
+    const placed = await checkPlacement(supabaseAdmin, company_id, body.branch_id || null, body.batch_id || null)
+    if ('error' in placed) return NextResponse.json({ error: placed.error }, { status: 400 })
+    Object.assign(placement, placed)
+  }
   if (coachCompany && (role === 'coach' || role === 'partner')) {
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
   }
@@ -162,6 +171,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   ...clientPlace,
   ...guardian,
   ...clientBasics,
+  ...placement,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
 })
 
