@@ -49,6 +49,7 @@ type ClientProfile = {
   client_type: string | null
   archived_at: string | null
   primary_coach_id?: string | null   // usual coach (#40); a soft link, never limits who can train the client
+  created_at?: string                // joined date (header "Joined Oct 2026")
   country?: string | null    // client's own country / default currency (multi-country gyms, db/2026-11-01-multi-country.md)
   currency?: string | null
 }
@@ -169,6 +170,9 @@ export default function ClientDetailPage() {
   const [feedbackText, setFeedbackText] = useState<Record<string, string>>({})
   const [savedFeedback, setSavedFeedback] = useState<Record<string, boolean>>({})
   const [showResetPassword, setShowResetPassword] = useState(false)
+  // Header ⋯ menu and the goal chip (tap shows the full goal)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [goalOpen, setGoalOpen] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
@@ -275,6 +279,14 @@ export default function ClientDetailPage() {
   const [makingPdf, setMakingPdf] = useState(false)
 
   useEffect(() => { initialize() }, [clientId])
+
+  // Esc closes the header ⋯ menu
+  useEffect(() => {
+    if (!headerMenuOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setHeaderMenuOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [headerMenuOpen])
 
   // #37: load "3 of 5 AI plans used this month" (only shown when AI plans are on for the company)
   useEffect(() => {
@@ -1089,6 +1101,8 @@ const handleResetPassword = async () => {
   // #37: this client's AI plans for the month are used up (the server refuses a 6th as well)
   const aiPlansUsedUp = !!aiPlans && aiPlans.used >= aiPlans.limit
   const country: Country | null = client ? normalizeCountry((client as { companies?: { country?: string | null } }).companies?.country) : null
+  // Train module on for this gym (Plans / Sessions / Progress tabs for PT clients)
+  const trainModule = !!(client as { companies?: { client_module_enabled?: boolean | null } } | null)?.companies?.client_module_enabled
   const chartData = getChartData()
   const totalMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0)
   // null until the client/company row has loaded; INR only if the company's currency is empty
@@ -1213,6 +1227,31 @@ const handleResetPassword = async () => {
     )
   }
 
+  // Edit member panel (opens in Renew mode)
+  const openEditClient = () => {
+    const latest = memberships[0]
+    const parts = splitE164(client?.phone, country)
+    const clientCountry = normalizeCountry(client?.country || country)
+    setEditClientForm({
+      full_name: client?.full_name || '',
+      // The number without its code (the code is in the picker / the gym's own); unreadable values as saved
+      phone: parts ? (multiCountry || parts.country === phoneCountry(country) ? parts.local : displayPhone(client?.phone, country)) : client?.phone || '',
+      phone_country: parts?.country ?? clientCountry,
+      country: clientCountry,
+      currency: client?.currency || baseCurrency,
+      membership_currency: '',
+      plan_type: latest?.plan_type || '1 Month',
+      amount_paid: latest?.amount_paid?.toString() || '',
+      // Opens in Renew mode: dates start after the current membership (or today)
+      start_date: renewalStartDate(),
+      end_date: '',
+      client_type: client?.client_type || 'member'
+    })
+    setMembershipMode('renew')
+    setMembershipMessage('')
+    setShowEditClient(!showEditClient)
+  }
+
   // Skeleton while loading, so the page appears instantly instead of a blank "Loading..."
   if (loading) return (
     <div className="min-h-screen bg-gray-950 text-white" aria-busy="true">
@@ -1246,90 +1285,100 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
-      {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')}
-            className="text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg text-xs transition">
-            ← Back
-          </button>
-          {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
-          {!isCoach && (<>
-          {/* No login yet (coach-run member): nothing to reset */}
-          {!isNoLogin(client?.email) && <button
-            onClick={() => setShowResetPassword(!showResetPassword)}
-            className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-            Reset Password
-          </button>}
-          <button
-            onClick={() => {
-              const latest = memberships[0]
-              const parts = splitE164(client?.phone, country)
-              const clientCountry = normalizeCountry(client?.country || country)
-              setEditClientForm({
-                full_name: client?.full_name || '',
-                // The number without its code (the code is in the picker / the gym's own); unreadable values as saved
-                phone: parts ? (multiCountry || parts.country === phoneCountry(country) ? parts.local : displayPhone(client?.phone, country)) : client?.phone || '',
-                phone_country: parts?.country ?? clientCountry,
-                country: clientCountry,
-                currency: client?.currency || baseCurrency,
-                membership_currency: '',
-                plan_type: latest?.plan_type || '1 Month',
-                amount_paid: latest?.amount_paid?.toString() || '',
-                // Opens in Renew mode: dates start after the current membership (or today)
-                start_date: renewalStartDate(),
-                end_date: '',
-                client_type: client?.client_type || 'member'
-              })
-              setMembershipMode('renew')
-              setMembershipMessage('')
-              setShowEditClient(!showEditClient)
-            }}
-            className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition">
-            Edit
-          </button>
-          {client?.archived_at ? (
-            <button
-              onClick={handleUnarchiveClient}
-              className="text-xs text-green-500 hover:text-green-400 border border-green-900 hover:border-green-500 px-3 py-1.5 rounded-lg transition">
-              Restore
-            </button>
-          ) : (
-            <button
-              onClick={handleArchiveClient}
-              className="text-xs text-gray-500 hover:text-amber-400 border border-gray-700 hover:border-amber-600 px-3 py-1.5 rounded-lg transition">
-              Archive
-            </button>
-          )}
-          <button
-            onClick={handleDeleteClient}
-            disabled={deletingClient}
-            className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 hover:border-red-500 px-3 py-1.5 rounded-lg transition">
-            {deletingClient ? 'Deleting...' : 'Delete'}
-          </button>
-          </>)}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700">
-              <span className="text-orange-500 font-bold text-sm">{client?.full_name[0]}</span>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold text-white">{client?.full_name}</h1>
-                {client?.client_type === 'pt' && (
-                  <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
-                )}
-                {client?.archived_at && (
-                  <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
+      {/* Header: back, name, coach · joined, ⋯ member actions, goal + membership chips */}
+      {(() => {
+        const coachLabel = client?.primary_coach_id
+          ? (client.primary_coach_id === viewerId ? 'You' : staff.find(x => x.id === client.primary_coach_id)?.full_name || client?.trainer_name || 'Coach')
+          : client?.trainer_name || ''
+        const joined = client?.created_at ? formatDate(client.created_at, country, 'monthYear') : ''
+        const metaLine = [
+          !coachCompany && (coachLabel ? `Coach: ${coachLabel}` : 'No coach'),
+          joined && `Joined ${joined}`,
+        ].filter(Boolean).join(' · ')
+        const m = memberships[0]
+        const mDays = m ? daysLeftFromDate(m.end_date) : null
+        const mEnd = m ? formatDate(m.end_date, country, 'dayMonth') : ''
+        const mChip = m && mDays !== null
+          ? mDays < 0 ? { dot: 'bg-red-500', text: `Expired ${mEnd}`, cls: 'text-red-300 border-red-900' }
+            : mDays <= 11 ? { dot: 'bg-amber-500', text: `Expiring ${mEnd}`, cls: 'text-amber-300 border-amber-900' }
+            : { dot: 'bg-green-500', text: `Active till ${mEnd}`, cls: 'text-green-300 border-green-900' }
+          : null
+        const menuItem = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
+        return (
+          <div className="bg-gray-900 border-b border-gray-800">
+            <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-4">
+              <div className="flex items-start gap-2">
+                <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')} aria-label="Back"
+                  className="shrink-0 w-11 h-11 -ml-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl transition text-xl">
+                  ←
+                </button>
+                <div className="flex-1 min-w-0 pt-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h1 className="text-2xl font-bold text-white leading-tight break-words">{client?.full_name}</h1>
+                    {client?.client_type === 'pt' && (
+                      <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
+                    )}
+                    {client?.archived_at && (
+                      <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
+                    )}
+                  </div>
+                  {metaLine && <p className="text-xs text-gray-500 mt-0.5">{metaLine}</p>}
+                </div>
+                {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
+                {!isCoach && (
+                  <div className="relative shrink-0">
+                    <button type="button" onClick={() => setHeaderMenuOpen(o => !o)} aria-label="Member actions"
+                      aria-haspopup="menu" aria-expanded={headerMenuOpen}
+                      className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-white rounded-xl hover:bg-gray-800 transition text-xl leading-none">
+                      ⋯
+                    </button>
+                    {headerMenuOpen && (<>
+                      <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} aria-hidden="true" />
+                      <div role="menu" className="absolute right-0 top-12 z-50 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
+                        <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); openEditClient() }}
+                          className={`${menuItem} text-orange-400`}>Edit</button>
+                        {/* No login yet (coach-run member): nothing to reset */}
+                        {!isNoLogin(client?.email) && (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); setShowResetPassword(!showResetPassword) }}
+                            className={`${menuItem} text-gray-200`}>Reset password</button>
+                        )}
+                        {client?.archived_at ? (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); handleUnarchiveClient() }}
+                            className={`${menuItem} text-green-400`}>Restore</button>
+                        ) : (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); handleArchiveClient() }}
+                            className={`${menuItem} text-gray-200`}>Archive</button>
+                        )}
+                        <button role="menuitem" type="button" disabled={deletingClient} onClick={() => { setHeaderMenuOpen(false); handleDeleteClient() }}
+                          className={`${menuItem} text-red-400 border-t border-gray-800 disabled:opacity-50`}>{deletingClient ? 'Deleting...' : 'Delete'}</button>
+                      </div>
+                    </>)}
+                  </div>
                 )}
               </div>
-              <p className="text-xs text-gray-400">{shownEmail(client?.email) || (isNoLogin(client?.email) ? 'No login' : '')}</p>
-              {client?.phone && (
-                <p className="text-xs text-gray-400">{displayPhone(client?.phone, country)}</p>
+              {(client?.goal || mChip) && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {client?.goal && (
+                    <button type="button" onClick={() => setGoalOpen(o => !o)} aria-expanded={goalOpen}
+                      aria-label={goalOpen ? 'Hide full goal' : 'Show full goal'}
+                      className={`min-h-[44px] text-left text-xs text-orange-200 bg-orange-950/60 border border-orange-900 rounded-xl px-3 py-2 transition hover:border-orange-700 ${goalOpen ? 'w-full' : 'max-w-full min-w-0'}`}>
+                      <span className={goalOpen ? 'whitespace-pre-wrap' : 'block truncate'}>
+                        <span className="text-orange-400">Goal:</span> {client.goal}
+                      </span>
+                    </button>
+                  )}
+                  {mChip && (
+                    <span className={`min-h-[44px] inline-flex items-center gap-2 text-xs bg-gray-950 border rounded-xl px-3 ${mChip.cls}`}>
+                      <span className={`w-2 h-2 rounded-full ${mChip.dot}`} aria-hidden="true" />
+                      {mChip.text}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
-        </div>
-      </div>
+        )
+      })()}
 
       {/* Edit Client Panel */}
       {showEditClient && !isCoach && (
@@ -1538,7 +1587,8 @@ const handleResetPassword = async () => {
   </div>
 )}
 
-      {/* Stats */}
+      {/* Stats (PT clients with the Train tabs see activities / minutes in Progress instead) */}
+      {!(client?.client_type === 'pt' && trainModule) && (
       <div className="max-w-2xl mx-auto px-6 pt-5 grid grid-cols-2 gap-3 mb-2">
         {client?.client_type === 'pt' ? (
           <>
@@ -1592,6 +1642,7 @@ const handleResetPassword = async () => {
           </>
         )}
       </div>
+      )}
 
       {/* Before you start (#40): what any staff member should know before training this PT client */}
       {client?.client_type === 'pt' && (() => {
@@ -1623,6 +1674,8 @@ const handleResetPassword = async () => {
                   {b.medical && (
                     <p className="text-amber-300 bg-amber-950/40 border border-amber-900 rounded-lg px-3 py-2">⚠ Medical / injuries: {b.medical}</p>
                   )}
+                  {/* Last sessions: shown here when there is no Sessions tab (Train module off); otherwise in Sessions */}
+                  {!trainModule && (<>
                   <p className="text-gray-400">
                     {b.daysSinceLast === null ? 'No sessions yet'
                       : b.daysSinceLast === 0 ? 'Last trained today'
@@ -1650,6 +1703,7 @@ const handleResetPassword = async () => {
                       See all {b.totalSessions} session{b.totalSessions === 1 ? '' : 's'} →
                     </button>
                   )}
+                  </>)}
                 </div>
               )}
             </div>
@@ -1659,16 +1713,18 @@ const handleResetPassword = async () => {
 
       {/* Tabs — PT members only, requires client module */}
       {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
-        <div className="max-w-2xl mx-auto px-6 mt-4">
-          <div className="flex gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800 mb-6">
+        <div className="sticky top-0 z-30 bg-gray-950 mt-3 mb-4">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-2">
+          <div role="tablist" className="grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
             {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-2 text-xs font-medium rounded-lg transition ${activeTab === tab
+              <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
+                className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
                   : 'text-gray-400 hover:text-white'}`}>
                 {tab === 'plans' ? 'Plans' : tab === 'sessions' ? 'Sessions' : tab === 'progress' ? 'Progress' : 'Profile'}
               </button>
             ))}
+          </div>
           </div>
         </div>
       )}
@@ -1684,12 +1740,6 @@ const handleResetPassword = async () => {
 <p className="text-xs text-gray-400 mb-3">
   📅 Today is <span className="text-white font-medium">{formatDate(new Date(), country, 'weekday')}</span>. Each plan covers 7 days from its start date; the client can tick off days only during that week.
 </p>
-{client?.goal && (
-  <div className="bg-orange-950 border border-orange-900 rounded-2xl px-5 py-4 mb-4">
-    <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Client Goal</p>
-    <p className="text-sm text-orange-200">{client.goal}</p>
-  </div>
-)}
 {(() => {
   const missing = [
     !client?.goal && 'goal',
@@ -2146,6 +2196,20 @@ const handleResetPassword = async () => {
         {/* SESSIONS TAB */}
         {activeTab === 'sessions' && (
           <div className="space-y-3">
+            {/* Last trained (moved here from Before you start) */}
+            {(() => {
+              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+              return (
+                <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
+                  <p className="text-sm text-white">
+                    {b.daysSinceLast === null ? 'No sessions yet'
+                      : b.daysSinceLast === 0 ? 'Last trained today'
+                      : `Last trained ${b.daysSinceLast} day${b.daysSinceLast === 1 ? '' : 's'} ago`}
+                  </p>
+                  {b.totalSessions > 0 && <p className="text-xs text-gray-500 shrink-0">{b.totalSessions} session{b.totalSessions === 1 ? '' : 's'}</p>}
+                </div>
+              )
+            })()}
             {renderShare()}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
@@ -2219,6 +2283,16 @@ const handleResetPassword = async () => {
         {/* PROGRESS TAB */}
         {activeTab === 'progress' && (
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                <p className="text-2xl font-bold text-orange-500">{sessions.length}</p>
+                <p className="text-xs text-gray-500 mt-1">Total Activities</p>
+              </div>
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
+                <p className="text-2xl font-bold text-orange-500">{totalMinutes}</p>
+                <p className="text-xs text-gray-500 mt-1">Total Minutes</p>
+              </div>
+            </div>
             {renderShare()}
             {(() => {
               // Plan adherence: this week's plan and the last 4 weeks
