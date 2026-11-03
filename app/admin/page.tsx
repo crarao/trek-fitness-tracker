@@ -5,10 +5,11 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { CURRENCIES, normalizeCurrency } from '@/lib/currency'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhoneLogin, displayPhone, phoneHint, shownEmail } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhoneLogin, displayPhone, phoneHint, shownEmail, isGeneratedLogin } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
+import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel } from '@/lib/labels'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
@@ -136,6 +137,7 @@ export default function AdminPage() {
   allowed_currencies: ['INR'] as string[],
   login_phone_country: 'IN' as PhoneCountry, // country code of a phone admin login
   company_type: 'gym' as CompanyType,
+  business_type: 'gym' as BusinessType,
   slug: '',
   slugEdited: false, // admin typed in the slug field: stop following the company name
   trial_start: localDateIso(),
@@ -381,6 +383,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
       slug: newCompany.slug,
       // Sent once the company_type column exists (or when it's an individual coach; the SQL must run first then)
       ...(newCompany.company_type === 'coach' || companies.some(c => 'company_type' in c) ? { company_type: newCompany.company_type } : {}),
+      // companies.business_type already exists: martial_arts switches on the dojo wording (lib/labels.ts)
+      business_type: newCompany.business_type,
     }
     const { data: company, error: companyError } = pendingCompanyId
       ? await supabase.from('companies').update(companyFields).eq('id', pendingCompanyId).select().single()
@@ -428,6 +432,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
   allowed_currencies: ['INR'] as string[],
   login_phone_country: 'IN' as PhoneCountry, // country code of a phone admin login
   company_type: 'gym' as CompanyType,
+  business_type: 'gym' as BusinessType,
   slug: '',
   slugEdited: false, // admin typed in the slug field: stop following the company name
   trial_start: localDateIso(),
@@ -520,6 +525,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ...('is_test' in editingCompany ? { is_test: !!editingCompany.is_test } : {}),
         // Only once the company_type column exists
         ...('company_type' in editingCompany ? { company_type: companyType(editingCompany) } : {}),
+        // Only when the super admin changed it: an empty value shows as General but stays empty until picked
+        ...(editingCompany.business_type !== companies.find(c => c.id === editingCompany.id)?.business_type
+          ? { business_type: businessType(editingCompany.business_type) } : {}),
         slug: slug || null,
       })
       .eq('id', editingCompany.id)
@@ -1070,6 +1078,15 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                   </select>
                 </div>
                 <div>
+                  <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Business type <span className="normal-case text-gray-600">— kind of training: wording, login banner, AI plans</span></label>
+                  <select value={newCompany.business_type} required
+                    onChange={(e) => setNewCompany({ ...newCompany, business_type: businessType(e.target.value) })}
+                    className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                    {BUSINESS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Martial arts: Students instead of Members, parent details, fee reminders go to the parent.</p>
+                </div>
+                <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home country <span className="normal-case text-gray-600">— date format, phone code and how clients log in</span></label>
                   <select value={newCompany.country}
                     onChange={(e) => {
@@ -1162,7 +1179,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <p className="font-medium text-white text-sm">
                             {company.name}
                             {company.is_test && <span className="ml-2 align-middle text-[10px] font-semibold tracking-wider text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">TEST</span>}
-                            <span className={`ml-2 align-middle text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${isCoachCompany(company) ? 'text-sky-300 bg-sky-950 border border-sky-900' : 'text-gray-400 bg-gray-800 border border-gray-700'}`}>{companyTypeLabel(company).toUpperCase()}</span>
+                            <span className={`ml-2 align-middle text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded ${isCoachCompany(company) ? 'text-sky-300 bg-sky-950 border border-sky-900' : 'text-gray-400 bg-gray-800 border border-gray-700'}`}>{companyTypeLabel(company).toUpperCase()} · {businessTypeLabel(company.business_type).toUpperCase()}</span>
                           </p>
                           <p className="text-sm text-gray-400 mt-0.5 break-all">{company.email}</p>
                           {company.phone && (
@@ -1332,6 +1349,16 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           {isCoachCompany(editingCompany) && (
                             <p className="text-xs text-amber-400 mt-1">Individual coach: coach / partner screens are hidden and no new ones can be added. Existing logins are kept, not deleted{companyCoachCount + activePartnerCount > 0 ? ` (${companyCoachCount} coach, ${activePartnerCount} partner active now: turn coaches off or remove partners if they shouldn't log in)` : ''}.</p>
                           )}
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Business type</label>
+                          <select value={businessType(editingCompany.business_type)}
+                            onChange={e => setEditingCompany({ ...editingCompany, business_type: businessType(e.target.value) })}
+                            className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                            {BUSINESS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                          </select>
+                          <p className="text-xs text-gray-500 mt-1">Martial arts: Students instead of Members, parent details, fee reminders go to the parent.</p>
                         </div>
 
                         <div>
@@ -1828,7 +1855,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                 {c.full_name}
                                 {c.client_type === 'pt' && <span className="ml-1.5 text-[10px] bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full align-middle">PT</span>}
                               </p>
-                              <p className="text-xs text-gray-500 truncate">{c.email && !isPhoneLogin(c.email) && shownEmail(c.email) ? c.email : displayPhone(c.phone, companies.find(co => co.id === c.company_id)?.country) || shownEmail(c.email) || 'No login'}</p>
+                              <p className="text-xs text-gray-500 truncate">{c.email && !isPhoneLogin(c.email) && shownEmail(c.email) ? c.email : displayPhone(c.phone, companies.find(co => co.id === c.company_id)?.country) || shownEmail(c.email) || (isGeneratedLogin(c.email) ? 'No login (child)' : 'No login')}</p>
                             </div>
                             <span className={`text-xs shrink-0 ${stateCls[state]}`}>● {stateLabel[state]}</span>
                           </div>

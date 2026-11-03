@@ -9,7 +9,8 @@ export const DEFAULT_BANNERS: Record<string, string> = {
   yoga: 'https://images.unsplash.com/photo-1588286840104-8957b019727f?w=1200&q=80',
   trek: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200&q=80',
   cycling: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80',
-  general: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=1200&q=80'
+  general: 'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?w=1200&q=80',
+  martial_arts: 'https://images.unsplash.com/photo-1555597673-b21d5c935865?w=1200&q=80'
 }
 
 export const DEFAULT_TAGLINES: Record<string, string> = {
@@ -18,7 +19,8 @@ export const DEFAULT_TAGLINES: Record<string, string> = {
   yoga: 'Find Your Balance.',
   trek: 'Every Summit Begins With A Single Step.',
   cycling: 'Push Your Limits.',
-  general: 'Achieve Your Goals.'
+  general: 'Achieve Your Goals.',
+  martial_arts: 'Discipline. Every class.'
 }
 
 export const bannerFor = (c: Branded | null | undefined) =>

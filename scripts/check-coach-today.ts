@@ -2,7 +2,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-coach-today.ts --outDir /tmp/cct --module commonjs --target es2020 --skipLibCheck && node /tmp/cct/scripts/check-coach-today.js
 
-import { todayRows, sortRows, beforeYouStart, isCovering, type CoachClient, type CoachPlan, type CoachSession } from '../lib/coach-today'
+import { todayRows, sortRows, beforeYouStart, isCovering, loggedByLabel, type CoachClient, type CoachPlan, type CoachSession } from '../lib/coach-today'
 
 const today = '2026-10-29' // a Thursday
 const weekStart = '2026-10-26' // Monday
@@ -86,3 +86,13 @@ console.log('   Ravi logs, no primary   →', isCovering(session('x3', noPrimary
 console.log('   client logs             →', isCovering(session('x4', hari.id, today, hari.id), hari), '(expect false)')
 console.log('   client logs (no logger) →', isCovering(session('x5', hari.id, today, null), hari), '(expect false)')
 console.log('   viewer Meena            →', isCovering(meena.id, hari), '(expect true)')
+
+console.log('\n5. loggedByLabel: only coach logins get the word (owner / partner by name)')
+const owner = { id: 'owner-anand', full_name: 'Anand Rao' }
+const allNames = { ...names, [owner.id]: owner.full_name }
+const coachIds = new Set([ravi.id, meena.id])
+console.log('   coach Ravi logs         →', loggedByLabel(session('y1', hari.id, today, ravi.id), allNames, 'Coach', coachIds), '(expect Coach Ravi)')
+console.log('   owner Anand logs        →', loggedByLabel(session('y2', hari.id, today, owner.id), allNames, 'Coach', coachIds), '(expect Anand)')
+console.log('   dojo: sensei Ravi logs  →', loggedByLabel(session('y3', hari.id, today, ravi.id), allNames, 'Sensei', coachIds), '(expect Sensei Ravi)')
+console.log('   dojo: owner logs        →', loggedByLabel(session('y4', hari.id, today, owner.id), allNames, 'Sensei', coachIds), '(expect Anand)')
+console.log('   client logs             →', loggedByLabel(session('y5', hari.id, today, null), allNames, 'Coach', coachIds), '(expect client)')

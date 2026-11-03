@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { thisWeekMonday } from '@/lib/calories'
+import { staffWord, ptWord, isDojo } from '@/lib/labels'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -87,11 +88,13 @@ export default function CoachHomePage() {
     router.push('/login')
   }
 
-  // Plans tab, today's day open (the client page reads tab and day)
+  // Plans tab, today's day open (the client page reads tab and day). Dojo: no plans, so the Sessions tab with
+  // the Log session form open (stop-gap attendance until Build 3)
   const openClient = (id: string) => {
     if (openingId) return
     setOpeningId(id)
-    router.push(`/company/client/${id}?tab=plans&day=today`)
+    const dojoHome = isDojo((company as { business_type?: string | null } | null)?.business_type)
+    router.push(dojoHome ? `/company/client/${id}?tab=sessions&log=today` : `/company/client/${id}?tab=plans&day=today`)
     setTimeout(() => setOpeningId(prev => (prev === id ? null : prev)), 10000) // safety reset
   }
 
@@ -113,13 +116,21 @@ export default function CoachHomePage() {
   )
 
   const country = company?.country ?? 'IN'
+  // Dojo (business type martial_arts): "Sensei" and "students" (every student is a PT client there), lib/labels.ts
+  const bt = (company as { business_type?: string | null } | null)?.business_type
+  const sw = staffWord(bt)
+  const pw = ptWord(bt)
+  const dojo = isDojo(bt)
+  const who = dojo ? 'students' : 'clients'
   const coaches = staff.filter(s => s.role === 'coach')
-  const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today))
+  const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today, sw.one,
+    new Set(staff.filter(x => x.role === 'coach').map(x => x.id))))
   const q = search.trim().toLowerCase()
   const shown = rows
     .filter(r => filter === 'all' || (filter === 'mine' ? r.isMine : !r.doneToday))
     .filter(r => !q || r.client.full_name.toLowerCase().includes(q) || (r.client.phone || '').includes(q))
-  const noPlansThisWeek = clients.length > 0 && rows.every(r => r.todayDay === 'no-plan')
+  // Dojo: no plans (attendance replaces them later), so never the "no plans" note
+  const noPlansThisWeek = !dojo && clients.length > 0 && rows.every(r => r.todayDay === 'no-plan')
   const counts: Record<Filter, number> = {
     all: rows.length,
     mine: rows.filter(r => r.isMine).length,
@@ -137,12 +148,13 @@ export default function CoachHomePage() {
   }
 
   const workoutText = (r: TodayRow) => {
+    if (dojo) return null
     if (r.todayDay === 'no-plan') return <span className="text-gray-500">No plan this week</span>
     if (r.todayDay === 'rest') return <span className="text-gray-500">Rest day</span>
     return <span className="text-gray-300">{r.todayDay.label}{r.workoutTime ? ` · ${r.workoutTime}` : ''}</span>
   }
 
-  const coachLine = (r: TodayRow) => (r.primaryCoach === 'You' ? 'You' : r.primaryCoach ? `Primary: ${r.primaryCoach}` : 'No primary coach')
+  const coachLine = (r: TodayRow) => (r.primaryCoach === 'You' ? 'You' : r.primaryCoach ? `Primary: ${r.primaryCoach}` : `No primary ${sw.one.toLowerCase()}`)
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -159,7 +171,7 @@ export default function CoachHomePage() {
             )}
             <div className="min-w-0">
               <p className="text-xs text-gray-500 truncate">{company?.name || 'CoachBoard'}</p>
-              <h1 className="text-lg font-bold text-white truncate">Hi {(me?.full_name || '').trim().split(/\s+/)[0] || 'Coach'}</h1>
+              <h1 className="text-lg font-bold text-white truncate">Hi {(me?.full_name || '').trim().split(/\s+/)[0] || sw.one}</h1>
               <p className="text-xs text-gray-400">{formatDate(today, country, 'weekday')}</p>
             </div>
           </div>
@@ -174,21 +186,21 @@ export default function CoachHomePage() {
         {error && <p className="text-sm text-red-300 bg-red-950 border border-red-900 rounded-xl px-4 py-3">{error}</p>}
 
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today <span className="normal-case text-gray-600">(PT clients)</span></h2>
+          <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today <span className="normal-case text-gray-600">({pw})</span></h2>
           <p className="text-xs text-gray-500">
-            <span className="text-green-400 font-semibold">{rows.filter(r => r.doneToday).length}</span> trained today
+            <span className="text-green-400 font-semibold">{rows.filter(r => r.doneToday).length}</span> {dojo ? 'came today' : 'trained today'}
           </p>
         </div>
 
         {clients.length === 0 ? (
           <div className="bg-gray-900 rounded-2xl p-8 text-center text-gray-400 border border-gray-800 text-sm">
-            No PT clients yet. The owner adds them.
+            No {pw} yet. The owner adds them.
           </div>
         ) : (
           <>
             {/* Chips + search */}
             <div className="flex flex-wrap gap-2">
-              {([['all', 'All PT clients'], ['mine', 'My clients'], ['not-yet', 'Not trained yet today']] as const).map(([key, label]) => (
+              {([['all', `All ${pw}`], ['mine', `My ${who}`], ['not-yet', dojo ? 'Not in yet today' : 'Not trained yet today']] as const).map(([key, label]) => (
                 <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
                   className={`text-xs px-3 py-1.5 rounded-full border transition ${filter === key ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                   {label} <span className={filter === key ? 'text-orange-100' : 'text-gray-500'}>{counts[key]}</span>
@@ -206,7 +218,7 @@ export default function CoachHomePage() {
 
             {shown.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-6">
-                {filter === 'mine' && !q ? 'No clients have you as their primary coach.' : 'No clients match.'}
+                {filter === 'mine' && !q ? `No ${who} have you as their primary ${sw.one.toLowerCase()}.` : `No ${who} match.`}
               </p>
             ) : (
               <ul className="space-y-2">
@@ -224,14 +236,14 @@ export default function CoachHomePage() {
                             <span className="text-xs text-orange-400">Opening…</span>
                           ) : r.doneToday ? (
                             <span className="text-xs text-green-400 font-medium">
-                              ✓ Done · by {r.doneToday.by}{r.doneToday.exercises ? ` · ${r.doneToday.exercises}` : ''}
+                              ✓ {dojo ? 'Came today' : 'Done'} · by {r.doneToday.by}{r.doneToday.exercises ? ` · ${r.doneToday.exercises}` : ''}
                             </span>
                           ) : (
-                            <span className="text-xs text-gray-500">Not yet</span>
+                            <span className="text-xs text-gray-500">{dojo ? 'Not yet · Log session' : 'Not yet'}</span>
                           )}
                         </div>
                       </div>
-                      <p className="text-xs mt-1.5 truncate">{workoutText(r)}</p>
+                      {!dojo && <p className="text-xs mt-1.5 truncate">{workoutText(r)}</p>}
                       {membershipTag(r.client.id) && <div className="mt-2">{membershipTag(r.client.id)}</div>}
                     </button>
                   </li>
@@ -244,7 +256,7 @@ export default function CoachHomePage() {
         {/* Coaches: sessions each active coach logged today (read-only) */}
         {coaches.some(c => !c.archived_at) && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Coaches · sessions logged today</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">{sw.many} · sessions logged today</p>
             <ul className="space-y-1">
               {coaches.filter(c => !c.archived_at).map(c => {
                 const n = sessions.filter(s => s.session_date === today && s.logged_by === c.id).length

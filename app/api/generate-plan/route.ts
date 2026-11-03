@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { isGymType } from '@/lib/leads'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getCaller, PLAN_ROLES, forbidden, checkCanManageClient } from '@/lib/auth-server'
@@ -131,7 +132,8 @@ export async function POST(request: Request) {
     }
 
     const businessType = profile.business_type || 'gym'
-    const style = coachingStyles[businessType] || coachingStyles.general
+    // Martial arts (dojo) is treated like a gym type (lib/leads.ts GYM_TYPES): the gym approach, worded "martial arts coach"
+    const style = coachingStyles[businessType] || (isGymType(businessType) ? coachingStyles.gym : coachingStyles.general)
 
     // The schedule comes from the Available Days chips, worked out here so the AI can't miscount
     const trainDays = parseAvailableDays(profile.available_days)
@@ -151,7 +153,7 @@ If the Goal or Medical Conditions text mentions a different number of days, stil
         + `The client's notes mention ${mentioned} days a week. If the profile is wrong, update Available Days and generate again.`)
     }
 
-    const prompt = `You are an experienced ${businessType} coach creating a detailed weekly training plan for a client.
+    const prompt = `You are an experienced ${businessType.replace(/_/g, ' ')} coach creating a detailed weekly training plan for a client.
 
 Coaching approach: ${style}
 

@@ -10,11 +10,13 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol, groupByCurrency, formatMoneyByCurrency, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, waDigits, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
+import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
+import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
 
 type Membership = {
   id: string
@@ -38,6 +40,10 @@ type Client = {
   primary_coach_id?: string | null
   country?: string | null  // client's own country / default currency (multi-country gyms)
   currency?: string | null
+  // Parent / guardian (db/2026-11-03-guardian.md): undefined before that SQL runs
+  guardian_name?: string | null
+  guardian_phone?: string | null
+  guardian_relation?: string | null
 }
 
 // Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
@@ -106,6 +112,14 @@ export default function CompanyAdminPage() {
   const [companyName, setCompanyName] = useState('')
   // Individual coach company (company_type = 'coach'): no coaches, coach assignment or "logged by" names
   const [coachCompany, setCoachCompany] = useState(false)
+  // companies.business_type (super admin): martial_arts = a dojo, "Students" instead of "Members" (lib/labels.ts)
+  const [businessType, setBusinessType] = useState<string | null>(null)
+  const mw = memberWord(businessType)
+  // Dojo: "Sensei" for coach logins, every student is a PT client (no PT checkbox / badges), no exercise list
+  const sw = staffWord(businessType)
+  const dojo = isDojo(businessType)
+  // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
+  const [guardianColumns, setGuardianColumns] = useState(false)
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -131,7 +145,11 @@ export default function CompanyAdminPage() {
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member', primary_coach_id: '',
     // Multi-country only: the client's country, the phone's country code and the payment currency ('' = home / base)
-    country: '', phone_country: '', currency: ''
+    country: '', phone_country: '', currency: '',
+    // Child with a parent (guardian columns only). child null = the default: ticked for a dojo (martial arts), else not
+    child: null as boolean | null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
+    // Dojo: the short profile on the same screen (age, gender, medical conditions)
+    age: '', gender: '', medical_conditions: '',
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -214,20 +232,25 @@ export default function CompanyAdminPage() {
     fetchClients(profile.company_id)
     fetchLeadStats(profile.company_id)
     fetchCoaches(profile.company_id)
-    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
-    if (fromLeadId) openFromLead(fromLeadId)
+    // Do the guardian columns exist yet? A column error before db/2026-11-03-guardian.md runs (then the fields stay hidden)
+    const guardianProbe = supabase.from('profiles').select('guardian_phone').limit(1)
+      .then(({ error }) => { setGuardianColumns(!error); return !error })
 
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
       client_limit: number | null; is_trial: boolean | null; pt_limit: number | null
       currency: string | null; country: string | null; client_module_enabled: boolean | null
       company_type?: string | null
+      business_type?: string | null
       multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null // db/2026-11-01-multi-country.md
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
     setCoachCompany(isCoachCompany(company))
+    setBusinessType(company?.business_type ?? null)
+    const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
+    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
     setTrainModule(!!company?.client_module_enabled)
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
@@ -246,7 +269,8 @@ export default function CompanyAdminPage() {
   }
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
-  const openFromLead = async (leadId: string) => {
+  // In a dojo the enquiry usually comes from a parent: its phone goes into Parent phone (Child starts ticked)
+  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>) => {
     const { data: lead, error } = await supabase
       .from('leads')
       .select('id, name, phone, source, interest, status')
@@ -257,10 +281,12 @@ export default function CompanyAdminPage() {
       if (error) console.error('Lead fetch error:', error)
       return
     }
+    const toParent = dojo && await guardianProbe
     setNewClient(prev => ({
       ...prev,
       full_name: lead.name || '',
-      phone: lead.phone || '',
+      phone: toParent ? '' : lead.phone || '',
+      guardian_phone: toParent ? lead.phone || '' : '',
       client_type: lead.interest === 'pt' ? 'pt' : 'member',
     }))
     setFromLead({ id: lead.id, name: lead.name, source: lead.source })
@@ -387,7 +413,7 @@ export default function CompanyAdminPage() {
   const handleAddCoach = async () => {
     if (!companyId) return
     const name = newCoach.full_name.trim()
-    if (!name) { setCoachMessage('Error: Enter the coach\'s name'); return }
+    if (!name) { setCoachMessage(`Error: Enter the ${sw.one.toLowerCase()}'s name`); return }
     const login = staffLogin(country, { phoneCountry: newCoach.phone_country || (country ?? 'IN'), phone: newCoach.phone, email: newCoach.email, password: newCoach.password })
     if ('error' in login) { setCoachMessage('Error: ' + login.error); return }
     const { email, password, phone, method } = login
@@ -403,9 +429,9 @@ export default function CompanyAdminPage() {
     if (result.error) { setCoachMessage('Error: ' + result.error); return }
     setNewCoach({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
     setCoachMessage(method === 'email'
-      ? `Coach added. They log in with ${email} and the password you set.`
-      : 'Coach added. Default password = phone number.')
-    showToast('Coach added ✓')
+      ? `${sw.one} added. They log in with ${email} and the password you set.`
+      : `${sw.one} added. Default password = phone number.`)
+    showToast(`${sw.one} added ✓`)
     fetchCoaches(companyId)
   }
 
@@ -425,7 +451,7 @@ export default function CompanyAdminPage() {
     if (!editCoach) return
     const name = editCoach.full_name.trim()
     const phone = editCoach.phone.trim()
-    if (!name) { setEditCoachError('Enter the coach\'s name'); return }
+    if (!name) { setEditCoachError(`Enter the ${sw.one.toLowerCase()}'s name`); return }
     if (editCoach.phoneLogin && !splitE164(phone, country)) { setEditCoachError(`Enter a valid phone number (${phoneHint(country ?? 'IN')}): they log in with it`); return }
     setSavingEditCoach(true)
     setEditCoachError('')
@@ -440,7 +466,7 @@ export default function CompanyAdminPage() {
     const old = coachById[editCoach.id]
     const samePhone = (a: string, b: string) => { const x = splitE164(a, country), y = splitE164(b, country); return x && y ? x.country === y.country && x.local === y.local : a === b }
     const phoneChanged = editCoach.phoneLogin && old && !samePhone(old.phone || '', phone)
-    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : 'Coach saved ✓')
+    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : `${sw.one} saved ✓`)
     setEditCoach(null)
     if (companyId) fetchCoaches(companyId)
   }
@@ -564,9 +590,21 @@ export default function CompanyAdminPage() {
     return indianDigits ? { kind: 'phone', email: loginEmailFor('IN', indianDigits), shown: indianDigits } : { kind: 'none' }
   }
 
+  // Child with parent details (only once the guardian columns exist): ticked by default for a dojo
+  const newClientChild = () => guardianColumns && (newClient.child ?? isDojo(businessType))
+  const newClientParentCountry = (): PhoneCountry => (newClient.guardian_phone_country || newClientPlace().phoneCountry) as PhoneCountry
+
   const handleCreateClient = async () => {
     setSaving(true)
     setMessage('')
+
+    // Child: the parent's phone is required (the student's own phone is optional)
+    const child = newClientChild()
+    if (child && !validLocalDigits(newClientParentCountry(), newClient.guardian_phone)) {
+      setMessage(`Error: Enter the parent's phone (${phoneHint(newClientParentCountry())})`)
+      setSaving(false)
+      return
+    }
 
     const { count } = await supabase
       .from('profiles')
@@ -589,7 +627,7 @@ export default function CompanyAdminPage() {
     const place = newClientPlace()
     const login = newClientLogin()
     if (login.kind === 'bad-email') {
-      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the member without a login')
+      setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the ' + mw.one.toLowerCase() + ' without a login')
       setSaving(false)
       return
     }
@@ -610,9 +648,21 @@ export default function CompanyAdminPage() {
         // International format (+919876543210), lib/phone.ts
         phone: clientPhoneValue(place.phoneCountry, newClient.phone),
         trainer_name: newClient.trainer_name,
-        diet_plan: newClient.diet_plan,
-        client_type: newClient.client_type,
+        diet_plan: dojo ? '' : newClient.diet_plan,
+        // Dojo: age, gender and medical conditions are entered here (one screen), not later on the Profile tab
+        ...(dojo ? {
+          age: newClient.age ? parseInt(newClient.age) : null,
+          gender: newClient.gender || null,
+          medical_conditions: newClient.medical_conditions.trim() || null,
+        } : {}),
+        client_type: dojo ? 'pt' : newClient.client_type,
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
+        // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
+        ...(child ? {
+          guardian_name: newClient.guardian_name.trim(),
+          guardian_phone: clientPhoneValue(newClientParentCountry(), newClient.guardian_phone),
+          guardian_relation: newClient.guardian_relation,
+        } : {}),
         // Once the multi-country SQL has run: the client's country and default currency
         ...(currencyColumns ? { country: place.country, currency: place.currency } : {})
       })
@@ -638,7 +688,7 @@ export default function CompanyAdminPage() {
       if (mError) console.error('Membership insert error:', mError)
     }
 
-    setMessage('Member created successfully!')
+    setMessage(`${mw.one} created successfully!`)
     if (fromLead) {
       // Mark the enquiry Joined; the member is kept even if this fails
       const { data: updated, error: leadError } = await supabase
@@ -647,18 +697,20 @@ export default function CompanyAdminPage() {
         .eq('id', fromLead.id)
         .select('id')
       if (leadError) console.error('Lead update error:', leadError)
-      if (leadError || !updated?.length) showToast("Member added, but the enquiry wasn't updated", 'error')
-      else { showToast('Member added ✓ · enquiry marked Joined'); fetchLeadStats(companyId!) }
+      if (leadError || !updated?.length) showToast(`${mw.one} added, but the enquiry wasn't updated`, 'error')
+      else { showToast(`${mw.one} added ✓ · enquiry marked Joined`); fetchLeadStats(companyId!) }
       setFromLead(null)
     } else {
-      showToast('Member added ✓')
+      showToast(`${mw.one} added ✓`)
     }
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
       client_type: 'member', primary_coach_id: '',
-      country: '', phone_country: '', currency: ''
+      country: '', phone_country: '', currency: '',
+      child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
+      age: '', gender: '', medical_conditions: '',
     })
     setShowForm(false)
     setSaving(false)
@@ -783,8 +835,10 @@ export default function CompanyAdminPage() {
   const loggerName = (id: string) => {
     if (id === 'client') return 'Clients themselves'
     // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
-    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
-    return first ? `Coach ${first}` : 'Coach'
+    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
+    // Only coach / sensei logins read "Coach Ravi"; the owner / a partner shows by name ("by Anand")
+    if (!coachById[id]) return first || 'staff'
+    return first ? `${sw.one} ${first}` : sw.one
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
 
@@ -834,7 +888,11 @@ export default function CompanyAdminPage() {
     .filter(c => {
       if (!searchQuery.trim()) return true
       const q = searchQuery.toLowerCase()
+      const qDigits = q.replace(/\D/g, '')
       return c.full_name.toLowerCase().includes(q) || (c.phone || '').includes(q)
+        // Parent name / phone (digits only, so "98765 43210" finds +919876543210)
+        || (c.guardian_name || '').toLowerCase().includes(q)
+        || (!!qDigits && (c.guardian_phone || '').replace(/\D/g, '').includes(qDigits))
     })
 
   if (trialInfo && !trialInfo.is_active) {
@@ -914,7 +972,7 @@ export default function CompanyAdminPage() {
             <button
               onClick={() => { setShowForm(!showForm); setFromLead(null) }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
-              + Add Member
+              + Add {mw.one}
             </button>
           </div>
         </div>
@@ -1007,9 +1065,9 @@ export default function CompanyAdminPage() {
       {/* Stat cards */}
       <div className="px-4 sm:px-8 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Members</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
+          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
         <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
@@ -1167,12 +1225,12 @@ export default function CompanyAdminPage() {
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach assignments <span className="normal-case text-gray-600">(PT clients by primary coach)</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} assignments <span className="normal-case text-gray-600">({ptWord(businessType)} by primary {sw.one.toLowerCase()})</span></p>
               <p className="text-xs text-gray-500 shrink-0">{ptCount - unassigned.length} of {ptCount} assigned</p>
             </div>
             <ul className="mt-2 divide-y divide-gray-800">
               {[...assignments.map(a => ({ id: a.coach.id, name: a.coach.full_name, off: !!a.coach.archived_at, clients: a.clients })),
-                ...(unassigned.length ? [{ id: 'none', name: 'No primary coach', off: false, clients: unassigned }] : [])].map(row => {
+                ...(unassigned.length ? [{ id: 'none', name: `No primary ${sw.one.toLowerCase()}`, off: false, clients: unassigned }] : [])].map(row => {
                 const open = assignCoach === row.id
                 const trainedToday = row.clients.filter(c => trainedTodayIds.has(c.id)).length
                 return (
@@ -1184,7 +1242,7 @@ export default function CompanyAdminPage() {
                           {row.name}{row.off ? ' (login off)' : ''}
                         </span>
                         <span className="text-xs text-gray-400 shrink-0">
-                          <span className="text-lg font-bold text-white">{row.clients.length}</span> client{row.clients.length === 1 ? '' : 's'}
+                          <span className="text-lg font-bold text-white">{row.clients.length}</span> {dojo ? (row.clients.length === 1 ? 'student' : 'students') : `client${row.clients.length === 1 ? '' : 's'}`}
                           {row.clients.length > 0 && <span className="text-gray-500"> · {trainedToday} trained today</span>}
                         </span>
                       </div>
@@ -1207,7 +1265,7 @@ export default function CompanyAdminPage() {
                 )
               })}
             </ul>
-            <p className="text-[11px] text-gray-600 mt-2">Set the primary coach on Add Member or the client&apos;s Profile tab. Any coach can still train any client.</p>
+            <p className="text-[11px] text-gray-600 mt-2">Set the primary {sw.one.toLowerCase()} on Add {mw.one} or the {mw.one.toLowerCase()}&apos;s Profile tab. Any {sw.one.toLowerCase()} can still train any {mw.one.toLowerCase()}.</p>
           </div>
         </div>
       )}
@@ -1218,7 +1276,7 @@ export default function CompanyAdminPage() {
             {/* Collapsed by default: a one-line summary; tap for Today / This week */}
             <button type="button" onClick={() => setShowTraining(!showTraining)} aria-expanded={showTraining}
               className="w-full flex items-baseline justify-between gap-3 text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">({ptWord(businessType)}) · {formatDate(new Date(), country, 'weekday')}</span></p>
               <span className="flex items-baseline gap-3 shrink-0">
                 {!showTraining && recent && (
                   <span className="text-xs text-gray-500">
@@ -1243,7 +1301,7 @@ export default function CompanyAdminPage() {
                     <p className="text-xs text-gray-500"><span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained</p>
                   </div>
                   {trainedToday.length === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No PT sessions logged yet today.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT'} sessions logged yet today.</p>
                   ) : (
                     <ul className="mt-1 divide-y divide-gray-800">
                       {trainedToday.map(s => {
@@ -1274,7 +1332,7 @@ export default function CompanyAdminPage() {
                       <p className="text-[11px] text-gray-500 mb-1.5">Workout today, not done yet</p>
                       <div className="flex flex-wrap gap-2">
                         {dueToday.map(({ c, label }) => (
-                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, '?tab=plans&day=today')}
+                          <button key={c.id} type="button" data-nav onClick={() => openClient(c.id, dojo ? '?tab=sessions&log=today' : '?tab=plans&day=today')}
                             title={label}
                             className="text-xs px-2.5 py-1.5 rounded-lg border border-green-800 bg-gray-800 text-gray-200 hover:border-green-500">
                             {c.full_name.split(' ')[0]} <span className="text-green-300">Mark today</span>
@@ -1287,9 +1345,11 @@ export default function CompanyAdminPage() {
 
                 {/* THIS WEEK — each client's plan week (7 days from its start) */}
                 <div className="mt-3 border-t border-gray-800 pt-3">
-                  <p className="text-[11px] text-gray-500 uppercase tracking-wider">This week <span className="normal-case text-gray-600">(each client&apos;s plan week)</span></p>
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wider">This week <span className="normal-case text-gray-600">{dojo ? '(since Monday)' : <>(each client&apos;s plan week)</>}</span></p>
+                  {/* Dojo: no plans (attendance replaces them later), so no plan progress, missed days or "no plan" list */}
+                  {!dojo && <>
                   {weekTotals.planned === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No PT client has a plan for this week yet.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT client'} has a plan for this week yet.</p>
                   ) : (
                     <>
                       <div className="flex items-baseline gap-2 mt-1">
@@ -1299,7 +1359,7 @@ export default function CompanyAdminPage() {
                       <div className="mt-2 h-2 rounded-full bg-gray-800 overflow-hidden" role="progressbar" aria-valuenow={pct(weekTotals) ?? 0} aria-valuemin={0} aria-valuemax={100}>
                         <div className="h-full bg-purple-500 rounded-full" style={{ width: `${pct(weekTotals)}%` }} />
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} PT clients have a plan this week</p>
+                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} {ptWord(businessType)} have a plan this week</p>
                     </>
                   )}
                   {missedWeek.length > 0 && (
@@ -1330,6 +1390,8 @@ export default function CompanyAdminPage() {
                       </div>
                     </div>
                   )}
+                  </>}
+                  {dojo && byLogger.length === 0 && <p className="text-sm text-gray-400 mt-1">No sessions logged yet this week.</p>}
                   {!coachCompany && byLogger.length > 0 && (
                     <div className="mt-3">
                       <p className="text-[11px] text-gray-500 mb-1.5">Logged by · today / since Mon</p>
@@ -1358,7 +1420,7 @@ export default function CompanyAdminPage() {
             <div className="flex items-baseline justify-between gap-3">
               <button type="button" onClick={() => setShowActivity(!showActivity)} aria-expanded={showActivity}
                 className="flex-1 min-w-0 flex items-baseline justify-between gap-3 text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} activity <span className="normal-case text-gray-600">({dojo ? 'students' : 'PT'} · today / since Mon)</span></p>
                 <span className="flex items-baseline gap-3 shrink-0">
                   {!showActivity && recent && (() => {
                     const coachSessionsToday = coachActivity.reduce((n, a) => n + a.today.sessions, 0)
@@ -1375,7 +1437,7 @@ export default function CompanyAdminPage() {
               </button>
               {showActivity && activityCoach && (
                 <button type="button" onClick={() => setActivityCoach(null)} className="text-xs text-orange-400 hover:text-orange-300 shrink-0">
-                  All coaches
+                  All {sw.many.toLowerCase()}
                 </button>
               )}
             </div>
@@ -1394,7 +1456,7 @@ export default function CompanyAdminPage() {
                           <span className={`text-sm truncate ${a.coach.archived_at ? 'text-gray-500' : 'text-white'}`}>{a.coach.full_name}{a.coach.archived_at ? ' (off)' : ''}</span>
                           <span className="text-xs text-gray-400 shrink-0">
                             <span className="text-white font-semibold">{a.today.sessions}</span> / {a.week.sessions} sessions
-                            {' · '}{a.today.clients.length} / {a.week.clients.length} clients
+                            {' · '}{a.today.clients.length} / {a.week.clients.length} {dojo ? 'students' : 'clients'}
                             {a.week.covering > 0 && <span className="text-sky-300"> · {a.today.covering} / {a.week.covering} covering</span>}
                           </span>
                         </button>
@@ -1445,7 +1507,7 @@ export default function CompanyAdminPage() {
                     )}
                     {noPrimaryClients.length > 0 && (
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1.5">No primary coach set</p>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No primary {sw.one.toLowerCase()} set</p>
                         <div className="flex flex-wrap gap-1.5">
                           {noPrimaryClients.slice(0, 12).map(c => (
                             <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
@@ -1479,8 +1541,8 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* Exercise list: the gym's own exercises for the plan builder (rename / archive) */}
-      {trainModule && (
+      {/* Exercise list: the gym's own exercises for the plan builder (rename / archive). Not shown to dojos */}
+      {trainModule && !dojo && (
         <div className="px-4 sm:px-8 pt-3">
           <button type="button" data-nav onClick={() => router.push('/company/exercises')}
             className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
@@ -1495,14 +1557,14 @@ export default function CompanyAdminPage() {
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
               className="w-full flex items-center justify-between text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Coaches <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.many} <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
               <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
             </button>
             {showCoaches && (
               <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-3">Coaches see PT clients and plans only: no payments, leads or settings.</p>
+                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType)} and plans only: no payments, leads or settings.</p>
                 {coaches.length === 0 ? (
-                  <p className="text-sm text-gray-400 mb-3">No coaches yet.</p>
+                  <p className="text-sm text-gray-400 mb-3">No {sw.many.toLowerCase()} yet.</p>
                 ) : (
                   <ul className="space-y-2 mb-3">
                     {coaches.map(c => {
@@ -1512,7 +1574,7 @@ export default function CompanyAdminPage() {
                       if (editCoach?.id === c.id) return (
                         <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
                           <div className="grid grid-cols-2 gap-2">
-                            <input type="text" placeholder="Coach name" aria-label="Coach name"
+                            <input type="text" placeholder={`${sw.one} name`} aria-label={`${sw.one} name`}
                               value={editCoach.full_name}
                               onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
                               className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
@@ -1565,7 +1627,7 @@ export default function CompanyAdminPage() {
                   </ul>
                 )}
                 <div className="grid grid-cols-2 gap-2 mb-2">
-                  <input type="text" placeholder="Coach name"
+                  <input type="text" placeholder={`${sw.one} name`}
                     value={newCoach.full_name}
                     onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
                     className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
@@ -1598,12 +1660,12 @@ export default function CompanyAdminPage() {
                 )}
                 <button type="button" onClick={handleAddCoach} disabled={savingCoach}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
-                  {savingCoach ? 'Adding...' : '+ Add coach'}
+                  {savingCoach ? 'Adding...' : `+ Add ${sw.one.toLowerCase()}`}
                 </button>
                 <p className="text-xs text-gray-600 mt-1.5">
                   {(country ?? 'IN') === 'IN'
-                    ? 'Coaches log in with their phone. Default password is their phone number.'
-                    : 'With an email, coaches log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.'}
+                    ? `${sw.many} log in with their phone. Default password is their phone number.`
+                    : `With an email, ${sw.many.toLowerCase()} log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.`}
                 </p>
               </div>
             )}
@@ -1663,7 +1725,7 @@ export default function CompanyAdminPage() {
               count: activeMemberships.filter(m => m.plan_type === plan).length
             })).filter(p => p.count > 0)
 
-            if (total === 0) return <p className="text-xs text-gray-600">No active members yet.</p>
+            if (total === 0) return <p className="text-xs text-gray-600">No active {mw.many.toLowerCase()} yet.</p>
 
             return (
               <div className="space-y-2.5">
@@ -1695,7 +1757,7 @@ export default function CompanyAdminPage() {
           {/* Table toolbar */}
           <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-3">
-              <h2 className="font-semibold text-white text-sm sm:text-base">Members — {companyName}</h2>
+              <h2 className="font-semibold text-white text-sm sm:text-base">{mw.many} — {companyName}</h2>
               <div className="flex gap-1 flex-wrap">
                 {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
                   <button key={f} onClick={() => setActiveFilter(f)}
@@ -1726,7 +1788,7 @@ export default function CompanyAdminPage() {
               </svg>
               <input
                 type="text"
-                placeholder="Search by name or phone..."
+                placeholder={isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
@@ -1744,7 +1806,7 @@ export default function CompanyAdminPage() {
 
           {loading ? (
             <div className="divide-y divide-gray-800" aria-busy="true">
-              <span className="sr-only" role="status">Loading members…</span>
+              <span className="sr-only" role="status">Loading {mw.many.toLowerCase()}…</span>
               {[0, 1, 2, 3, 4].map(i => (
                 <div key={i} className="px-4 sm:px-6 py-4 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-gray-800 animate-pulse shrink-0" />
@@ -1759,19 +1821,19 @@ export default function CompanyAdminPage() {
           ) : filteredClients.length === 0 ? (
             <div className="px-6 py-12 text-center text-gray-500 text-sm">
               {activeFilter === 'archived'
-                ? 'No archived members.'
+                ? `No archived ${mw.many.toLowerCase()}.`
                 : clients.length === 0
-                ? 'No members yet. Add your first one!'
+                ? `No ${mw.many.toLowerCase()} yet. Add your first one!`
                 : searchQuery.trim()
-                ? `No members match "${searchQuery}".`
-                : `No ${activeFilter} members.`}
+                ? `No ${mw.many.toLowerCase()} match "${searchQuery}".`
+                : `No ${activeFilter} ${mw.many.toLowerCase()}.`}
             </div>
           ) : (
             <div className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
-                  <th className="px-4 sm:px-6 py-3 text-left font-medium">Member</th>
+                  <th className="px-4 sm:px-6 py-3 text-left font-medium">{mw.one}</th>
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
                   <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
                   <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
@@ -1801,14 +1863,15 @@ export default function CompanyAdminPage() {
                   }[status]
 
                   const handleAction = () => {
-                    // Country code + number for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts)
-                    const wa = waDigits(client.phone, country)
-                    if (status === 'expiring' && wa) {
-                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} expires on ${m ? formatDate(m.end_date, country, 'dayMonth') : ''}. Renew now to keep going! 💪`
-                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
-                    } else if (status === 'expired' && wa) {
-                      const msg = `Hi ${client.full_name.split(' ')[0]}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! 💪`
-                      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank')
+                    // To the parent when a valid parent phone is set, else the member (lib/guardian.ts). Country code + number
+                    // for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts). No parent: as always.
+                    const to = reminderRecipient(client, country)
+                    if ((status === 'expiring' || status === 'expired') && to.waDigits) {
+                      const msg = reminderText({
+                        status, memberFirst: client.full_name.split(' ')[0], parentFirst: to.greetName,
+                        companyName, endDate: m?.end_date, businessType, toParent: to.toParent, country,
+                      })
+                      window.open(`https://wa.me/${to.waDigits}?text=${encodeURIComponent(msg)}`, '_blank')
                     } else {
                       openClient(client.id)
                     }
@@ -1832,11 +1895,11 @@ export default function CompanyAdminPage() {
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <p className="font-medium text-white text-sm">{client.full_name}</p>
-                              {client.client_type === 'pt' && (
+                              {client.client_type === 'pt' && !dojo && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
                               {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
-                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
+                                <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
                               )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
                               {activeFilter !== 'archived' && m && (
@@ -1853,13 +1916,17 @@ export default function CompanyAdminPage() {
                                 Opening…
                               </p>
                             ) : (
+                              <>
+                              {client.guardian_name && (
+                                <p className="text-xs text-gray-400">Parent: {client.guardian_name}</p>
+                              )}
                               <p className="text-xs text-gray-500">
                                 {displayPhone(client.phone, country) || shownEmail(client.email)}
                                 {/* PT plan progress this week, on the second line so the row stays phone-width */}
                                 {trainModule && client.client_type === 'pt' && (() => {
                                   const a = weekAdherence[client.id]
                                   if (!a) return null
-                                  if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  if (a === 'no-plan') return dojo ? null : <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
                                   // "Mark today" lives on the Training card (#44), not on each row
                                   return (
                                     <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
@@ -1868,6 +1935,7 @@ export default function CompanyAdminPage() {
                                   )
                                 })()}
                               </p>
+                              </>
                             )}
                           </div>
                         </div>
@@ -1935,7 +2003,7 @@ export default function CompanyAdminPage() {
           <div className="px-4 py-6 max-w-lg mx-auto">
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-white">New Member</h3>
+                <h3 className="font-semibold text-white">New {mw.one}</h3>
                 <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="text-gray-500 hover:text-white transition text-xl leading-none">✕</button>
               </div>
@@ -1960,6 +2028,9 @@ export default function CompanyAdminPage() {
                     </select>
                   </div>
                 )}
+                {newClientChild() && (
+                  <label className="col-span-2 -mb-2 text-xs text-gray-500">Student&apos;s phone (optional — only if they will log in)</label>
+                )}
                 {multiCountry ? (
                   <div className="col-span-2 flex gap-2">
                     <CountryCodePicker value={newClientPlace().phoneCountry}
@@ -1979,6 +2050,71 @@ export default function CompanyAdminPage() {
                   value={newClient.email}
                   onChange={e => setNewClient({ ...newClient, email: e.target.value })}
                   className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                {guardianColumns && (
+                  // Parent / guardian (any business type; ticked by default only for a dojo). The parent's phone is
+                  // contact only, never a login, so siblings can share it.
+                  <label className="col-span-2 flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={newClientChild()}
+                      onChange={e => {
+                        const on = e.target.checked
+                        // From an enquiry: carry the phone across to the field that is now in use
+                        const move = fromLead && (on ? !newClient.guardian_phone : !newClient.phone)
+                        setNewClient({
+                          ...newClient, child: on,
+                          ...(move && on ? { guardian_phone: newClient.phone, phone: '' } : {}),
+                          ...(move && !on ? { phone: newClient.guardian_phone, guardian_phone: '' } : {}),
+                        })
+                      }}
+                      className="w-4 h-4 accent-orange-500" />
+                    <span className="text-sm text-gray-300">Child — add parent details</span>
+                  </label>
+                )}
+                {newClientChild() && (
+                  <div className="col-span-2 grid grid-cols-2 gap-3 border border-gray-800 rounded-lg p-3">
+                    <input type="text" placeholder="Parent name"
+                      value={newClient.guardian_name}
+                      onChange={e => setNewClient({ ...newClient, guardian_name: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    <select value={newClient.guardian_relation} aria-label="Relation"
+                      onChange={e => setNewClient({ ...newClient, guardian_relation: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      {GUARDIAN_RELATIONS.map(r => <option key={r}>{r}</option>)}
+                    </select>
+                    <div className="col-span-2 flex gap-2">
+                      {multiCountry && (
+                        <CountryCodePicker value={newClientParentCountry()}
+                          onChange={c => setNewClient({ ...newClient, guardian_phone_country: c })} className="py-2.5" />
+                      )}
+                      <input type="tel" placeholder={`Parent phone (${phoneHint(newClientParentCountry())})`} aria-label="Parent phone"
+                        value={newClient.guardian_phone}
+                        onChange={e => setNewClient({ ...newClient, guardian_phone: e.target.value })}
+                        className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    </div>
+                    <p className="col-span-2 -mt-1 text-xs text-gray-500">Fee reminders go to the parent on WhatsApp.</p>
+                  </div>
+                )}
+                {dojo && (
+                  // Dojo: the whole student profile on one screen (Age, Gender, Medical); editable later on the Profile tab
+                  <>
+                    <input type="number" placeholder="Age" min={1} max={120} aria-label="Age"
+                      value={newClient.age}
+                      onChange={e => setNewClient({ ...newClient, age: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    <select value={newClient.gender} aria-label="Gender"
+                      onChange={e => setNewClient({ ...newClient, gender: e.target.value })}
+                      className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                      <option value="">Gender</option>
+                      <option>Male</option>
+                      <option>Female</option>
+                      <option>Other</option>
+                    </select>
+                    <textarea placeholder="Medical conditions / injuries (optional)"
+                      value={newClient.medical_conditions}
+                      onChange={e => setNewClient({ ...newClient, medical_conditions: e.target.value })}
+                      rows={2}
+                      className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
+                  </>
+                )}
                 {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
                   <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
                     value={newClient.password}
@@ -2050,27 +2186,28 @@ export default function CompanyAdminPage() {
                     {newClient.end_date ? ` → ${formatDate(newClient.end_date, country, 'medium')}` : ''}
                   </p>
                 )}
-                <textarea placeholder="Diet plan (optional)"
+                {/* Dojo: no diet plan, and every student is a PT client (saved as 'pt' below and in create-user) */}
+                {!dojo && <textarea placeholder="Diet plan (optional)"
                   value={newClient.diet_plan}
                   onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
                   rows={2}
-                  className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
-                <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
+                  className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />}
+                {!dojo && <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
                   <input type="checkbox"
                     checked={newClient.client_type === 'pt'}
                     onChange={e => setNewClient({ ...newClient, client_type: e.target.checked ? 'pt' : 'member' })}
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
-                </label>
+                </label>}
                 {/* Coach for this member: picked from the gym's coaches (no free text). PT: primary coach; regular member: optional */}
                 {!coachCompany && activeCoaches.length > 0 && (
                   <div className="col-span-2">
-                    <label className="text-xs text-gray-500 mb-1 block">{newClient.client_type === 'pt' ? 'Primary coach' : 'Trainer (optional)'}</label>
+                    <label className="text-xs text-gray-500 mb-1 block">{dojo ? `${sw.one} (optional)` : newClient.client_type === 'pt' ? 'Primary coach' : 'Trainer (optional)'}</label>
                     <select
                       value={newClient.primary_coach_id}
                       onChange={e => setNewClient({ ...newClient, primary_coach_id: e.target.value })}
                       className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
-                      <option value="">No primary coach</option>
+                      <option value="">No primary {sw.one.toLowerCase()}</option>
                       {activeCoaches.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
                     </select>
                   </div>
@@ -2082,7 +2219,7 @@ export default function CompanyAdminPage() {
               <div className="flex gap-2 mt-4">
                 <button onClick={handleCreateClient} disabled={saving}
                   className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
-                  {saving ? 'Creating...' : 'Create Member'}
+                  {saving ? 'Creating...' : `Create ${mw.one}`}
                 </button>
                 <button onClick={() => { setShowForm(false); setMessage(''); setFromLead(null) }}
                   className="px-4 py-2.5 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition">

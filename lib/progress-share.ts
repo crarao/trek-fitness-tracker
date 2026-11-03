@@ -10,6 +10,7 @@ import { missedAndDue, type TodaySession } from './todays-sessions'
 import { estimateKcal } from './calories'
 import { parseActivity } from './activities'
 import { sessionsInWeek } from './weekly-totals'
+import { pickRecipient } from './guardian'
 
 export type ShareClient = {
   full_name: string
@@ -64,15 +65,17 @@ export function maskPhone(toPhone: string | null, country: Country): string {
 }
 
 // Who the message goes to: the guardian when a guardian phone is set, otherwise the client
+// (the shared rule is pickRecipient in lib/guardian.ts; this keeps its own phone reader, waPhone)
 function recipient(client: ShareClient, country: Country) {
-  const guardianPhone = waPhone(client.guardian_phone, country)
+  const to = pickRecipient(client, raw => waPhone(raw, country))
+  const guardianPhone = to.toParent ? to.phone : null
   if (guardianPhone) {
     const name = (client.guardian_name || '').trim()
     const relation = (client.guardian_relation || '').trim()
     const toLabel = relation && name ? `${relation} (${name})` : relation || name || 'Guardian'
     return { toPhone: guardianPhone, toLabel, guardian: true, greetName: firstName(name) }
   }
-  return { toPhone: waPhone(client.phone, country), toLabel: client.full_name, guardian: false, greetName: firstName(client.full_name) }
+  return { toPhone: to.phone, toLabel: client.full_name, guardian: false, greetName: firstName(client.full_name) }
 }
 
 // "Tue · Upper Body Push · 6/7 exercises · 60 min" (parts without data are left out)

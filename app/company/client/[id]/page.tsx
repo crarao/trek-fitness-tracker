@@ -5,7 +5,8 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin } from '@/lib/phone'
+import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint } from '@/lib/phone'
+import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
@@ -18,6 +19,7 @@ import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, pl
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
+import { memberWord, staffWord, isDojo } from '@/lib/labels'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -51,6 +53,10 @@ type ClientProfile = {
   created_at?: string                // joined date (header "Joined Oct 2026")
   country?: string | null    // client's own country / default currency (multi-country gyms, db/2026-11-01-multi-country.md)
   currency?: string | null
+  // Parent / guardian (db/2026-11-03-guardian.md): undefined before that SQL runs
+  guardian_name?: string | null
+  guardian_phone?: string | null
+  guardian_relation?: string | null
 }
 
 // Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
@@ -120,6 +126,8 @@ export default function ClientDetailPage() {
   const searchParams = useSearchParams()
   const linkTab = searchParams.get('tab')
   const linkDay = searchParams.get('day')
+  // "?tab=sessions&log=today" (dojo sensei home): Sessions tab with the Log session form open
+  const linkLog = searchParams.get('log')
   const linkApplied = useRef(false)
 
   const [client, setClient] = useState<ClientProfile | null>(null)
@@ -209,7 +217,8 @@ export default function ClientDetailPage() {
     trainer_name: '', diet_plan: '',
     goal: '', age: '', gender: '', height_cm: '', weight_kg: '',
     fitness_level: '', food_preference: '', meals_per_day: '', available_days: '',
-    medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: ''
+    medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: '',
+    guardian_name: '', guardian_phone: '', guardian_relation: ''
   })
   const [savingClientProfile, setSavingClientProfile] = useState(false)
   const [clientProfileMessage, setClientProfileMessage] = useState('')
@@ -217,6 +226,8 @@ export default function ClientDetailPage() {
   // Ticks per "planId:Day", kept on this device under "coach-ticks:<planId>:<Day>" so they never mix
   // with the client's own ticks ("cb-ticks") on a shared phone.
   const COACH_TICKS = 'coach-ticks:'
+  // Dojo "Log session" form on the Sessions tab (no plan): its key in markKey
+  const DOJO_LOG_KEY = 'dojo-log'
   const [coachTicks, setCoachTicks] = useState<Record<string, number[]>>(() => {
     if (typeof window === 'undefined') return {}
     const out: Record<string, number[]> = {}
@@ -338,6 +349,12 @@ export default function ClientDetailPage() {
   useEffect(() => {
     if (linkApplied.current || loading || !client) return
     linkApplied.current = true
+    // Dojo: no Plans tab (attendance replaces plans later): plan links open Sessions, "today" opens Log session
+    if (isDojo((client as { companies?: { business_type?: string | null } }).companies?.business_type) && (linkTab === 'plans' || linkTab === 'sessions')) {
+      setActiveTab('sessions')
+      if (linkLog === 'today' || linkDay === 'today') openMarkForm(DOJO_LOG_KEY)
+      return
+    }
     if (linkTab === 'sessions') { setActiveTab('sessions'); return } // owner dashboard → Today's sessions
     if (linkTab !== 'plans') return
     setActiveTab('plans')
@@ -508,20 +525,28 @@ export default function ClientDetailPage() {
   const loggedByText = (s: Session) => {
     if (!s.logged_by || s.logged_by === clientId) return 'by client'
     // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
-    const first = (staffNames[s.logged_by] || staff.find(x => x.id === s.logged_by)?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
+    const first = (staffNames[s.logged_by] || staff.find(x => x.id === s.logged_by)?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
     const covering = isCovering(s.logged_by, { id: clientId, primary_coach_id: client?.primary_coach_id })
-    return (first ? `by Coach ${first}` : 'by coach') + (covering ? ' (covering)' : '')
+    const bt = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
+    const word = staffWord(bt).one
+    // Only coach / sensei logins read "by Coach Ravi"; the owner / a partner shows by name
+    if (staff.find(x => x.id === s.logged_by)?.role !== 'coach') return `by ${first || 'staff'}` + (covering ? ' (covering)' : '')
+    return (first ? `by ${word} ${first}` : `by ${word.toLowerCase()}`) + (covering ? ' (covering)' : '')
   }
   const staffFirstName = (id: string | null | undefined) => (staff.find(x => x.id === id)?.full_name || '').trim().split(/\s+/)[0]
   // Individual coach company (company_type = 'coach'): the owner is the coach, so no coach names or primary coach
   const coachCompany = isCoachCompany((client as { companies?: { company_type?: string | null } } | null)?.companies)
+  // Dojo (business type martial_arts): "Sensei", every student is PT (no PT badge / checkbox), short profile (age, gender, medical, parent)
+  const dojoType = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
+  const dojo = isDojo(dojoType)
+  const sw = staffWord(dojoType)
   // Shown near Mark done when a coach trains someone else's client (or a client with no primary coach)
   const coveringBadge = () => {
     if (coachCompany || !isCoach || !viewerId || !isCovering(viewerId, { id: clientId, primary_coach_id: client?.primary_coach_id })) return null
     const primary = staffFirstName(client?.primary_coach_id)
     return (
       <p className="text-[11px] text-gray-500 mb-2">
-        {client?.primary_coach_id ? `Covering for ${primary || 'their coach'}` : 'No primary coach'}
+        {client?.primary_coach_id ? `Covering for ${primary || `their ${sw.one.toLowerCase()}`}` : `No primary ${sw.one.toLowerCase()}`}
       </p>
     )
   }
@@ -545,7 +570,8 @@ export default function ClientDetailPage() {
   // "Mark done for <client>": saves a session for the client like the client's own Done ✓
   // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
   // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
-  const handleCoachLogDay = async (plan: Plan, day: PlanDay | null, label: string | null) => {
+  // plan null = a dojo session with no plan (Sessions tab → Log session; weekly_plan_id stays empty)
+  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null) => {
     setMarkError('')
     const minutes = parseInt(markForm.duration_minutes)
     if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return }
@@ -553,11 +579,11 @@ export default function ClientDetailPage() {
     setSavingMark(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setSavingMark(false); router.push('/login'); return }
-    const tickKey = day ? `${plan.id}:${day.day}` : ''
+    const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     const row: Record<string, unknown> = {
       client_id: clientId,
-      weekly_plan_id: plan.id,
+      weekly_plan_id: plan?.id ?? null,
       session_date: markForm.session_date,
       duration_minutes: minutes,
       notes: markForm.notes,
@@ -585,8 +611,8 @@ export default function ClientDetailPage() {
     closeMarkForm()
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
-    setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
-    showToast(`✓ ${day ? day.day : 'Session'} done for ${clientFirstName}`)
+    if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
+    showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
     loadData(['sessions'])
   }
 
@@ -829,6 +855,36 @@ const handleSaveDiet = async () => {
 
 const handleSaveClientProfile = async () => {
   setSavingClientProfile(true)
+  // Parent / guardian: saved through update-client (checks the phone on the server), only once the columns exist
+  if (client && 'guardian_phone' in client) {
+    const raw = clientProfileForm.guardian_phone.trim()
+    let parentPhone = ''
+    if (raw) {
+      const parts = splitE164(raw.startsWith('+') ? raw : clientPhoneValue(phoneCountry(client.country || country), raw), country)
+      if (!parts) {
+        setSavingClientProfile(false)
+        showToast('Enter a valid parent phone number, or leave it empty', 'error')
+        return
+      }
+      parentPhone = toE164(parts.country, parts.local)
+    }
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: clientId,
+        guardian_name: clientProfileForm.guardian_name,
+        guardian_phone: parentPhone,
+        guardian_relation: clientProfileForm.guardian_relation,
+      })
+    })
+    const result = await response.json().catch(() => ({ error: "Couldn't save" }))
+    if (result.error) {
+      setSavingClientProfile(false)
+      showToast("Couldn't save parent details: " + result.error, 'error')
+      return
+    }
+  }
   const { error: profileError } = await supabase
     .from('profiles')
     .update({
@@ -1001,10 +1057,10 @@ const handleResetPassword = async () => {
       setEditMessage('Error: ' + result.error)
       return
     }
-    await supabase.from('profiles').update({ client_type: editClientForm.client_type }).eq('id', clientId)
+    await supabase.from('profiles').update({ client_type: dojo ? 'pt' : editClientForm.client_type }).eq('id', clientId)
     setSavingEdit(false)
     setEditMessage('Saved! ✓')
-    showToast('Member updated ✓')
+    showToast(`${memberWord((client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type).one} updated ✓`)
     loadData(['client'])
     setTimeout(() => { setShowEditClient(false); setEditMessage('') }, 1000)
   }
@@ -1126,7 +1182,8 @@ const handleResetPassword = async () => {
     const result = await response.json().catch(() => ({ error: 'Network error' }))
     setSavingPrimaryCoach(false)
     if (!response.ok || result.error) { showToast("Couldn't save: " + (result.error || response.status), 'error'); return }
-    showToast(coachId ? `Primary coach: ${staff.find(x => x.id === coachId)?.full_name || ''} ✓` : 'No primary coach ✓')
+    const word = staffWord((client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type).one
+    showToast(coachId ? `Primary ${word.toLowerCase()}: ${staff.find(x => x.id === coachId)?.full_name || ''} ✓` : `No primary ${word.toLowerCase()} ✓`)
     loadData(['client'])
   }
 
@@ -1156,7 +1213,7 @@ const handleResetPassword = async () => {
   // "Log today's session" bar: today's workout day of this week's plan (or this week's text plan).
   // Hidden when there is nothing to log today (no plan this week, or today is a rest day).
   const todayLog = (() => {
-    if (client?.client_type !== 'pt' || !trainModule) return null
+    if (client?.client_type !== 'pt' || !trainModule || dojo) return null
     const cur = currentPlan(plans)
     if (!cur) return null
     const json = planJsonOf(cur)
@@ -1436,11 +1493,11 @@ const handleResetPassword = async () => {
       {/* Header: back, name, coach · joined, ⋯ member actions, goal + membership chips */}
       {(() => {
         const coachLabel = client?.primary_coach_id
-          ? (client.primary_coach_id === viewerId ? 'You' : staff.find(x => x.id === client.primary_coach_id)?.full_name || client?.trainer_name || 'Coach')
+          ? (client.primary_coach_id === viewerId ? 'You' : staff.find(x => x.id === client.primary_coach_id)?.full_name || client?.trainer_name || sw.one)
           : client?.trainer_name || ''
         const joined = client?.created_at ? formatDate(client.created_at, country, 'monthYear') : ''
         const metaLine = [
-          !coachCompany && (coachLabel ? `Coach: ${coachLabel}` : 'No coach'),
+          !coachCompany && (coachLabel ? `${sw.one}: ${coachLabel}` : `No ${sw.one.toLowerCase()}`),
           joined && `Joined ${joined}`,
         ].filter(Boolean).join(' · ')
         const m = memberships[0]
@@ -1463,7 +1520,7 @@ const handleResetPassword = async () => {
                 <div className="flex-1 min-w-0 pt-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h1 className="text-2xl font-bold text-white leading-tight break-words">{client?.full_name}</h1>
-                    {client?.client_type === 'pt' && (
+                    {client?.client_type === 'pt' && !dojo && (
                       <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
                     )}
                     {client?.archived_at && (
@@ -1580,13 +1637,14 @@ const handleResetPassword = async () => {
                 onChange={e => setEditClientForm({ ...editClientForm, phone: e.target.value })}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             )}
-            <label className="flex items-center gap-3 cursor-pointer py-1">
+            {/* Dojo: every student is PT (senseis see them, progress can be shared), so no checkbox */}
+            {!dojo && <label className="flex items-center gap-3 cursor-pointer py-1">
               <input type="checkbox"
                 checked={editClientForm.client_type === 'pt'}
                 onChange={e => setEditClientForm({ ...editClientForm, client_type: e.target.checked ? 'pt' : 'member' })}
                 className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
               <span className="text-sm text-gray-300">Personal Training (PT) member</span>
-            </label>
+            </label>}
             {editMessage && (
               <p className={`text-sm ${editMessage.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{editMessage}</p>
             )}
@@ -1794,7 +1852,7 @@ const handleResetPassword = async () => {
 
       {/* Before you start (#40): what any staff member should know before training this PT client */}
       {client?.client_type === 'pt' && (() => {
-        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+        const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, new Set(staff.filter(x => x.role === 'coach').map(x => x.id)))
         const primary = client.primary_coach_id ? staff.find(x => x.id === client.primary_coach_id)?.full_name : null
         const toggle = () => {
           const next = !bysOpen
@@ -1815,7 +1873,7 @@ const handleResetPassword = async () => {
                 <div className="mt-3 space-y-2.5 text-sm">
                   {!coachCompany && (
                     <p className="text-gray-400">
-                      Primary coach: <span className="text-white">{client.primary_coach_id ? (client.primary_coach_id === viewerId ? 'You' : primary || 'Coach') : 'No primary coach'}</span>
+                      Primary {sw.one.toLowerCase()}: <span className="text-white">{client.primary_coach_id ? (client.primary_coach_id === viewerId ? 'You' : primary || sw.one) : `No primary ${sw.one.toLowerCase()}`}</span>
                     </p>
                   )}
                   {b.goal && <p className="text-gray-400">Goal: <span className="text-white">{b.goal}</span></p>}
@@ -1863,8 +1921,9 @@ const handleResetPassword = async () => {
       {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (
         <div className="sticky top-0 z-30 bg-gray-950 mt-3 mb-4">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-2">
-          <div role="tablist" className="grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800">
-            {(['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
+          <div role="tablist" className={`grid ${dojo ? 'grid-cols-3' : 'grid-cols-4'} gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800`}>
+            {/* Dojo: no Plans tab (attendance with batches replaces it later; saved plans are kept) */}
+            {(dojo ? ['profile', 'sessions', 'progress'] as const : ['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
               <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
                 className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
@@ -1883,7 +1942,7 @@ const handleResetPassword = async () => {
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
 
         {/* PLANS TAB */}
-        {activeTab === 'plans' && (
+        {activeTab === 'plans' && !dojo && (
           <div>
 {(() => {
   const missing = [
@@ -2441,7 +2500,7 @@ const handleResetPassword = async () => {
           <div className="space-y-3">
             {/* Last trained (moved here from Before you start) */}
             {(() => {
-              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso())
+              const b = beforeYouStart({ ...client, id: clientId }, sessions.map(x => ({ ...x, client_id: clientId })), { ...Object.fromEntries(staff.map(x => [x.id, x.full_name])), ...staffNames }, localDateIso(), sw.one, new Set(staff.filter(x => x.role === 'coach').map(x => x.id)))
               return (
                 <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 flex items-center justify-between gap-3">
                   <p className="text-sm text-white">
@@ -2453,6 +2512,24 @@ const handleResetPassword = async () => {
                 </div>
               )
             })()}
+            {/* Dojo: no plans, so staff log a session here (stop-gap attendance until Build 3) */}
+            {dojo && (markKey === DOJO_LOG_KEY ? (
+              <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
+                {coveringBadge()}
+                <SessionForm mode="day" idPrefix="dojo-log" value={markForm} onChange={setMarkForm}
+                  feelingEnabled={!isCoach}
+                  country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
+                  notesLabel="Notes (optional)"
+                  error={markError} saving={savingMark} submitLabel={`Save session for ${clientFirstName}`}
+                  onSubmit={() => handleCoachLogDay(null, null, null)} onCancel={closeMarkForm}
+                  heading={<p className="text-xs font-semibold text-green-400">Session for {clientFirstName}</p>} />
+              </div>
+            ) : (
+              <button type="button" onClick={() => openMarkForm(DOJO_LOG_KEY)}
+                className="w-full min-h-[44px] bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-2xl text-sm text-orange-400 font-medium transition">
+                + Log session for {clientFirstName}
+              </button>
+            ))}
             {renderShare()}
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
@@ -2537,8 +2614,8 @@ const handleResetPassword = async () => {
               </div>
             </div>
             {renderShare()}
-            {(() => {
-              // Plan adherence: this week's plan and the last 4 weeks
+            {!dojo && (() => {
+              // Plan adherence: this week's plan and the last 4 weeks (not for dojos: no plans)
               const cur = currentPlan(plans)
               const week = cur ? planAdherence(cur, sessions) : null
               const four = recentAdherence(plans, sessions, 4)
@@ -2645,7 +2722,7 @@ const handleResetPassword = async () => {
 
       {/* Card header with Edit button */}
       <div className="flex justify-between items-center">
-        <h2 className="font-semibold text-white">Client Fitness Profile</h2>
+        <h2 className="font-semibold text-white">{dojo ? `${memberWord(dojoType).one} Profile` : 'Client Fitness Profile'}</h2>
         {!isCoach && <button
           onClick={() => {
             if (editingClientProfile) {
@@ -2666,6 +2743,9 @@ const handleResetPassword = async () => {
                 medical_conditions: client?.medical_conditions || '',
                 emergency_contact_name: client?.emergency_contact_name || '',
                 emergency_contact_phone: client?.emergency_contact_phone || '',
+                guardian_name: client?.guardian_name || '',
+                guardian_phone: displayPhone(client?.guardian_phone, country),
+                guardian_relation: client?.guardian_relation || '',
               })
               setEditingClientProfile(true)
             }
@@ -2677,8 +2757,9 @@ const handleResetPassword = async () => {
 
       {editingClientProfile && !isCoach ? (
         <div className="space-y-4">
+          {/* Dojo profile: age, gender, medical conditions and parent only (other fields hidden, saved values kept) */}
           {/* Goal */}
-          <div>
+          {!dojo && <div>
             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Goal</label>
             <textarea
               placeholder="Client's fitness goal..."
@@ -2686,7 +2767,7 @@ const handleResetPassword = async () => {
               onChange={e => setClientProfileForm({ ...clientProfileForm, goal: e.target.value })}
               rows={2}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
-          </div>
+          </div>}
 
           {/* Age + Gender */}
           <div className="grid grid-cols-2 gap-3">
@@ -2711,6 +2792,7 @@ const handleResetPassword = async () => {
             </div>
           </div>
 
+          {!dojo && <>
           {/* Height + Weight */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2802,6 +2884,8 @@ const handleResetPassword = async () => {
             </div>
           </div>
 
+          </>}
+
           {/* Medical Conditions */}
           <div>
             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Medical Conditions / Injuries</label>
@@ -2813,8 +2897,8 @@ const handleResetPassword = async () => {
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
           </div>
 
-          {/* Emergency Contact */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Emergency Contact (not for dojos: the parent is the contact) */}
+          {!dojo && <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Emergency Contact</label>
               <input type="text" placeholder="Name"
@@ -2829,10 +2913,39 @@ const handleResetPassword = async () => {
                 onChange={e => setClientProfileForm({ ...clientProfileForm, emergency_contact_phone: e.target.value })}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             </div>
-          </div>
+          </div>}
 
-          {/* Trainer + Diet */}
-          <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
+          {/* Parent / guardian (once db/2026-11-03-guardian.md has run): fee reminders and progress shares go to this phone */}
+          {client && 'guardian_phone' in client && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Parent / guardian</label>
+                <input type="text" placeholder="Name"
+                  value={clientProfileForm.guardian_name}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_name: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Relation</label>
+                <select value={clientProfileForm.guardian_relation}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_relation: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  <option value="">—</option>
+                  {GUARDIAN_RELATIONS.map(r => <option key={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Parent phone</label>
+                <input type="tel" placeholder={`Phone (${phoneHint(phoneCountry(client.country || country))}; another country: start with +)`}
+                  value={clientProfileForm.guardian_phone}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, guardian_phone: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+            </div>
+          )}
+
+          {/* Trainer + Diet (not for dojos: the sensei is picked on the Profile tab, no diet) */}
+          {!dojo && <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
             <div>
               {!coachCompany && (<>
@@ -2849,7 +2962,7 @@ const handleResetPassword = async () => {
                 rows={4}
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
             </div>
-          </div>
+          </div>}
 
           {clientProfileMessage && (
             <p className="text-green-400 text-sm">{clientProfileMessage}</p>
@@ -2864,7 +2977,7 @@ const handleResetPassword = async () => {
       ) : (
         <>
           {/* Goal */}
-          {client?.goal && (
+          {client?.goal && !dojo && (
             <div className="bg-orange-950 border border-orange-900 rounded-xl px-4 py-3">
               <p className="text-xs text-orange-400 uppercase tracking-wider mb-1">Goal</p>
               <p className="text-sm text-orange-200">{client.goal}</p>
@@ -2881,6 +2994,7 @@ const handleResetPassword = async () => {
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Gender</p>
               <p className="text-sm text-white">{client?.gender || '—'}</p>
             </div>
+            {!dojo && <>
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Height</p>
               <p className="text-sm text-white">{client?.height_cm ? `${client.height_cm} cm` : '—'}</p>
@@ -2901,10 +3015,11 @@ const handleResetPassword = async () => {
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Meals per day</p>
               <p className="text-sm text-white">{client?.meals_per_day || '—'}</p>
             </div>
+            </>}
           </div>
 
           {/* Available Days */}
-          {client?.available_days && (
+          {client?.available_days && !dojo && (
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Available Days</p>
               <div className="flex gap-2 flex-wrap">
@@ -2923,27 +3038,47 @@ const handleResetPassword = async () => {
             <p className="text-sm text-white">{client?.medical_conditions || '—'}</p>
           </div>
 
-          {/* Emergency Contact */}
-          <div className="border-t border-gray-800 pt-4">
+          {/* Emergency Contact (not for dojos: the parent is the contact) */}
+          {!dojo && <div className="border-t border-gray-800 pt-4">
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Emergency Contact</p>
             <p className="text-sm text-white">{client?.emergency_contact_name || '—'}</p>
             <p className="text-sm text-gray-400">{client?.emergency_contact_phone || ''}</p>
-          </div>
+          </div>}
+
+          {/* Parent / guardian (dojo students; fee reminders and progress shares go here). Read-only for coaches too. */}
+          {client && (client.guardian_name || client.guardian_phone) && (() => {
+            const wa = waDigits(client.guardian_phone, country)
+            return (
+              <div className="border-t border-gray-800 pt-4">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Parent / guardian</p>
+                <p className="text-sm text-white">{client.guardian_name || '—'}{client.guardian_relation ? <span className="text-gray-400"> · {client.guardian_relation}</span> : null}</p>
+                {client.guardian_phone && (
+                  <p className="text-sm text-gray-400">
+                    {displayPhone(client.guardian_phone, country)}
+                    {wa && (
+                      <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer"
+                        className="ml-2 text-xs text-green-400 hover:text-green-300">WhatsApp</a>
+                    )}
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Trainer + Diet Plan */}
           <div className={`border-t pt-4 space-y-3 ${client?.client_type === 'pt' ? 'border-purple-800' : 'border-gray-800'}`}>
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Trainer & Diet</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">{dojo ? sw.one : 'Trainer & Diet'}</p>
             {client && (
               <div>
                 {!coachCompany && (<>
-                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{client.client_type === 'pt' ? 'Primary coach' : 'Trainer'}</label>
+                <label htmlFor="primary-coach" className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">{client.client_type === 'pt' || dojo ? `Primary ${sw.one.toLowerCase()}` : 'Trainer'}</label>
                 {isCoach ? (
-                  <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || 'Coach') : 'No primary coach'}</p>
+                  <p id="primary-coach" className="text-sm text-white">{client.primary_coach_id ? (staff.find(x => x.id === client.primary_coach_id)?.full_name || sw.one) : `No primary ${sw.one.toLowerCase()}`}</p>
                 ) : (
                 <select id="primary-coach" value={client.primary_coach_id || ''} disabled={savingPrimaryCoach}
                   onChange={e => handleSavePrimaryCoach(e.target.value)}
                   className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm disabled:opacity-50">
-                  <option value="">{client.client_type === 'pt' ? 'No primary coach' : 'No trainer'}</option>
+                  <option value="">{client.client_type === 'pt' || dojo ? `No primary ${sw.one.toLowerCase()}` : 'No trainer'}</option>
                   {staff.filter(x => x.role === 'coach' && (!x.archived_at || x.id === client.primary_coach_id)).map(x => (
                     <option key={x.id} value={x.id}>{x.full_name}{x.archived_at ? ' (login off)' : ''}</option>
                   ))}
@@ -2955,13 +3090,14 @@ const handleResetPassword = async () => {
                 )}
               </div>
             )}
-            <div>
+            {/* Diet plan + AI diet chart: not for dojos */}
+            {!dojo && <div>
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Diet Plan</p>
               <p className="text-sm text-white whitespace-pre-wrap">{client?.diet_plan || '—'}</p>
-            </div>
+            </div>}
 
             {/* AI diet chart (super admin can turn it off per gym; typed diet plans still work) */}
-            {!isCoach && (client as { companies?: { ai_diet_enabled?: boolean | null } } | null)?.companies?.ai_diet_enabled !== false && !dietDraft && !dietGenerating && (
+            {!dojo && !isCoach && (client as { companies?: { ai_diet_enabled?: boolean | null } } | null)?.companies?.ai_diet_enabled !== false && !dietDraft && !dietGenerating && (
               <div className="space-y-2">
                 {(!client?.food_preference || !client?.weight_kg) && (
                   <p className="text-xs text-yellow-300">
@@ -2986,7 +3122,7 @@ const handleResetPassword = async () => {
                 <button onClick={handleGenerateDiet} className="text-xs text-white bg-red-800 hover:bg-red-700 px-3 py-1.5 rounded-lg">Try again</button>
               </div>
             )}
-            {dietDraft && (
+            {dietDraft && !dojo && (
               <div ref={dietPanelRef} className="scroll-mt-4 bg-gray-800/60 border border-green-800 rounded-xl p-4 space-y-3">
                 <p className="text-xs text-green-400 font-medium">✨ AI diet chart: review and edit before saving</p>
                 <textarea value={dietDraft} onChange={e => setDietDraft(e.target.value)} rows={14}
@@ -3018,6 +3154,17 @@ const handleResetPassword = async () => {
   </div>
 )}
       </div>
+      {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
+      {dojo && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
+            <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              Log today&apos;s session
+            </button>
+          </div>
+        </div>
+      )}
       {/* Log today's session: fixed at the bottom on every tab */}
       {todayLog && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">

@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 import { getCaller, STAFF, checkCanManageClient, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
-import { splitE164, loginEmailFor, isPhoneLogin } from '@/lib/phone'
+import { splitE164, loginEmailFor, isPhoneLogin, toE164 } from '@/lib/phone'
+import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -71,14 +72,39 @@ export async function POST(request: Request) {
     }
   }
 
-  // Update profile row
+  // Parent / guardian (db/2026-11-03-guardian.md; sent only once those columns exist). Phone saved like phone (+<code><digits>).
+  if ('guardian_name' in body) {
+    updates.guardian_name = typeof body.guardian_name === 'string' && body.guardian_name.trim() ? body.guardian_name.trim() : null
+  }
+  if ('guardian_relation' in body) {
+    const relation = typeof body.guardian_relation === 'string' ? body.guardian_relation.trim() : ''
+    if (relation && !(GUARDIAN_RELATIONS as readonly string[]).includes(relation)) {
+      return NextResponse.json({ error: 'Relation must be Mother, Father or Guardian' }, { status: 400 })
+    }
+    updates.guardian_relation = relation || null
+  }
+  if ('guardian_phone' in body) {
+    const raw = typeof body.guardian_phone === 'string' ? body.guardian_phone.trim() : ''
+    if (raw) {
+      const co = await loadCompany()
+      const parts = splitE164(raw, (co?.country as string | null) ?? 'IN')
+      if (!parts) return NextResponse.json({ error: 'Enter a valid parent phone number' }, { status: 400 })
+      updates.guardian_phone = toE164(parts.country, parts.local)
+    } else {
+      updates.guardian_phone = null
+    }
+  }
+
+  // Update profile row. .select() so a save that touched no row (wrong id) shows as an error, not "Saved"
   if (Object.keys(updates).length) {
-    const { error: profileError } = await supabaseAdmin
+    const { data: saved, error: profileError } = await supabaseAdmin
       .from('profiles')
       .update(updates)
       .eq('id', user_id)
+      .select('id')
 
     if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
+    if (!saved?.length) return NextResponse.json({ error: "Couldn't save: the client wasn't found" }, { status: 400 })
   }
 
   // If phone changed and account is phone-based, update auth email to match.
