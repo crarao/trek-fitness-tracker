@@ -1,7 +1,9 @@
 'use client'
 
 // Branches & batches (Dojo Build 2, ROADMAP #77; owner / partner, db/2026-11-03-branches-batches.md).
-// A branch is a location; a batch is a class at one branch on set days and times. Students get a home batch on
+// A branch is a location; a batch is a class at one branch on set days and times.
+// Branches are added / edited by super admin only (pricing is per branch, db/2026-11-03-branches-super-admin.md;
+// app/branches-editor.tsx in Super Admin). Here the owner and partners see them and manage the batches inside. Students get a home batch on
 // Add Student or their Profile tab, and can still attend any batch (attendance: Build 3, #78).
 // Nothing is deleted (CLAUDE.md Rule #1; the tables have no delete permission): branches and batches are archived.
 // Archiving keeps students' saved branch / batch; they still show, marked "(archived)", until changed.
@@ -19,7 +21,6 @@ import {
 const INPUT = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-500'
 const BTN = 'text-xs text-gray-300 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg'
 
-type BranchDraft = { id: string | null; name: string; address: string }
 type BatchDraft = { id: string | null; branch_id: string; name: string; days: string[]; start_time: string; end_time: string }
 
 // "18:00:00" (Postgres) → "18:00" for <input type="time">
@@ -36,7 +37,6 @@ export default function BatchesPage() {
   const [branches, setBranches] = useState<Branch[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [counts, setCounts] = useState<{ branch: Record<string, number>; batch: Record<string, number> }>({ branch: {}, batch: {} })
-  const [branchDraft, setBranchDraft] = useState<BranchDraft | null>(null)
   const [batchDraft, setBatchDraft] = useState<BatchDraft | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -86,28 +86,6 @@ export default function BatchesPage() {
     return () => { live = false }
   }, [router])
 
-  const saveBranch = async () => {
-    if (!branchDraft || !companyId) return
-    const name = tidyName(branchDraft.name)
-    if (!name) { setError('Add a name for the branch (e.g. Kokapet).'); return }
-    if (name.length > 60) { setError('Keep the name under 60 characters.'); return }
-    if (nameTaken(branches, name, branchDraft.id ?? undefined)) { setError('There is already a branch with this name.'); return }
-    setSaving(true)
-    setError('')
-    const fields = { name, address: tidyName(branchDraft.address) || null }
-    // .select() so a save blocked by database rules (0 rows, no error) isn't reported as saved
-    const { data, error } = branchDraft.id
-      ? await supabase.from('branches').update(fields).eq('id', branchDraft.id).eq('company_id', companyId).select(BRANCH_COLUMNS)
-      : await supabase.from('branches').insert({ ...fields, company_id: companyId }).select(BRANCH_COLUMNS)
-    setSaving(false)
-    if (error) { setError(error.code === '23505' ? 'There is already a branch with this name.' : 'Could not save: ' + error.message); return }
-    if (!data?.length) { setError("Couldn't save: not allowed for this login"); return }
-    const row = data[0] as Branch
-    setBranches(l => (branchDraft.id ? l.map(b => (b.id === row.id ? row : b)) : [...l, row]).sort((a, b) => a.name.localeCompare(b.name)))
-    setBranchDraft(null)
-    showToast(branchDraft.id ? 'Branch saved ✓' : `${row.name} added ✓`)
-  }
-
   const saveBatch = async () => {
     if (!batchDraft || !companyId) return
     const problem = batchProblem(batchDraft)
@@ -146,24 +124,6 @@ export default function BatchesPage() {
   }
 
   const studentCount = (n: number | undefined) => `${n || 0} ${(n || 0) === 1 ? mw.one.toLowerCase() : mw.many.toLowerCase()}`
-
-  const branchForm = (d: BranchDraft) => (
-    <div className="space-y-2">
-      <input value={d.name} maxLength={60} autoFocus placeholder="Branch name (e.g. Kokapet)" aria-label="Branch name"
-        onChange={e => setBranchDraft({ ...d, name: e.target.value })} className={INPUT} />
-      <input value={d.address} maxLength={200} placeholder="Address (optional)" aria-label="Address"
-        onChange={e => setBranchDraft({ ...d, address: e.target.value })} className={INPUT} />
-      {error && <p className="text-xs text-red-400">{error}</p>}
-      <div className="flex gap-2">
-        <button type="button" onClick={saveBranch} disabled={saving}
-          className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold py-2 rounded-lg disabled:opacity-50">
-          {saving ? 'Saving…' : d.id ? 'Save' : 'Add branch'}
-        </button>
-        <button type="button" onClick={() => { setBranchDraft(null); setError('') }}
-          className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2 rounded-lg">Cancel</button>
-      </div>
-    </div>
-  )
 
   const batchForm = (d: BatchDraft) => (
     <div className="space-y-2 bg-gray-950/60 border border-gray-800 rounded-xl p-3">
@@ -205,23 +165,10 @@ export default function BatchesPage() {
     const list = sortBatches(batches.filter(b => b.branch_id === br.id && (showArchived || !b.is_archived)))
     return (
       <section key={br.id} className={`bg-gray-900 border rounded-2xl p-4 space-y-3 ${br.is_archived ? 'border-gray-800 opacity-70' : 'border-gray-800'}`}>
-        {branchDraft?.id === br.id ? branchForm(branchDraft) : (
-          <div className="flex items-start gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-base font-semibold text-white truncate">{br.name}{br.is_archived ? ' (archived)' : ''}</p>
-              <p className="text-[11px] text-gray-500 truncate">{[br.address, studentCount(counts.branch[br.id])].filter(Boolean).join(' · ')}</p>
-            </div>
-            {br.is_archived ? (
-              <button type="button" onClick={() => setArchived('branches', br.id, br.name, false)} className={BTN}>Restore</button>
-            ) : (
-              <>
-                <button type="button" onClick={() => { setError(''); setBatchDraft(null); setBranchDraft({ id: br.id, name: br.name, address: br.address || '' }) }} className={BTN}>Edit</button>
-                <button type="button" onClick={() => setArchived('branches', br.id, br.name, true)}
-                  className="text-xs text-gray-400 border border-gray-700 hover:border-amber-600 hover:text-amber-300 px-3 py-1.5 rounded-lg">Archive</button>
-              </>
-            )}
-          </div>
-        )}
+        <div className="min-w-0">
+          <p className="text-base font-semibold text-white truncate">{br.name}{br.is_archived ? ' (archived)' : ''}</p>
+          <p className="text-[11px] text-gray-500 truncate">{[br.address, studentCount(counts.branch[br.id])].filter(Boolean).join(' · ')}</p>
+        </div>
 
         {!br.is_archived && (
           <>
@@ -240,7 +187,7 @@ export default function BatchesPage() {
                       ) : (
                         <>
                           <button type="button" onClick={() => {
-                            setError(''); setBranchDraft(null)
+                            setError('')
                             setBatchDraft({ id: b.id, branch_id: b.branch_id, name: b.name, days: sortDays(b.days), start_time: hhmm(b.start_time), end_time: hhmm(b.end_time) })
                           }} className={BTN}>Edit</button>
                           <button type="button" onClick={() => setArchived('batches', b.id, b.name, true)}
@@ -254,7 +201,7 @@ export default function BatchesPage() {
             </ul>
             {batchDraft && !batchDraft.id && batchDraft.branch_id === br.id ? batchForm(batchDraft) : (
               <button type="button"
-                onClick={() => { setError(''); setBranchDraft(null); setBatchDraft({ id: null, branch_id: br.id, name: '', days: [], start_time: '', end_time: '' }) }}
+                onClick={() => { setError(''); setBatchDraft({ id: null, branch_id: br.id, name: '', days: [], start_time: '', end_time: '' }) }}
                 className="w-full text-sm text-orange-400 hover:text-orange-300 border border-dashed border-gray-700 hover:border-orange-700 rounded-xl py-2">
                 + Add batch at {br.name}
               </button>
@@ -294,7 +241,7 @@ export default function BatchesPage() {
 
       <div className="px-4 sm:px-8 py-5 max-w-3xl mx-auto space-y-4">
         <p className="text-xs text-gray-400">
-          Add your branches, then the batches (classes) at each one. Each {mw.one.toLowerCase()} gets a home batch on
+          Add the batches (classes) at each of your branches. Each {mw.one.toLowerCase()} gets a home batch on
           Add {mw.one} or their Profile tab, and can still attend any batch.
         </p>
 
@@ -306,19 +253,14 @@ export default function BatchesPage() {
           </div>
         ) : (
           <>
-            {shownBranches.length === 0 && !branchDraft && (
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">No branches yet. Add your first one below.</div>
+            {shownBranches.length === 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">
+                No branches yet. CoachBoard sets up your branches; then you add the batches (classes) at each one here.
+              </div>
             )}
             {shownBranches.map(branchCard)}
 
-            {branchDraft && !branchDraft.id ? (
-              <section className="bg-gray-900 border border-gray-800 rounded-2xl p-4">{branchForm(branchDraft)}</section>
-            ) : (
-              <button type="button" onClick={() => { setError(''); setBatchDraft(null); setBranchDraft({ id: null, name: '', address: '' }) }}
-                className="w-full bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2.5 rounded-xl transition">
-                + Add branch
-              </button>
-            )}
+            <p className="text-xs text-gray-500">Need another branch, or a branch renamed? Contact CoachBoard: branches are part of your plan.</p>
 
             {anyArchived && (
               <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}

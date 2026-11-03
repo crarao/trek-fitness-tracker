@@ -9,7 +9,8 @@ import { type PhoneCountry, validLocalDigits, loginEmailFor, staffLogin, isPhone
 import CountryCodePicker from '@/app/country-code-picker'
 import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricing'
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
-import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel } from '@/lib/labels'
+import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel, isDojo } from '@/lib/labels'
+import BranchesEditor from '@/app/branches-editor'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
@@ -1360,6 +1361,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </select>
                           <p className="text-xs text-gray-500 mt-1">Martial arts: Students instead of Members, parent details, fee reminders go to the parent.</p>
                         </div>
+
+                        {/* Branches (dojos, #77): super admin only, pricing is per branch. Saves straight away (not with Save Changes) */}
+                        {isDojo(editingCompany.business_type) && (
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Branches <span className="normal-case text-gray-600">— save straight away</span></label>
+                            <BranchesEditor companyId={editingCompany.id} onSaved={showToast} />
+                          </div>
+                        )}
 
                         <div>
                           <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Home country <span className="normal-case text-gray-600">— pre-fills the base currency</span></label>
