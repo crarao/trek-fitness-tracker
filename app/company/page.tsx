@@ -17,6 +17,7 @@ import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
+import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 
 type Membership = {
   id: string
@@ -44,6 +45,9 @@ type Client = {
   guardian_name?: string | null
   guardian_phone?: string | null
   guardian_relation?: string | null
+  // Branch and home batch (db/2026-11-03-branches-batches.md): undefined before that SQL runs
+  branch_id?: string | null
+  batch_id?: string | null
 }
 
 // Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
@@ -120,6 +124,11 @@ export default function CompanyAdminPage() {
   const dojo = isDojo(businessType)
   // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
   const [guardianColumns, setGuardianColumns] = useState(false)
+  // Branches & batches (dojos, db/2026-11-03-branches-batches.md): on once the tables exist. 'all' | branch id | 'none'
+  const [batchesOn, setBatchesOn] = useState(false)
+  const [branchList, setBranchList] = useState<Branch[]>([])
+  const [batchList, setBatchList] = useState<Batch[]>([])
+  const [branchFilter, setBranchFilter] = useState<string>('all')
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -150,6 +159,8 @@ export default function CompanyAdminPage() {
     child: null as boolean | null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
     // Dojo: the short profile on the same screen (age, gender, medical conditions)
     age: '', gender: '', medical_conditions: '',
+    // Dojo with branches & batches: branch and home batch ('' = none)
+    branch_id: '', batch_id: '',
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -249,6 +260,7 @@ export default function CompanyAdminPage() {
     setCompanyName(company?.name || '')
     setCoachCompany(isCoachCompany(company))
     setBusinessType(company?.business_type ?? null)
+    if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
     setTrainModule(!!company?.client_module_enabled)
@@ -266,6 +278,18 @@ export default function CompanyAdminPage() {
       is_active: company?.is_active as boolean,
       is_trial: company?.is_trial ?? true
     })
+  }
+
+  // Branches & batches (dojos only for now). An error = the tables don't exist yet: everything stays hidden
+  const fetchBatches = async (cId: string) => {
+    const [br, ba] = await Promise.all([
+      supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
+      supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
+    ])
+    if (br.error || ba.error) { setBatchesOn(false); return }
+    setBranchList((br.data || []) as Branch[])
+    setBatchList((ba.data || []) as Batch[])
+    setBatchesOn(true)
   }
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
@@ -657,6 +681,8 @@ export default function CompanyAdminPage() {
         } : {}),
         client_type: dojo ? 'pt' : newClient.client_type,
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
+        // Dojo with branches & batches: branch and home batch (checked on the server)
+        ...(dojo && batchesOn ? { branch_id: newClient.branch_id || null, batch_id: newClient.batch_id || null } : {}),
         // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
         ...(child ? {
           guardian_name: newClient.guardian_name.trim(),
@@ -711,6 +737,7 @@ export default function CompanyAdminPage() {
       country: '', phone_country: '', currency: '',
       child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
       age: '', gender: '', medical_conditions: '',
+      branch_id: '', batch_id: '',
     })
     setShowForm(false)
     setSaving(false)
@@ -723,11 +750,22 @@ export default function CompanyAdminPage() {
     return d == null ? null : d + 1
   }
 
+  // Dojo branch chips: the list and its tab counts follow the chosen branch ('all' = everyone)
+  const inBranch = (c: Client) => !dojo || !batchesOn || branchFilter === 'all'
+    || (branchFilter === 'none' ? !c.branch_id : c.branch_id === branchFilter)
+  const branchClients = clients.filter(inBranch)
   const statusCounts = {
-    active: clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'active').length,
-    expiring: clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expiring').length,
-    expired: clients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired').length,
+    active: branchClients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'active').length,
+    expiring: branchClients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expiring').length,
+    expired: branchClients.filter(c => membershipStatus(latestMembership(c.memberships)) === 'expired').length,
   }
+  const branchById = Object.fromEntries(branchList.map(b => [b.id, b]))
+  const batchById = Object.fromEntries(batchList.map(b => [b.id, b]))
+  // Chips: active branches, plus archived ones that still have students; "No branch" when someone has none
+  const branchChips = dojo && batchesOn
+    ? branchList.filter(b => !b.is_archived || clients.some(c => c.branch_id === b.id))
+    : []
+  const noBranchCount = clients.filter(c => !c.branch_id).length
 
   const expiringSoonClients = clients.filter(c => {
     const m = latestMembership(c.memberships)
@@ -884,6 +922,7 @@ export default function CompanyAdminPage() {
   const maxAssigned = Math.max(1, ...assignments.map(a => a.clients.length), unassigned.length)
 
   const filteredClients = (activeFilter === 'archived' ? archivedClients : clients)
+    .filter(inBranch)
     .filter(c => activeFilter === 'all' || activeFilter === 'archived' || membershipStatus(latestMembership(c.memberships)) === activeFilter)
     .filter(c => {
       if (!searchQuery.trim()) return true
@@ -1541,6 +1580,18 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Branches & batches (dojos, #77): owner / partner manage them on their own page */}
+      {dojo && batchesOn && (
+        <div className="px-4 sm:px-8 pt-3">
+          <button type="button" data-nav onClick={() => router.push('/company/batches')}
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            {branchList.some(b => !b.is_archived)
+              ? <>{branchList.filter(b => !b.is_archived).length} branch{branchList.filter(b => !b.is_archived).length === 1 ? '' : 'es'} · {batchList.filter(b => !b.is_archived).length} batch{batchList.filter(b => !b.is_archived).length === 1 ? '' : 'es'} <span className="text-white font-medium">→ Branches &amp; batches</span></>
+              : <>Set up your branches and class times <span className="text-white font-medium">→ Branches &amp; batches</span></>}
+          </button>
+        </div>
+      )}
+
       {/* Exercise list: the gym's own exercises for the plan builder (rename / archive). Not shown to dojos */}
       {trainModule && !dojo && (
         <div className="px-4 sm:px-8 pt-3">
@@ -1781,6 +1832,19 @@ export default function CompanyAdminPage() {
                 </button>
               </div>
             </div>
+            {/* Dojo: branch chips (the list and tab counts follow the chosen branch) */}
+            {branchChips.length > 0 && (
+              <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Branch">
+                {[{ id: 'all', label: 'All branches', n: clients.length },
+                  ...branchChips.map(b => ({ id: b.id, label: b.name + (b.is_archived ? ' (archived)' : ''), n: clients.filter(c => c.branch_id === b.id).length })),
+                  ...(noBranchCount > 0 ? [{ id: 'none', label: 'No branch', n: noBranchCount }] : [])].map(chip => (
+                  <button key={chip.id} type="button" onClick={() => setBranchFilter(chip.id)} aria-pressed={branchFilter === chip.id}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition ${branchFilter === chip.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
+                    {chip.label} <span className={branchFilter === chip.id ? 'text-orange-100' : 'text-gray-500'}>{chip.n}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"
                 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none">
@@ -1919,6 +1983,9 @@ export default function CompanyAdminPage() {
                               <>
                               {client.guardian_name && (
                                 <p className="text-xs text-gray-400">Parent: {client.guardian_name}</p>
+                              )}
+                              {dojo && batchesOn && (client.branch_id || client.batch_id) && (
+                                <p className="text-xs text-gray-500">{homeBatchLine(branchById[client.branch_id || ''] || (client.batch_id ? branchById[batchById[client.batch_id]?.branch_id || ''] : null), batchById[client.batch_id || ''], country)}</p>
                               )}
                               <p className="text-xs text-gray-500">
                                 {displayPhone(client.phone, country) || shownEmail(client.email)}
@@ -2113,6 +2180,31 @@ export default function CompanyAdminPage() {
                       onChange={e => setNewClient({ ...newClient, medical_conditions: e.target.value })}
                       rows={2}
                       className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
+                    {/* Branch + home batch (once branches exist). Picking a batch sets its branch; the student can attend any batch */}
+                    {batchesOn && branchList.some(b => !b.is_archived) && (
+                      <>
+                        <select value={newClient.branch_id} aria-label="Branch"
+                          onChange={e => setNewClient({ ...newClient, branch_id: e.target.value, batch_id: '' })}
+                          className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                          <option value="">Branch</option>
+                          {branchList.filter(b => !b.is_archived).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        <select value={newClient.batch_id} aria-label="Home batch"
+                          onChange={e => {
+                            const batch = batchList.find(b => b.id === e.target.value)
+                            setNewClient({ ...newClient, batch_id: e.target.value, ...(batch ? { branch_id: batch.branch_id } : {}) })
+                          }}
+                          className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                          <option value="">Home batch</option>
+                          {sortBatches(batchList.filter(b => !b.is_archived && (!newClient.branch_id || b.branch_id === newClient.branch_id)
+                            && !branchById[b.branch_id]?.is_archived)).map(b => (
+                            <option key={b.id} value={b.id}>
+                              {newClient.branch_id ? '' : `${branchById[b.branch_id]?.name || ''} · `}{b.name}{batchWhen(b, country) ? ` (${batchWhen(b, country)})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
                   </>
                 )}
                 {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">

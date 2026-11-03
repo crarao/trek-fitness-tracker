@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { thisWeekMonday } from '@/lib/calories'
 import { staffWord, ptWord, isDojo } from '@/lib/labels'
+import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine } from '@/lib/batches'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -22,7 +23,9 @@ export default function CoachHomePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [me, setMe] = useState<{ id: string; full_name: string } | null>(null)
-  const [company, setCompany] = useState<{ name: string; logo_url: string | null; country: Country } | null>(null)
+  const [company, setCompany] = useState<{ name: string; logo_url: string | null; country: Country; business_type: string | null } | null>(null)
+  // Dojo: each student's branch / home batch (db/2026-11-03-branches-batches.md); empty before that SQL
+  const [placement, setPlacement] = useState<Record<string, string>>({})
   const [clients, setClients] = useState<CoachClient[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [plans, setPlans] = useState<CoachPlan[]>([])
@@ -68,13 +71,34 @@ export default function CoachHomePage() {
     if (failed?.error) { console.error('Coach home load error:', failed.error); setError("Couldn't load today's list. Refresh the page to try again.") }
     if (membershipRes.error) console.error('Membership status error:', membershipRes.error)
 
-    const profile = profileRes.data as { id: string; full_name: string | null; companies: { name?: string | null; logo_url?: string | null; country?: string | null } | null } | null
+    const profile = profileRes.data as { id: string; full_name: string | null; companies: { name?: string | null; logo_url?: string | null; country?: string | null; business_type?: string | null } | null } | null
     setMe({ id: user.id, full_name: profile?.full_name || '' })
     setCompany({
       name: profile?.companies?.name || '',
       logo_url: profile?.companies?.logo_url || null,
       country: normalizeCountry(profile?.companies?.country),
+      // Kept so the dojo wording (Sensei, students, Came today) switches on
+      business_type: profile?.companies?.business_type ?? null,
     })
+    // Dojo: the line under each student ("Kokapet · Juniors · Mon/Wed/Fri 6–7 pm"). Errors (no tables yet) = no line
+    if (isDojo(profile?.companies?.business_type)) {
+      const [pl, br, ba] = await Promise.all([
+        supabase.from('profiles').select('id, branch_id, batch_id').eq('role', 'client').eq('client_type', 'pt').is('archived_at', null),
+        supabase.from('branches').select(BRANCH_COLUMNS),
+        supabase.from('batches').select(BATCH_COLUMNS),
+      ])
+      if (!pl.error && !br.error && !ba.error) {
+        const branchById = Object.fromEntries(((br.data || []) as Branch[]).map(b => [b.id, b]))
+        const batchById = Object.fromEntries(((ba.data || []) as Batch[]).map(b => [b.id, b]))
+        const country = normalizeCountry(profile?.companies?.country)
+        setPlacement(Object.fromEntries(((pl.data || []) as { id: string; branch_id: string | null; batch_id: string | null }[])
+          .map(p => {
+            const batch = p.batch_id ? batchById[p.batch_id] : null
+            return [p.id, homeBatchLine(branchById[p.branch_id || batch?.branch_id || ''], batch, country)]
+          })
+          .filter(([, line]) => line)))
+      }
+    }
     setClients((clientsRes.data || []) as CoachClient[])
     setStaff(staffRes as Staff[])
     setPlans((plansRes.data || []) as CoachPlan[])
@@ -93,7 +117,7 @@ export default function CoachHomePage() {
   const openClient = (id: string) => {
     if (openingId) return
     setOpeningId(id)
-    const dojoHome = isDojo((company as { business_type?: string | null } | null)?.business_type)
+    const dojoHome = isDojo(company?.business_type)
     router.push(dojoHome ? `/company/client/${id}?tab=sessions&log=today` : `/company/client/${id}?tab=plans&day=today`)
     setTimeout(() => setOpeningId(prev => (prev === id ? null : prev)), 10000) // safety reset
   }
@@ -117,7 +141,7 @@ export default function CoachHomePage() {
 
   const country = company?.country ?? 'IN'
   // Dojo (business type martial_arts): "Sensei" and "students" (every student is a PT client there), lib/labels.ts
-  const bt = (company as { business_type?: string | null } | null)?.business_type
+  const bt = company?.business_type
   const sw = staffWord(bt)
   const pw = ptWord(bt)
   const dojo = isDojo(bt)
@@ -244,6 +268,7 @@ export default function CoachHomePage() {
                         </div>
                       </div>
                       {!dojo && <p className="text-xs mt-1.5 truncate">{workoutText(r)}</p>}
+                      {dojo && placement[r.client.id] && <p className="text-xs mt-1.5 truncate text-gray-400">{placement[r.client.id]}</p>}
                       {membershipTag(r.client.id) && <div className="mt-2">{membershipTag(r.client.id)}</div>}
                     </button>
                   </li>
