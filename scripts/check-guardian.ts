@@ -4,7 +4,7 @@
 //   npx tsc scripts/check-guardian.ts --outDir /tmp/cg --module commonjs --target es2020 --skipLibCheck && node /tmp/cg/scripts/check-guardian.js
 
 import { reminderText, reminderRecipient, hasGuardian } from '../lib/guardian'
-import { memberWord, isDojo } from '../lib/labels'
+import { memberWord, isDojo, staffWord, ptWord } from '../lib/labels'
 import { generatedStudentLogin, isGeneratedLogin, isPhoneLogin, isNoLogin } from '../lib/phone'
 
 let failed = 0
@@ -65,6 +65,12 @@ console.log('\n4. memberWord')
 for (const [bt, one, many] of [['martial_arts', 'Student', 'Students'], ['gym', 'Member', 'Members'], [null, 'Member', 'Members']] as const) {
   const w = memberWord(bt)
   check(`memberWord(${bt}) isDojo=${isDojo(bt)}`, w, w.one === one && w.many === many && isDojo(bt) === (bt === 'martial_arts'))
+}
+
+console.log('\n5. staffWord / ptWord (Dojo Build 1.1)')
+for (const [bt, one, many, pt] of [['martial_arts', 'Sensei', 'Senseis', 'students'], ['gym', 'Coach', 'Coaches', 'PT clients'], [null, 'Coach', 'Coaches', 'PT clients']] as const) {
+  const w = staffWord(bt)
+  check(`staffWord(${bt}) / ptWord`, [w, ptWord(bt)], w.one === one && w.many === many && ptWord(bt) === pt)
 }
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')

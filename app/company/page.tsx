@@ -15,7 +15,7 @@ import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
-import { memberWord, isDojo } from '@/lib/labels'
+import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
 
 type Membership = {
@@ -115,6 +115,9 @@ export default function CompanyAdminPage() {
   // companies.business_type (super admin): martial_arts = a dojo, "Students" instead of "Members" (lib/labels.ts)
   const [businessType, setBusinessType] = useState<string | null>(null)
   const mw = memberWord(businessType)
+  // Dojo: "Sensei" for coach logins, every student is a PT client (no PT checkbox / badges), no exercise list
+  const sw = staffWord(businessType)
+  const dojo = isDojo(businessType)
   // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
   const [guardianColumns, setGuardianColumns] = useState(false)
   const [currency, setCurrency] = useState<string | null>(null)
@@ -408,7 +411,7 @@ export default function CompanyAdminPage() {
   const handleAddCoach = async () => {
     if (!companyId) return
     const name = newCoach.full_name.trim()
-    if (!name) { setCoachMessage('Error: Enter the coach\'s name'); return }
+    if (!name) { setCoachMessage(`Error: Enter the ${sw.one.toLowerCase()}'s name`); return }
     const login = staffLogin(country, { phoneCountry: newCoach.phone_country || (country ?? 'IN'), phone: newCoach.phone, email: newCoach.email, password: newCoach.password })
     if ('error' in login) { setCoachMessage('Error: ' + login.error); return }
     const { email, password, phone, method } = login
@@ -424,9 +427,9 @@ export default function CompanyAdminPage() {
     if (result.error) { setCoachMessage('Error: ' + result.error); return }
     setNewCoach({ full_name: '', phone: '', email: '', password: '', phone_country: '' })
     setCoachMessage(method === 'email'
-      ? `Coach added. They log in with ${email} and the password you set.`
-      : 'Coach added. Default password = phone number.')
-    showToast('Coach added ✓')
+      ? `${sw.one} added. They log in with ${email} and the password you set.`
+      : `${sw.one} added. Default password = phone number.`)
+    showToast(`${sw.one} added ✓`)
     fetchCoaches(companyId)
   }
 
@@ -446,7 +449,7 @@ export default function CompanyAdminPage() {
     if (!editCoach) return
     const name = editCoach.full_name.trim()
     const phone = editCoach.phone.trim()
-    if (!name) { setEditCoachError('Enter the coach\'s name'); return }
+    if (!name) { setEditCoachError(`Enter the ${sw.one.toLowerCase()}'s name`); return }
     if (editCoach.phoneLogin && !splitE164(phone, country)) { setEditCoachError(`Enter a valid phone number (${phoneHint(country ?? 'IN')}): they log in with it`); return }
     setSavingEditCoach(true)
     setEditCoachError('')
@@ -461,7 +464,7 @@ export default function CompanyAdminPage() {
     const old = coachById[editCoach.id]
     const samePhone = (a: string, b: string) => { const x = splitE164(a, country), y = splitE164(b, country); return x && y ? x.country === y.country && x.local === y.local : a === b }
     const phoneChanged = editCoach.phoneLogin && old && !samePhone(old.phone || '', phone)
-    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : 'Coach saved ✓')
+    showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : `${sw.one} saved ✓`)
     setEditCoach(null)
     if (companyId) fetchCoaches(companyId)
   }
@@ -643,8 +646,8 @@ export default function CompanyAdminPage() {
         // International format (+919876543210), lib/phone.ts
         phone: clientPhoneValue(place.phoneCountry, newClient.phone),
         trainer_name: newClient.trainer_name,
-        diet_plan: newClient.diet_plan,
-        client_type: newClient.client_type,
+        diet_plan: dojo ? '' : newClient.diet_plan,
+        client_type: dojo ? 'pt' : newClient.client_type,
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
         // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
         ...(child ? {
@@ -823,8 +826,8 @@ export default function CompanyAdminPage() {
   const loggerName = (id: string) => {
     if (id === 'client') return 'Clients themselves'
     // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
-    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^coach\s+/i, '').split(/\s+/)[0]
-    return first ? `Coach ${first}` : 'Coach'
+    const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
+    return first ? `${sw.one} ${first}` : sw.one
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
 
@@ -1053,7 +1056,7 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
+          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
         <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
@@ -1211,12 +1214,12 @@ export default function CompanyAdminPage() {
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Coach assignments <span className="normal-case text-gray-600">(PT clients by primary coach)</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} assignments <span className="normal-case text-gray-600">({ptWord(businessType)} by primary {sw.one.toLowerCase()})</span></p>
               <p className="text-xs text-gray-500 shrink-0">{ptCount - unassigned.length} of {ptCount} assigned</p>
             </div>
             <ul className="mt-2 divide-y divide-gray-800">
               {[...assignments.map(a => ({ id: a.coach.id, name: a.coach.full_name, off: !!a.coach.archived_at, clients: a.clients })),
-                ...(unassigned.length ? [{ id: 'none', name: 'No primary coach', off: false, clients: unassigned }] : [])].map(row => {
+                ...(unassigned.length ? [{ id: 'none', name: `No primary ${sw.one.toLowerCase()}`, off: false, clients: unassigned }] : [])].map(row => {
                 const open = assignCoach === row.id
                 const trainedToday = row.clients.filter(c => trainedTodayIds.has(c.id)).length
                 return (
@@ -1251,7 +1254,7 @@ export default function CompanyAdminPage() {
                 )
               })}
             </ul>
-            <p className="text-[11px] text-gray-600 mt-2">Set the primary coach on Add Member or the client&apos;s Profile tab. Any coach can still train any client.</p>
+            <p className="text-[11px] text-gray-600 mt-2">Set the primary {sw.one.toLowerCase()} on Add {mw.one} or the {mw.one.toLowerCase()}&apos;s Profile tab. Any {sw.one.toLowerCase()} can still train any {mw.one.toLowerCase()}.</p>
           </div>
         </div>
       )}
@@ -1262,7 +1265,7 @@ export default function CompanyAdminPage() {
             {/* Collapsed by default: a one-line summary; tap for Today / This week */}
             <button type="button" onClick={() => setShowTraining(!showTraining)} aria-expanded={showTraining}
               className="w-full flex items-baseline justify-between gap-3 text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">(PT clients) · {formatDate(new Date(), country, 'weekday')}</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">({ptWord(businessType)}) · {formatDate(new Date(), country, 'weekday')}</span></p>
               <span className="flex items-baseline gap-3 shrink-0">
                 {!showTraining && recent && (
                   <span className="text-xs text-gray-500">
@@ -1287,7 +1290,7 @@ export default function CompanyAdminPage() {
                     <p className="text-xs text-gray-500"><span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained</p>
                   </div>
                   {trainedToday.length === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No PT sessions logged yet today.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT'} sessions logged yet today.</p>
                   ) : (
                     <ul className="mt-1 divide-y divide-gray-800">
                       {trainedToday.map(s => {
@@ -1333,7 +1336,7 @@ export default function CompanyAdminPage() {
                 <div className="mt-3 border-t border-gray-800 pt-3">
                   <p className="text-[11px] text-gray-500 uppercase tracking-wider">This week <span className="normal-case text-gray-600">(each client&apos;s plan week)</span></p>
                   {weekTotals.planned === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No PT client has a plan for this week yet.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT client'} has a plan for this week yet.</p>
                   ) : (
                     <>
                       <div className="flex items-baseline gap-2 mt-1">
@@ -1343,7 +1346,7 @@ export default function CompanyAdminPage() {
                       <div className="mt-2 h-2 rounded-full bg-gray-800 overflow-hidden" role="progressbar" aria-valuenow={pct(weekTotals) ?? 0} aria-valuemin={0} aria-valuemax={100}>
                         <div className="h-full bg-purple-500 rounded-full" style={{ width: `${pct(weekTotals)}%` }} />
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} PT clients have a plan this week</p>
+                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} {ptWord(businessType)} have a plan this week</p>
                     </>
                   )}
                   {missedWeek.length > 0 && (
@@ -1402,7 +1405,7 @@ export default function CompanyAdminPage() {
             <div className="flex items-baseline justify-between gap-3">
               <button type="button" onClick={() => setShowActivity(!showActivity)} aria-expanded={showActivity}
                 className="flex-1 min-w-0 flex items-baseline justify-between gap-3 text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wider">Coach activity <span className="normal-case text-gray-600">(PT · today / since Mon)</span></p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} activity <span className="normal-case text-gray-600">({dojo ? 'students' : 'PT'} · today / since Mon)</span></p>
                 <span className="flex items-baseline gap-3 shrink-0">
                   {!showActivity && recent && (() => {
                     const coachSessionsToday = coachActivity.reduce((n, a) => n + a.today.sessions, 0)
@@ -1419,7 +1422,7 @@ export default function CompanyAdminPage() {
               </button>
               {showActivity && activityCoach && (
                 <button type="button" onClick={() => setActivityCoach(null)} className="text-xs text-orange-400 hover:text-orange-300 shrink-0">
-                  All coaches
+                  All {sw.many.toLowerCase()}
                 </button>
               )}
             </div>
@@ -1489,7 +1492,7 @@ export default function CompanyAdminPage() {
                     )}
                     {noPrimaryClients.length > 0 && (
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1.5">No primary coach set</p>
+                        <p className="text-[11px] text-gray-500 mb-1.5">No primary {sw.one.toLowerCase()} set</p>
                         <div className="flex flex-wrap gap-1.5">
                           {noPrimaryClients.slice(0, 12).map(c => (
                             <button key={c.id} type="button" data-nav onClick={() => openClient(c.id)}
@@ -1523,8 +1526,8 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* Exercise list: the gym's own exercises for the plan builder (rename / archive) */}
-      {trainModule && (
+      {/* Exercise list: the gym's own exercises for the plan builder (rename / archive). Not shown to dojos */}
+      {trainModule && !dojo && (
         <div className="px-4 sm:px-8 pt-3">
           <button type="button" data-nav onClick={() => router.push('/company/exercises')}
             className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
@@ -1539,14 +1542,14 @@ export default function CompanyAdminPage() {
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
               className="w-full flex items-center justify-between text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Coaches <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.many} <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
               <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
             </button>
             {showCoaches && (
               <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-3">Coaches see PT clients and plans only: no payments, leads or settings.</p>
+                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType)} and plans only: no payments, leads or settings.</p>
                 {coaches.length === 0 ? (
-                  <p className="text-sm text-gray-400 mb-3">No coaches yet.</p>
+                  <p className="text-sm text-gray-400 mb-3">No {sw.many.toLowerCase()} yet.</p>
                 ) : (
                   <ul className="space-y-2 mb-3">
                     {coaches.map(c => {
@@ -1556,7 +1559,7 @@ export default function CompanyAdminPage() {
                       if (editCoach?.id === c.id) return (
                         <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
                           <div className="grid grid-cols-2 gap-2">
-                            <input type="text" placeholder="Coach name" aria-label="Coach name"
+                            <input type="text" placeholder={`${sw.one} name`} aria-label={`${sw.one} name`}
                               value={editCoach.full_name}
                               onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
                               className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
@@ -1609,7 +1612,7 @@ export default function CompanyAdminPage() {
                   </ul>
                 )}
                 <div className="grid grid-cols-2 gap-2 mb-2">
-                  <input type="text" placeholder="Coach name"
+                  <input type="text" placeholder={`${sw.one} name`}
                     value={newCoach.full_name}
                     onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
                     className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
@@ -1642,12 +1645,12 @@ export default function CompanyAdminPage() {
                 )}
                 <button type="button" onClick={handleAddCoach} disabled={savingCoach}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
-                  {savingCoach ? 'Adding...' : '+ Add coach'}
+                  {savingCoach ? 'Adding...' : `+ Add ${sw.one.toLowerCase()}`}
                 </button>
                 <p className="text-xs text-gray-600 mt-1.5">
                   {(country ?? 'IN') === 'IN'
-                    ? 'Coaches log in with their phone. Default password is their phone number.'
-                    : 'With an email, coaches log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.'}
+                    ? `${sw.many} log in with their phone. Default password is their phone number.`
+                    : `With an email, ${sw.many.toLowerCase()} log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.`}
                 </p>
               </div>
             )}
@@ -1877,11 +1880,11 @@ export default function CompanyAdminPage() {
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <p className="font-medium text-white text-sm">{client.full_name}</p>
-                              {client.client_type === 'pt' && (
+                              {client.client_type === 'pt' && !dojo && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
                               {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
-                                <span className="text-[11px] text-gray-500 leading-none">Coach: {coachById[client.primary_coach_id].full_name.trim().replace(/^coach\s+/i, '').split(/\s+/)[0]}</span>
+                                <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
                               )}
                               {/* Phones: status sits here (the Status column shows from tablet width up) */}
                               {activeFilter !== 'archived' && m && (
@@ -2146,27 +2149,28 @@ export default function CompanyAdminPage() {
                     {newClient.end_date ? ` → ${formatDate(newClient.end_date, country, 'medium')}` : ''}
                   </p>
                 )}
-                <textarea placeholder="Diet plan (optional)"
+                {/* Dojo: no diet plan, and every student is a PT client (saved as 'pt' below and in create-user) */}
+                {!dojo && <textarea placeholder="Diet plan (optional)"
                   value={newClient.diet_plan}
                   onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
                   rows={2}
-                  className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />
-                <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
+                  className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />}
+                {!dojo && <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
                   <input type="checkbox"
                     checked={newClient.client_type === 'pt'}
                     onChange={e => setNewClient({ ...newClient, client_type: e.target.checked ? 'pt' : 'member' })}
                     className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-purple-500" />
                   <span className="text-sm text-gray-300">Personal Training (PT) member</span>
-                </label>
+                </label>}
                 {/* Coach for this member: picked from the gym's coaches (no free text). PT: primary coach; regular member: optional */}
                 {!coachCompany && activeCoaches.length > 0 && (
                   <div className="col-span-2">
-                    <label className="text-xs text-gray-500 mb-1 block">{newClient.client_type === 'pt' ? 'Primary coach' : 'Trainer (optional)'}</label>
+                    <label className="text-xs text-gray-500 mb-1 block">{dojo ? `${sw.one} (optional)` : newClient.client_type === 'pt' ? 'Primary coach' : 'Trainer (optional)'}</label>
                     <select
                       value={newClient.primary_coach_id}
                       onChange={e => setNewClient({ ...newClient, primary_coach_id: e.target.value })}
                       className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
-                      <option value="">No primary coach</option>
+                      <option value="">No primary {sw.one.toLowerCase()}</option>
                       {activeCoaches.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
                     </select>
                   </div>

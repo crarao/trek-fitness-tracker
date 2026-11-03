@@ -35,3 +35,15 @@ export function isDojo(value: string | null | undefined): boolean {
 export function memberWord(value: string | null | undefined): { one: string; many: string } {
   return isDojo(value) ? { one: 'Student', many: 'Students' } : { one: 'Member', many: 'Members' }
 }
+
+// The visible word for a coach login (role 'coach'): Sensei / Senseis in a dojo, else Coach / Coaches.
+// Words only: the role, routes (/coach) and variables keep their names.
+export function staffWord(value: string | null | undefined): { one: string; many: string } {
+  return isDojo(value) ? { one: 'Sensei', many: 'Senseis' } : { one: 'Coach', many: 'Coaches' }
+}
+
+// How the PT clients are named on staff screens. In a dojo every student is a PT client (create-user saves them as
+// client_type 'pt' so senseis see them and progress can be shared), so the PT label would be noise: they're "students".
+export function ptWord(value: string | null | undefined): string {
+  return isDojo(value) ? 'students' : 'PT clients'
+}

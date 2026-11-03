@@ -5,6 +5,7 @@ import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
 import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164 } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
+import { isDojo } from '@/lib/labels'
 import { randomUUID, randomBytes } from 'crypto'
 
 export async function POST(request: Request) {
@@ -137,7 +138,8 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   phone: phone || null,
   trainer_name: trainer_name || null,
   diet_plan: diet_plan || null,
-  client_type: client_type || 'member',
+  // Dojo (business type martial_arts): every student is a PT client, so senseis see them and progress can be shared
+  client_type: role === 'client' && isDojo(companyRow?.business_type as string | null) ? 'pt' : client_type || 'member',
   ...clientPlace,
   ...guardian,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
