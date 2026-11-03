@@ -255,12 +255,10 @@ export default function BatchesPage() {
           <>
             {shownBranches.length === 0 && (
               <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">
-                No branches yet. CoachBoard sets up your branches; then you add the batches (classes) at each one here.
+                No branches yet.
               </div>
             )}
             {shownBranches.map(branchCard)}
-
-            <p className="text-xs text-gray-500">Need another branch, or a branch renamed? Contact CoachBoard: branches are part of your plan.</p>
 
             {anyArchived && (
               <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}

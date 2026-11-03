@@ -1587,7 +1587,7 @@ export default function CompanyAdminPage() {
             className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
             {branchList.some(b => !b.is_archived)
               ? <>{branchList.filter(b => !b.is_archived).length} branch{branchList.filter(b => !b.is_archived).length === 1 ? '' : 'es'} · {batchList.filter(b => !b.is_archived).length} batch{batchList.filter(b => !b.is_archived).length === 1 ? '' : 'es'} <span className="text-white font-medium">→ Branches &amp; batches</span></>
-              : <>No branches yet: CoachBoard sets them up, then you add class times <span className="text-white font-medium">→ Branches &amp; batches</span></>}
+              : <>No branches yet <span className="text-white font-medium">→ Branches &amp; batches</span></>}
           </button>
         </div>
       )}
