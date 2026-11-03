@@ -836,6 +836,8 @@ export default function CompanyAdminPage() {
     if (id === 'client') return 'Clients themselves'
     // A name saved as "Coach Ravi" shouldn't read "Coach Coach"
     const first = (recent?.names[id] || coachById[id]?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
+    // Dojo: only sensei logins read "Sensei Ravi"; the owner / a partner shows by name ("by DSKKA")
+    if (dojo && !coachById[id]) return first || 'staff'
     return first ? `${sw.one} ${first}` : sw.one
   }
   const loggedByText = (s: TodaySession) => (loggerOf(s) === 'client' ? 'by client' : `by ${loggerName(loggerOf(s))}`)
@@ -1240,7 +1242,7 @@ export default function CompanyAdminPage() {
                           {row.name}{row.off ? ' (login off)' : ''}
                         </span>
                         <span className="text-xs text-gray-400 shrink-0">
-                          <span className="text-lg font-bold text-white">{row.clients.length}</span> client{row.clients.length === 1 ? '' : 's'}
+                          <span className="text-lg font-bold text-white">{row.clients.length}</span> {dojo ? (row.clients.length === 1 ? 'student' : 'students') : `client${row.clients.length === 1 ? '' : 's'}`}
                           {row.clients.length > 0 && <span className="text-gray-500"> · {trainedToday} trained today</span>}
                         </span>
                       </div>
@@ -1454,7 +1456,7 @@ export default function CompanyAdminPage() {
                           <span className={`text-sm truncate ${a.coach.archived_at ? 'text-gray-500' : 'text-white'}`}>{a.coach.full_name}{a.coach.archived_at ? ' (off)' : ''}</span>
                           <span className="text-xs text-gray-400 shrink-0">
                             <span className="text-white font-semibold">{a.today.sessions}</span> / {a.week.sessions} sessions
-                            {' · '}{a.today.clients.length} / {a.week.clients.length} clients
+                            {' · '}{a.today.clients.length} / {a.week.clients.length} {dojo ? 'students' : 'clients'}
                             {a.week.covering > 0 && <span className="text-sky-300"> · {a.today.covering} / {a.week.covering} covering</span>}
                           </span>
                         </button>
@@ -1924,7 +1926,7 @@ export default function CompanyAdminPage() {
                                 {trainModule && client.client_type === 'pt' && (() => {
                                   const a = weekAdherence[client.id]
                                   if (!a) return null
-                                  if (a === 'no-plan') return <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  if (a === 'no-plan') return dojo ? null : <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
                                   // "Mark today" lives on the Training card (#44), not on each row
                                   return (
                                     <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
