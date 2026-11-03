@@ -39,6 +39,8 @@ const SECTIONS: { prefix: string; roles: Role[] }[] = [
   { prefix: '/admin', roles: ['super_admin'] },
   { prefix: '/coach', roles: ['coach'] },
   { prefix: '/company/client', roles: ['company_admin', 'partner', 'coach'] },
+  // Attendance (#78): senseis mark classes too (the month view is read-only for them: no money on it)
+  { prefix: '/company/attendance', roles: ['company_admin', 'partner', 'coach'] },
   { prefix: '/company', roles: ['company_admin', 'partner'] },
   { prefix: '/client', roles: ['client'] },
 ]
