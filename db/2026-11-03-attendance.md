@@ -1,7 +1,7 @@
-Ran on prod (Mumbai): —
+Ran on prod (Mumbai): ✅ 3 Nov 2026 (by Anand); attendance tested on the preview and working.
 Ran on dev: n/a (dev DB not set up yet)
 
-# 3 Nov 2026 — Attendance (Dojo Build 3, ROADMAP #78) — TO RUN BY ANAND
+# 3 Nov 2026 — Attendance (Dojo Build 3, ROADMAP #78) — ✅ RUN ON MUMBAI 3 NOV — do not run again
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
