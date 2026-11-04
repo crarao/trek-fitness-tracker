@@ -706,6 +706,7 @@ export default function CompanyAdminPage() {
       return
     }
 
+    let membershipSaved = true
     if (newClient.plan_type && newClient.start_date && newClient.end_date) {
       const { error: mError } = await supabase.from('memberships').insert({
         profile_id: result.userId,
@@ -716,7 +717,9 @@ export default function CompanyAdminPage() {
         end_date: newClient.end_date,
         ...(currencyColumns ? { currency: place.currency } : {})
       })
-      if (mError) console.error('Membership insert error:', mError)
+      if (mError) { console.error('Membership insert error:', mError); membershipSaved = false }
+    } else {
+      membershipSaved = false
     }
 
     setMessage(`${mw.one} created successfully!`)
@@ -731,6 +734,9 @@ export default function CompanyAdminPage() {
       if (leadError || !updated?.length) showToast(`${mw.one} added, but the enquiry wasn't updated`, 'error')
       else { showToast(`${mw.one} added ✓ · enquiry marked Joined`); fetchLeadStats(companyId!) }
       setFromLead(null)
+    } else if (!membershipSaved) {
+      // Added, but no membership: the list shows "No plan" until one is added (open them → Add membership)
+      showToast(`${mw.one} added, but the membership wasn't saved. Open them → ⋯ → Edit → Add membership`, 'error')
     } else {
       showToast(`${mw.one} added ✓`)
     }
@@ -2004,11 +2010,11 @@ export default function CompanyAdminPage() {
                               {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
                                 <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
                               )}
-                              {/* Phones: status sits here (the Status column shows from tablet width up) */}
-                              {activeFilter !== 'archived' && m && (
+                              {/* Phones: status sits here (the Status column shows from tablet width up). No membership saved: "No plan" */}
+                              {activeFilter !== 'archived' && (
                                 <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
                                   <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                                  {m ? status.charAt(0).toUpperCase() + status.slice(1) : 'No plan'}
                                 </span>
                               )}
 
@@ -2064,7 +2070,12 @@ export default function CompanyAdminPage() {
                             <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
                             {status.charAt(0).toUpperCase() + status.slice(1)}
                           </span>
-                        ) : <span className="text-gray-600 text-sm">—</span>}
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                            No plan
+                          </span>
+                        )}
                       </td>
                       <td className="hidden lg:table-cell px-4 py-4">
                         {days !== null && m ? (
