@@ -1718,7 +1718,7 @@ export default function CompanyAdminPage() {
                   <input type="text" placeholder={`${sw.one} name`}
                     value={newCoach.full_name}
                     onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
-                    className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                    className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
                   {(country ?? 'IN') !== 'IN' && (
                     <>
                       <input type="email" placeholder="Email (or leave empty: phone login)" autoComplete="off"
@@ -1733,7 +1733,8 @@ export default function CompanyAdminPage() {
                       )}
                     </>
                   )}
-                  <div className={`${(country ?? 'IN') !== 'IN' ? 'col-span-2 ' : ''}flex gap-2 min-w-0`}>
+                  {/* Full row: next to the name, the country-code picker left the number box too narrow on phones */}
+                  <div className="col-span-2 flex gap-2 min-w-0">
                     <CountryCodePicker value={newCoach.phone_country || (country ?? 'IN')}
                       onChange={c => setNewCoach({ ...newCoach, phone_country: c })} className="py-2" />
                     <input type="tel"
