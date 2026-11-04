@@ -2139,13 +2139,13 @@ export default function CompanyAdminPage() {
                   <div className="col-span-2 flex gap-2">
                     <CountryCodePicker value={newClientPlace().phoneCountry}
                       onChange={c => setNewClient({ ...newClient, phone_country: c })} className="py-2.5" />
-                    <input type="tel" placeholder={phonePlaceholder(newClientPlace().phoneCountry)}
+                    <input type="tel" placeholder={`${phonePlaceholder(newClientPlace().phoneCountry)} (optional)`}
                       value={newClient.phone}
                       onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
                       className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
                   </div>
                 ) : (
-                  <input type="tel" placeholder={phonePlaceholder(country ?? 'IN')}
+                  <input type="tel" placeholder={`${phonePlaceholder(country ?? 'IN')} (optional)`}
                     value={newClient.phone}
                     onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
                     className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
