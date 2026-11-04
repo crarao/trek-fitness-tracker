@@ -1693,7 +1693,8 @@ export default function CompanyAdminPage() {
                             <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
                             <p className="text-xs text-gray-500 truncate">
                               {c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, country)}
-                              {!c.archived_at && ` · ${today} session${today === 1 ? '' : 's'} today`}
+                              {/* Not for dojos: senseis tap attendance, nothing to tally */}
+                              {!c.archived_at && !dojo && ` · ${today} session${today === 1 ? '' : 's'} today`}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">

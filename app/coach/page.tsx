@@ -333,8 +333,8 @@ export default function CoachHomePage() {
           </>
         )}
 
-        {/* Coaches: sessions each active coach logged today (read-only) */}
-        {coaches.some(c => !c.archived_at) && (
+        {/* Coaches: sessions each active coach logged today (read-only). Not for dojos: senseis tap attendance, nothing to tally */}
+        {!dojo && coaches.some(c => !c.archived_at) && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">{sw.many} · sessions logged today</p>
             <ul className="space-y-1">

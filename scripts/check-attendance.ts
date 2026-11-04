@@ -53,8 +53,14 @@ check('Nov so far: attended (one per day) of scheduled', [ms.attended, ms.schedu
 check('statsText', statsText(ms), '3 of 5 classes')
 check('no home batch', statsText(monthStats({ profileId: 'a', homeBatch: null, rows: ishanRows, month: today, today })), '3 classes')
 check('past month counts to its end', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: '2026-10-15', today }).scheduled, 13)
-check('joined 1 Nov: October not counted as missed', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: '2026-10-15', today, since: '2026-11-01T09:00:00Z' }).scheduled, 0)
-check('joined 5 Nov: classes from then', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: today, today, since: '2026-11-05' }).scheduled, 3)
+check('joined 1 Nov: October not counted as missed', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows.filter(x => x.class_date >= '2026-11-01'), month: '2026-10-15', today, since: '2026-11-01T09:00:00Z' }).scheduled, 0)
+check('joined 1 Nov, came 30 Oct: 1 of 1', statsText(monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: '2026-10-15', today, since: '2026-11-01T09:00:00Z' })), '1 of 1 class')
+check('joined 5 Nov: classes from then', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows.filter(x => x.class_date >= '2026-11-05'), month: today, today, since: '2026-11-05' }).scheduled, 3)
+check('joined 5 Nov, came 2 Nov: from first class', monthStats({ profileId: 'a', homeBatch: juniors, rows: ishanRows, month: today, today, since: '2026-11-05' }).scheduled, 5)
+const weekdays = { ...juniors, days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] }
+const mani = monthStats({ profileId: 'a', homeBatch: weekdays, rows: [r('a', 'j', '2026-11-02'), r('a', 'j', '2026-11-03'), r('a', 'j', '2026-11-04')], month: '2026-11-04', today: '2026-11-04', since: '2026-11-04T07:00:00Z' })
+check('added 4 Nov, marked 2–4 Nov: never "3 of 1"', statsText(mani), '3 of 3 classes')
+check('more than scheduled: just the count', statsText({ attended: 4, scheduled: 3 }), '4 classes')
 
 console.log('\n5. buildAttendanceMessage')
 const withParent = buildAttendanceMessage({

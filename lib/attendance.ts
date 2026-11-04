@@ -116,15 +116,21 @@ export function monthStats(opts: {
 }): { attended: number; scheduled: number | null; from: string; to: string } {
   const { from, to } = monthRange(opts.month)
   const until = to < opts.today ? to : opts.today
+  const dates = attendedDates(opts.profileId, opts.rows, from, until)
+  // Count from the day they joined, or their first class this month if that's earlier
+  // (staff often add a student and then mark the days they already came: "3 of 1" otherwise)
   const joined = (opts.since || '').slice(0, 10)
-  const start = joined && joined > from ? joined : from
-  const attended = attendedDates(opts.profileId, opts.rows, from, until).length
+  const firstClass = dates.length ? dates[dates.length - 1] : ''
+  const earliest = joined && firstClass && firstClass < joined ? firstClass : joined
+  const start = earliest && earliest > from ? earliest : from
+  const attended = dates.length
   const scheduled = opts.homeBatch ? scheduledDates(opts.homeBatch.days, start, until).length : null
   return { attended, scheduled, from, to }
 }
 
 export const statsText = (s: { attended: number; scheduled: number | null }) =>
-  s.scheduled != null && s.scheduled > 0
+  // More than scheduled (drop-ins on other days): just the count, never "4 of 3"
+  s.scheduled != null && s.scheduled > 0 && s.attended <= s.scheduled
     ? `${s.attended} of ${s.scheduled} class${s.scheduled === 1 ? '' : 'es'}`
     : `${s.attended} class${s.attended === 1 ? '' : 'es'}`
 
