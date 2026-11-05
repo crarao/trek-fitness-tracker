@@ -1,7 +1,7 @@
-Ran on prod (Mumbai): ⏳ not yet — Anand runs it
+Ran on prod (Mumbai): ✅ Step 1 + Step 2 checks 5 Nov 2026 (by Anand, passed); Step 3 cross-company test not yet run
 Ran on dev: n/a (dev DB not set up yet)
 
-# 5 Nov 2026 — Weight / reps per exercise (`exercise_logs`, ROADMAP #80) — NOT RUN YET
+# 5 Nov 2026 — Weight / reps per exercise (`exercise_logs`, ROADMAP #80) — ✅ STEP 1 RUN ON MUMBAI 5 NOV — do not run Step 1 again
 
 > **Run in: Mumbai — project `nptxjfvkqjuekgkspemu`** (the live app).
 > SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new

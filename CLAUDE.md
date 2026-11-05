@@ -129,6 +129,12 @@ attendance (#78; never deleted: untap = present false)
   ├── marked_by → profiles (who tapped last), marked_at
   └── unique (batch_id, profile_id, class_date)
 
+exercise_logs (weight / reps per exercise per session, #80)
+  ├── session_id → logged_sessions, client_id → profiles, company_id → companies (copies, checked by RLS)
+  ├── exercise_id → exercises (null = name not in the library), exercise_name (copy), name_key (generated)
+  ├── position, sets, reps, weight (null = bodyweight), unit (kg; lb allowed, not in the app), set_details jsonb (unused)
+  └── logged_by → profiles, created_at  (cascades with the session / client / company)
+
 exercises (exercise library, #74; never deleted: archived)
   ├── company_id → companies (null = shared starter list, super admin only edits)
   ├── name (unique per gym, case-insensitive), aliases text[], muscle_group, equipment
@@ -167,6 +173,8 @@ exercises (exercise library, #74; never deleted: archived)
 | Server check that a client's branch / batch is in their gym (create-user, update-client) | `lib/placement-server.ts` |
 | Leads rules (sources, follow-up state, WhatsApp wording, summary) | `lib/leads.ts` |
 | Exercise library rules (search, labels, recent) | `lib/exercises.ts` (check: `scripts/check-exercises.ts`) |
+| Weight / reps logs: parse plan text, match names to the library, pre-fill from last log, monthly top weight / volume (check: `scripts/check-exercise-logs.ts`) | `lib/exercise-logs.ts` |
+| Per-exercise progress chart (coach Progress tab) | `app/exercise-progress.tsx` |
 | Plan builder: editor, exercise picker sheet, copy-plan sheet | `app/plan-editor.tsx`, `app/exercise-picker.tsx`, `app/plan-copy-sheet.tsx` |
 | Manage the gym's exercises (owner / partner) | `app/company/exercises/page.tsx` |
 | Client app | `app/client/page.tsx` |
@@ -330,6 +338,7 @@ Sales, pricing, and product reference documents (HTML) — open in a browser, do
 - `branches`, `batches` (#77, `db/2026-11-03-branches-batches.md`, `db/2026-11-03-branches-super-admin.md`): everyone signed in to the gym reads; **branches: only super admin adds / edits** (pricing per branch); **batches: owner / partner add and edit their gym's** (the branch must be in the same gym); super admin all; no delete (archive).
 - `attendance` (#78, `db/2026-11-03-attendance.md`): owner / partner / coach read and mark their gym's (the batch and the student must be in the gym; a coach only PT students; `marked_by` = the person saving); a student reads their own; super admin all; no delete (untap = `present false`).
 - `leads`: staff of the gym read / add / update, super admin reads all, no delete. `ai_usage`, `contact_requests`: super admin read (server writes).
+- `exercise_logs` (#80, `db/2026-11-05-exercise-logs.md`): client reads / edits own; owner / partner their gym's (read, add, edit, delete); coach their gym's PT clients' (read, add, edit, no delete); super admin all. Every write checks the session belongs to `client_id`, the client is in `company_id`, and `exercise_id` is the starter list or that gym's; `logged_by` = the person saving.
 - `exercises` (#74, `db/2026-11-01-exercise-library.md`): everyone signed in reads the starter list + their gym's; owner / partner / coach add and edit their gym's; starter list super admin only; no delete (archive).
 - `session_metrics` (not used by the app yet): same reach as `logged_sessions` — client own sessions, staff their gym's client sessions, coaches their gym's PT client sessions (no delete), super admin all (`db/2026-10-31-session-metrics-rls.md`, run on Mumbai 31 Oct). `client_goals`: RLS on, no rules, not used — locked on purpose.
 - API routes and `proxy.ts` use the server key, so RLS doesn't affect them; every route checks the caller with `getCaller()`. Blocked updates / deletes return 0 rows without an error: use `.select()` after update / delete and check rows when it matters.
@@ -387,6 +396,8 @@ This is load-bearing — `update-client` (Indian numbers only) and `update-coach
 **Attendance (#78, Dojo Build 3, `db/2026-11-03-attendance.md`):** for dojos, attendance replaces Log session once the table exists (pages ask for `attendance` once; an error = not yet, then Build 1.2 behaviour). Roll call `/company/attendance/<batch id>[?date=]` (proxy: owner, partner, coach): tap who came, tap again to undo (`present false`), not tapped = absent, "+ Drop-in" for students of other batches (`is_drop_in`), past days correctable, no future days; saves with `upsert(onConflict: 'batch_id,profile_id,class_date')`. Monthly view `/company/attendance`. Counts come from `lib/attendance.ts`: `monthStats` = days attended (any batch, one per day) vs the home batch's scheduled classes so far, counted **from the day the student joined** (`profiles.created_at`); `buildAttendanceMessage` is the parent's WhatsApp (same `pickRecipient` rule). Student page: Sessions tab is "Attendance", Progress shows classes this / last month, Share = attendance month (no PDF). Sensei home: Today's batches across branches + came today from attendance. Owner dashboard: Attendance card replaces the session-based Training and Sensei activity cards. Old logged sessions stay and still show.
 
 **Parent / guardian (#53, `db/2026-11-03-guardian.md`):** any client can have a parent (`guardian_name / guardian_phone / guardian_relation`); the Add Member "Child — add parent details" box starts ticked only for martial arts. Fields show and are sent only once the columns exist (dashboard: one `select('guardian_phone').limit(1)` probe; client page: `'guardian_phone' in client`). Who a WhatsApp message goes to is one rule, `pickRecipient` in `lib/guardian.ts` (parent when their phone is valid, else the client), used by progress shares and membership reminders (`reminderRecipient` + `reminderText`; no parent = the old wording and number). `create-user` and `update-client` validate the parent phone on the server. The parent's phone is contact only, never a login.
+
+**Weight / reps per exercise (#80, `db/2026-11-05-exercise-logs.md`):** v1 is the coach path only (client page → Plans → this week's day). A ticked exercise shows sets × reps @ kg, pre-filled by `prefill(e, lastLogFor(...))`; changed numbers are kept on the device under `coach-weights:<planId>:<Day>` like the ticks. `handleCoachLogDay` saves the session first, then the rows from `rowsToSave` (timed / distance and empty exercises left out; `exercise_id` via `resolveExerciseId`, so it is always the starter list or the gym's); if that insert fails the session stays and `weightsRetry` retries the weights only. The page asks for `exercise_logs` once with the sessions; an error = table missing, weight rows hidden. kg only in the UI; never add kg and lb. Delete cascade order for a client is unchanged (logs go with the session).
 
 **Generated child logins (`lib/phone.ts`):** a child added with no phone of their own gets `generatedStudentLogin()` = `student-<8 a–z / 0–9>@getcoachboard.in` and a random 16-character password (made in `create-user`), `profiles.phone` null, so siblings can share a parent's phone. `isGeneratedLogin()` spots them; they are not phone logins (`isPhoneLogin` false, so `update-client` never moves them) and count as "no login" (`isNoLogin`, `shownEmail`). Never shown anywhere; Super Admin shows "No login (child)". The phone-login rule for everyone else is unchanged.
 
