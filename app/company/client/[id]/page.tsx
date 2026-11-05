@@ -701,28 +701,37 @@ export default function ClientDetailPage() {
     if (!exerciseLogsOn || isTimedOrDistance(e)) return null
     const d = draftFor(key, i, e)
     const last = lastLogFor(e, datedLogs, exLibrary)
-    const box = 'w-12 min-w-0 bg-gray-800 text-white text-center rounded-lg px-1 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
+    const box = 'min-w-0 bg-gray-800 text-white text-center rounded-lg px-1 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
     const step = 'w-9 h-9 shrink-0 rounded-lg bg-gray-800 border border-gray-700 text-white text-base leading-none hover:bg-gray-700'
     const num = (v: number | null) => (v == null ? '' : String(v))
     return (
       <div className="pl-11 pr-3 pb-2.5 -mt-1">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <input type="text" inputMode="numeric" aria-label={`${e.name} sets`} className={box}
-            key={`sets:${key}:${i}:${d.sets}`} defaultValue={num(d.sets)}
-            onBlur={ev => setDraft(key, i, e, { sets: numberFromInput(ev.target.value, 'sets') })} />
-          <span className="text-gray-500 text-sm">×</span>
-          <input type="text" inputMode="numeric" aria-label={`${e.name} reps`} className={box}
-            key={`reps:${key}:${i}:${d.reps}`} defaultValue={num(d.reps)}
-            onBlur={ev => setDraft(key, i, e, { reps: numberFromInput(ev.target.value, 'reps') })} />
-          <span className="text-gray-500 text-sm">@</span>
-          <button type="button" aria-label={`${e.name}: less weight`} className={step}
-            onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, -1) })}>−</button>
-          <input type="text" inputMode="decimal" aria-label={`${e.name} weight in kg`} className={`${box} w-14`} placeholder="–"
-            key={`weight:${key}:${i}:${d.weight}`} defaultValue={num(d.weight)}
-            onBlur={ev => setDraft(key, i, e, { weight: numberFromInput(ev.target.value, 'weight') })} />
-          <button type="button" aria-label={`${e.name}: more weight`} className={step}
-            onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, 1) })}>+</button>
-          <span className="text-gray-500 text-xs">kg</span>
+        {/* Two groups that each stay on one line; on a narrow phone the weight group moves under the first */}
+        <div className="flex items-end gap-x-4 gap-y-2 flex-wrap">
+          <div className="shrink-0">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Sets × reps</p>
+            <div className="flex items-center gap-1.5">
+              <input type="text" inputMode="numeric" aria-label={`${e.name} sets`} className={`${box} w-12`}
+                key={`sets:${key}:${i}:${d.sets}`} defaultValue={num(d.sets)}
+                onBlur={ev => setDraft(key, i, e, { sets: numberFromInput(ev.target.value, 'sets') })} />
+              <span className="text-gray-500 text-sm">×</span>
+              <input type="text" inputMode="numeric" aria-label={`${e.name} reps`} className={`${box} w-12`}
+                key={`reps:${key}:${i}:${d.reps}`} defaultValue={num(d.reps)}
+                onBlur={ev => setDraft(key, i, e, { reps: numberFromInput(ev.target.value, 'reps') })} />
+            </div>
+          </div>
+          <div className="shrink-0">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Weight (kg)</p>
+            <div className="flex items-center gap-1.5">
+              <button type="button" aria-label={`${e.name}: less weight`} className={step}
+                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, -1) })}>−</button>
+              <input type="text" inputMode="decimal" aria-label={`${e.name} weight in kg`} className={`${box} w-16`} placeholder="–"
+                key={`weight:${key}:${i}:${d.weight}`} defaultValue={num(d.weight)}
+                onBlur={ev => setDraft(key, i, e, { weight: numberFromInput(ev.target.value, 'weight') })} />
+              <button type="button" aria-label={`${e.name}: more weight`} className={step}
+                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, 1) })}>+</button>
+            </div>
+          </div>
         </div>
         <p className="text-[11px] text-gray-500 mt-1">
           {last ? <>Last time: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
