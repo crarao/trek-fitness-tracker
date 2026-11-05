@@ -2649,10 +2649,13 @@ const handleResetPassword = async () => {
                   const dayDone = !d.rest && done.has(d.day)
                   const notes = dayDone ? doneNotesWithWho(plan.id)[d.day] : ''
                   // What was ticked on the day (latest session for it); this week's days not yet done show the coach's ticks
+                  // "Log another session" on a done day (its form is open): tick afresh, with weight rows (#80)
+                  const loggingAgain = isCurrent && dayDone && markKey === `${plan.id}:${d.day}`
                   const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
-                  const ticks = saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
+                  const ticks = loggingAgain ? coachTicks[`${plan.id}:${d.day}`] || []
+                    : saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
                     : isCurrent && !dayDone ? coachTicks[`${plan.id}:${d.day}`] || [] : []
-                  const canTick = isCurrent && !d.rest && !dayDone
+                  const canTick = isCurrent && !d.rest && (!dayDone || loggingAgain)
                   const showTicks = canTick || ticks.length > 0
                   return (
                     <>
