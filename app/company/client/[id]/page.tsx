@@ -328,6 +328,16 @@ export default function ClientDetailPage() {
   const [shareNote, setShareNote] = useState('')
   const [shareText, setShareText] = useState('')
   const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
+  // PDF: include the week's day-by-day plan (exercises, sets, weights)? Off = only the daily summary
+  // and the Strength table. Remembered on this device; on by default (the report as before).
+  const PDF_PLAN_KEY = 'pdf-include-plan'
+  const [pdfIncludePlan, setPdfIncludePlan] = useState(() => {
+    try { return typeof window === 'undefined' || localStorage.getItem(PDF_PLAN_KEY) !== '0' } catch { return true }
+  })
+  const choosePdfIncludePlan = (on: boolean) => {
+    setPdfIncludePlan(on)
+    try { localStorage.setItem(PDF_PLAN_KEY, on ? '1' : '0') } catch { /* ignore */ }
+  }
   const [coachName, setCoachName] = useState('')        // logged-in staff user, for the sign-off
   const [staff, setStaff] = useState<Staff[]>([])
   const [savingPrimaryCoach, setSavingPrimaryCoach] = useState(false)
@@ -1492,7 +1502,8 @@ const handleResetPassword = async () => {
       await downloadProgressPdf({
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
         text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab
-        plan: (() => { const json = plan ? planJsonOf(plan) : null; return plan && json ? { weekStart: plan.week_start, json } : null })(),
+        // The day-by-day plan only when the coach leaves "Include the week's plan" on
+        plan: (() => { const json = plan && pdfIncludePlan ? planJsonOf(plan) : null; return plan && json ? { weekStart: plan.week_start, json } : null })(),
         // Strength by exercise (#80): logs up to the report week's Sunday (or today, if that's earlier)
         strength: exerciseLogsOn ? strengthReport(datedLogs, exLibrary, [isoAdd(weekStart, 6), localDateIso()].sort()[0]) : null,
         showCalories: false, // decided 5 Nov: no calories in the PDF report (WhatsApp messages keep them)
@@ -1645,10 +1656,22 @@ const handleResetPassword = async () => {
             Copy text
           </button>
         </div>
-        {!attendanceMode && <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
-          className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
-          {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
-        </button>}
+        {!attendanceMode && (
+          <div className="space-y-2">
+            <label className="flex items-start gap-2.5 text-xs text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={pdfIncludePlan} onChange={e => choosePdfIncludePlan(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-green-600 shrink-0" />
+              <span>
+                Include the week&apos;s plan in the PDF
+                <span className="block text-gray-500">Exercises with sets and weights, day by day. Off: daily summary and the strength table only.</span>
+              </span>
+            </label>
+            <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
+              className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
+              {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
+            </button>
+          </div>
+        )}
       </div>
     )
   }
