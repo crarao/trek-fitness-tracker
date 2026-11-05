@@ -91,6 +91,14 @@ export function sessionLine(s: ShareSession): string {
   return [label, exText, min].filter(Boolean).join(' · ')
 }
 
+// The message without the calorie estimate, for the PDF report (decided 5 Nov: no calories there).
+// Removes the "🔥 about 1,234 kcal (estimate)" part this file writes, on its own line or after "⏱ … min · ".
+export function withoutCalories(text: string): string {
+  return text
+    .replace(/[ \t]*·[ \t]*🔥[^\n]*?kcal[^\n]*?\(estimate\)/g, '')
+    .replace(/^[ \t]*🔥[^\n]*?kcal[^\n]*?\(estimate\)[ \t]*(\n|$)/gm, '')
+}
+
 // The numbers for one week (also used by the PDF report, lib/progress-pdf.ts)
 export type WeekSummary = {
   sessions: ShareSession[]   // every session logged inside the week, in date order (= the chart's bar)

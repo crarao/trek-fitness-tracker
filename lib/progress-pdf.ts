@@ -7,6 +7,8 @@ import { type Country, formatDate } from './locale'
 import { imagesToPdf, type PdfPage } from './pdf'
 import type { WeekSummary } from './progress-share'
 import { type PlanJson, daysInWeekOrder, exerciseDetail } from './plan-structure'
+import { type StrengthReport, changeText, weightText } from './exercise-logs'
+import { withoutCalories } from './progress-share'
 
 export type ProgressPdfInput = {
   companyName: string
@@ -18,6 +20,8 @@ export type ProgressPdfInput = {
   fourWeeks: { done: number; planned: number } | null // plan days done over the last 4 weeks
   totals: { start: string; sessions: number; minutes: number }[] // per week, oldest first
   plan?: { weekStart: string; json: PlanJson } | null // the week's day-by-day plan, if it has one
+  strength?: StrengthReport | null                    // weight per exercise per month (#80), from lib/exercise-logs.ts
+  showCalories?: boolean                              // calorie tile and the message's calorie part; off unless true (5 Nov)
 }
 
 // 150 dpi A4
@@ -29,6 +33,9 @@ const FONT = '-apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif'
 const ORANGE = '#f97316'
 const DARK = '#111827'
 const GRAY = '#6b7280'
+const GREEN = '#16a34a'
+const RED = '#dc2626'
+const LINE = '#e5e7eb'
 
 const font = (size: number, weight = 400) => `${weight} ${size}px ${FONT}`
 
@@ -54,7 +61,7 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
   return out
 }
 
-async function chartImage(kind: 'bar' | 'line', labels: string[], data: number[], width: number, height: number) {
+async function chartImage(kind: 'bar' | 'line', labels: string[], data: (number | null)[], width: number, height: number, fromZero = true) {
   const { Chart, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Filler, BarController, LineController } = await import('chart.js')
   Chart.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Filler, BarController, LineController)
   const canvas = document.createElement('canvas')
@@ -75,6 +82,7 @@ async function chartImage(kind: 'bar' | 'line', labels: string[], data: number[]
         pointBackgroundColor: ORANGE,
         tension: 0.3,
         cubicInterpolationMode: 'monotone', // no dip below zero between points
+        spanGaps: true,                     // weeks / months with nothing logged: join the points around them
         fill: kind === 'line',
       }],
     },
@@ -86,7 +94,7 @@ async function chartImage(kind: 'bar' | 'line', labels: string[], data: number[]
       plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {
         x: { ticks, grid: { display: false } },
-        y: { ticks: { ...ticks, precision: 0 }, grid: { color: '#e5e7eb' }, beginAtZero: true },
+        y: { ticks: { ...ticks, precision: 0 }, grid: { color: '#e5e7eb' }, beginAtZero: fromZero },
       },
     },
   })
@@ -154,7 +162,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     week.planned ? ['This week', `${week.done} of ${week.planned} days`] : ['This week', `${week.sessions.length} session${week.sessions.length === 1 ? '' : 's'}`],
     ...(fourWeeks && fourWeeks.planned ? [['Last 4 weeks', `${Math.round((fourWeeks.done / fourWeeks.planned) * 100)}%`] as [string, string]] : []),
     ['Minutes', week.minutes.toLocaleString('en-US')],
-    ...(week.kcal ? [['Calories (est.)', `~${week.kcal.toLocaleString('en-US')}`] as [string, string]] : []),
+    ...(input.showCalories && week.kcal ? [['Calories (est.)', `~${week.kcal.toLocaleString('en-US')}`] as [string, string]] : []),
   ]
   const gap = 24
   const tileW = (W - 2 * M - gap * (tiles.length - 1)) / tiles.length
@@ -171,11 +179,12 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   })
   y += 150 + 60
 
-  // The coach's message, as edited
-  if (input.text.trim()) {
+  // The coach's message, as edited (without the calorie estimate unless showCalories)
+  const message = (input.showCalories ? input.text : withoutCalories(input.text)).trim()
+  if (message) {
     heading('Message from your coach')
     ctx.font = font(28)
-    const lines = wrap(ctx, input.text.trim(), W - 2 * M)
+    const lines = wrap(ctx, message, W - 2 * M)
     for (const line of lines) {
       const h = line ? 42 : 22
       ensure(h)
@@ -206,6 +215,66 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     ctx.drawImage(await chartImage(kind, labels, [...data], chartW, chartH), x, y + 50)
   }
   y += 50 + chartH + 40
+
+  // Strength by exercise (#80): heaviest weight per month, last 3 months, and a chart of the most
+  // logged exercise. Kept together on one page.
+  const st = input.strength
+  if (st && st.rows.length) {
+    const rowH = 50
+    const colW = 140
+    const changeW = 200
+    const nameW = W - 2 * M - colW * st.months.length - changeW
+    ensure(70 + rowH * (st.rows.length + 1) + 20)
+    heading('Strength by exercise')
+    ctx.fillStyle = GRAY
+    ctx.font = font(20)
+    ctx.textAlign = 'right'
+    ctx.fillText('heaviest weight each month (kg)', W - M, y - 28)
+    // Header row
+    ctx.font = font(21, 600)
+    ctx.textAlign = 'left'
+    ctx.fillText('Exercise', M, y + 30)
+    ctx.textAlign = 'right'
+    st.months.forEach((m, i) => ctx.fillText(formatDate(`${m}-01`, input.country, 'month'), M + nameW + colW * (i + 1) - 10, y + 30))
+    ctx.fillText('This month', W - M, y + 30)
+    ctx.textAlign = 'left'
+    y += rowH
+    ctx.fillStyle = LINE
+    ctx.fillRect(M, y - 8, W - 2 * M, 2)
+    for (const r of st.rows) {
+      ctx.fillStyle = DARK
+      ctx.font = font(25, 500)
+      ctx.fillText(r.name, M, y + 28, nameW - 20)
+      ctx.textAlign = 'right'
+      ctx.font = font(25)
+      r.values.forEach((v, i) => {
+        ctx.fillStyle = v == null ? GRAY : DARK
+        ctx.fillText(v == null ? '—' : weightText(v), M + nameW + colW * (i + 1) - 10, y + 28)
+      })
+      const [txt, color] = r.change != null
+        ? [r.change > 0 ? `▲ ${changeText(r.change)}` : r.change < 0 ? `▼ ${changeText(r.change)}` : `= ${changeText(r.change)}`,
+           r.change > 0 ? GREEN : r.change < 0 ? RED : GRAY]
+        : [r.first ? 'first month' : '—', GRAY]
+      ctx.fillStyle = color
+      ctx.font = font(24, r.change != null ? 700 : 400)
+      ctx.fillText(txt, W - M, y + 28)
+      ctx.textAlign = 'left'
+      y += rowH
+      ctx.fillStyle = LINE
+      ctx.fillRect(M, y - 8, W - 2 * M, 1)
+    }
+    y += 30
+    if (st.chart) {
+      const h = 280
+      ensure(50 + h + 30)
+      ctx.fillStyle = GRAY
+      ctx.font = font(22, 600)
+      ctx.fillText(`${st.chart.name.toUpperCase()} · LAST ${st.chart.months.length} MONTHS (KG)`, M, y + 22, W - 2 * M)
+      const chartLabels = st.chart.months.map(m => formatDate(`${m}-01`, input.country, 'month'))
+      ctx.drawImage(await chartImage('line', chartLabels, st.chart.data, W - 2 * M, h, false), M, y + 50)
+      y += 50 + h + 40
+    }
+  }
 
   // The week's plan, day by day (structured plans only; text plans are left out)
   if (input.plan) {
