@@ -7,7 +7,9 @@ import {
   type DatedLog, parseSets, parseReps, parseWeight, isTimedOrDistance, matchExercise, resolveExerciseId,
   lastLogFor, prefill, stepWeight, numberFromInput, rowsToSave, logDetail, logLine, monthlyProgress,
   changeThisMonth, changeText, lastMonths, topWeightSeries,
+  weekOf, weeklyProgress, changeThisPeriod, lastWeeks, withWeightIn, strengthReport,
 } from '../lib/exercise-logs'
+import { withoutCalories } from '../lib/progress-share'
 
 const ID_SQUAT = '00000000-0000-0000-0000-000000000002'
 const ID_LAT = '00000000-0000-0000-0000-000000000001'
@@ -140,15 +142,52 @@ console.log('— Monthly progress')
 const prog = monthlyProgress(logs, library)
 check('exercises (most logs first; id and id-less squat grouped)', prog.map(p => [p.name, p.logs]), [['Back squat', 3], ['Sled Push', 2], ['Plank', 1]])
 const squat = prog[0]
-check('squat months', squat.months.map(m => [m.month, m.topWeight, m.volume]), [['2026-10', 45, 2550], ['2026-11', 50, 1200]])
+check('squat months', squat.points.map(m => [m.period, m.topWeight, m.volume]), [['2026-10', 45, 2550], ['2026-11', 50, 1200]])
 check('squat change Nov', changeThisMonth(squat, '2026-11'), 11)
-check('sled change Nov (no reps: no volume)', [changeThisMonth(prog[1], '2026-11'), prog[1].months.map(m => m.volume)], [20, [0, 0]])
+check('sled change Nov (no reps: no volume)', [changeThisMonth(prog[1], '2026-11'), prog[1].points.map(m => m.volume)], [20, [0, 0]])
 check('plank: no weight → no change', changeThisMonth(prog[2], '2026-11'), null)
 check('no log this month → no change', changeThisMonth(squat, '2026-12'), null)
 check('first month only → no change', changeThisMonth(squat, '2026-10'), null)
 check('change text', [changeText(11), changeText(-5), changeText(0)], ['+11%', '−5%', '0%'])
 check('last 6 months over new year', lastMonths('2026-02', 6), ['2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02'])
 check('series with gaps', topWeightSeries(squat, lastMonths('2026-11', 3)), [null, 45, 50])
+
+console.log('— Weekly progress')
+check('week of Sun 8 Nov = Mon 2 Nov', weekOf('2026-11-08'), '2026-11-02')
+check('week of Mon 2 Nov', weekOf('2026-11-02'), '2026-11-02')
+check('week across a month: Sun 1 Nov → Mon 26 Oct', weekOf('2026-11-01'), '2026-10-26')
+check('last 3 weeks', lastWeeks('2026-11-05', 3), ['2026-10-19', '2026-10-26', '2026-11-02'])
+const weekly = weeklyProgress(logs, library)
+const wSquat = weekly.find(p => p.name === 'Back squat')!
+check('squat by week', wSquat.points.map(p => [p.period, p.topWeight]), [['2026-09-28', 40], ['2026-10-19', 45], ['2026-11-02', 50]])
+check('squat +% this week', changeThisPeriod(wSquat, '2026-11-02'), 11)
+check('series by week with gaps', topWeightSeries(wSquat, lastWeeks('2026-11-05', 3)), [45, null, 50])
+check('with weight in last 3 weeks (plank has none)', withWeightIn(weekly, lastWeeks('2026-11-05', 3)).map(p => p.name), ['Back squat', 'Sled Push'])
+
+console.log('— PDF: Strength by exercise')
+const rep = strengthReport(logs, library, '2026-11-08')!
+check('table months', rep.months, ['2026-09', '2026-10', '2026-11'])
+check('rows (plank left out: no weight)', rep.rows.map(r => [r.name, r.values, r.change, r.first]),
+  [['Back squat', [null, 45, 50], 11, false], ['Sled Push', [null, 50, 60], 20, false]])
+check('chart = most logged, 6 months', [rep.chart?.name, rep.chart?.data], ['Back squat', [null, null, null, null, 45, 50]])
+const firstOnly = strengthReport([log({ exercise_name: 'Goblet Squat', session_date: '2026-11-03', weight: 12 })], library, '2026-11-08')!
+check('first month', firstOnly.rows.map(r => [r.name, r.values, r.change, r.first]), [['Goblet Squat', [null, null, 12], null, true]])
+check('one month only: no chart', firstOnly.chart, null)
+check('logs after the report week are left out', strengthReport(logs, library, '2026-10-31')!.rows.map(r => [r.name, r.values, r.change]),
+  [['Barbell Back Squat', [null, null, 45], null], ['sled push', [null, null, 50], null]])
+check('nothing to show', strengthReport([], library, '2026-11-08'), null)
+const down = strengthReport([
+  log({ exercise_name: 'Squat', session_date: '2026-10-10', weight: 50 }),
+  log({ exercise_name: 'Squat', session_date: '2026-11-03', weight: 45 }),
+], library, '2026-11-08')!
+check('down this month', down.rows[0].change, -10)
+check('no weight this month: no change, not first', [down.rows[0].first, strengthReport([log({ exercise_name: 'Squat', session_date: '2026-10-10', weight: 50 })], library, '2026-11-08')!.rows[0].change], [false, null])
+
+console.log('— PDF: no calories in the message')
+check('after minutes', withoutCalories('Done 3 of 3\n\n⏱ 180 min · 🔥 about 1,234 kcal (estimate)\n\nGreat week'), 'Done 3 of 3\n\n⏱ 180 min\n\nGreat week')
+check('on its own line', withoutCalories('Done\n\n🔥 about 900 kcal (estimate)\nNote'), 'Done\n\nNote')
+check('no calories: unchanged', withoutCalories('Done\n\n⏱ 60 min'), 'Done\n\n⏱ 60 min')
+check('coach\'s own words kept', withoutCalories('Burned lots of kcal today!'), 'Burned lots of kcal today!')
 
 console.log(fails ? `\n${fails} FAILED` : '\nAll passed')
 if (fails) process.exit(1)
