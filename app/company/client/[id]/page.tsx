@@ -24,12 +24,16 @@ import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
+import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, stepWeight, numberFromInput, rowsToSave, isTimedOrDistance, logDetail, logLine, monthlyProgress, lastMonths } from '@/lib/exercise-logs'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
   ssr: false,
   loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
 })
+// Per-exercise top weight per month (#80); Chart.js, loaded only when the Progress tab shows it
+const ExerciseProgressChart = dynamic(() => import('@/app/exercise-progress'), { ssr: false })
 
 type ClientProfile = {
   full_name: string
@@ -282,6 +286,42 @@ export default function ClientDetailPage() {
   const [savingMark, setSavingMark] = useState(false)
   // The session the coach just marked done ("planId:Mon" key), for "Send to <client> on WhatsApp"
   const [lastMarked, setLastMarked] = useState<{ key: string; session: Session } | null>(null)
+  // Weight / reps per exercise (#80, db/2026-11-05-exercise-logs.md): on once the table answers.
+  // exLogs = this client's logs; exLibrary = starter list + this gym's exercises (to match names to ids).
+  const [exerciseLogsOn, setExerciseLogsOn] = useState(false)
+  const [exLogs, setExLogs] = useState<ExerciseLog[]>([])
+  const [exLibrary, setExLibrary] = useState<Exercise[]>([])
+  // Numbers the coach changed on ticked exercises, per "planId:Day" → position. Kept on this device
+  // under "coach-weights:<planId>:<Day>" like the ticks, so a reload mid-workout keeps them.
+  const COACH_WEIGHTS = 'coach-weights:'
+  const [logDrafts, setLogDrafts] = useState<Record<string, Record<number, LogDraft>>>(() => {
+    if (typeof window === 'undefined') return {}
+    const out: Record<string, Record<number, LogDraft>> = {}
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (!k?.startsWith(COACH_WEIGHTS)) continue
+        const v = JSON.parse(localStorage.getItem(k) || '{}')
+        if (v && typeof v === 'object') out[k.slice(COACH_WEIGHTS.length)] = v
+      }
+    } catch { /* storage unavailable: numbers just won't survive a reload */ }
+    return out
+  })
+  const saveDayDrafts = (key: string, next: Record<number, LogDraft> | null) => {
+    setLogDrafts(prev => {
+      const all = { ...prev }
+      if (next && Object.keys(next).length) all[key] = next; else delete all[key]
+      return all
+    })
+    try {
+      if (next && Object.keys(next).length) localStorage.setItem(COACH_WEIGHTS + key, JSON.stringify(next))
+      else localStorage.removeItem(COACH_WEIGHTS + key)
+    } catch { /* ignore */ }
+  }
+  // Session saved but its weights weren't: kept here to retry the weights only (never the session)
+  const [weightsRetry, setWeightsRetry] = useState<{ key: string; rows: LogInsert[]; error: string } | null>(null)
+  const [retryingWeights, setRetryingWeights] = useState(false)
+  const exLibraryLoaded = useRef(false)
   // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
   const [shareOpen, setShareOpen] = useState(false)
   const [shareWeek, setShareWeek] = useState<'this' | 'last'>(() => ([1, 2].includes(new Date().getDay()) ? 'last' : 'this'))
@@ -512,6 +552,19 @@ export default function ClientDetailPage() {
           .order('week_start', { ascending: false })
         setPlans(plansData || [])
       })(),
+      // Weight / reps logs (#80): an error = the table isn't there yet, so the weight rows stay hidden.
+      // Newest first (at most 1000 come back, so the oldest drop off first). The library is read once.
+      want('sessions') && (async () => {
+        const [lg, lib] = await Promise.all([
+          supabase.from('exercise_logs').select(EXERCISE_LOG_COLUMNS).eq('client_id', clientId)
+            .order('created_at', { ascending: false }).limit(1000),
+          exLibraryLoaded.current ? null : supabase.from('exercises').select(EXERCISE_COLUMNS).order('name').limit(1000),
+        ])
+        if (lg.error) { setExerciseLogsOn(false); return }
+        setExLogs((lg.data || []) as ExerciseLog[])
+        if (lib && !lib.error) { exLibraryLoaded.current = true; setExLibrary((lib.data || []) as Exercise[]) }
+        setExerciseLogsOn(true)
+      })(),
       want('sessions') && (async () => {
         // Sessions with their feedback in one request; falls back to two if the join isn't available
         const joined = await supabase
@@ -599,6 +652,94 @@ export default function ClientDetailPage() {
   }
   const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError('') }
 
+  // ---- Weight / reps per exercise (#80) ----
+  // Logs with their session's date (for "last time" and months); logs of sessions not loaded are left out
+  const sessionDates = Object.fromEntries(sessions.map(x => [x.id, x.session_date]))
+  const datedLogs: DatedLog[] = exLogs.flatMap(l => sessionDates[l.session_id] ? [{ ...l, session_date: sessionDates[l.session_id].slice(0, 10) }] : [])
+  const logsBySession = exLogs.reduce<Record<string, ExerciseLog[]>>((acc, l) => {
+    (acc[l.session_id] ||= []).push(l)
+    return acc
+  }, {})
+  // The numbers shown on a ticked exercise: what the coach changed, else the last log, else the plan
+  const draftFor = (key: string, i: number, e: PlanDay['exercises'][number]): LogDraft =>
+    logDrafts[key]?.[i] ?? prefill(e, lastLogFor(e, datedLogs, exLibrary))
+  const setDraft = (key: string, i: number, e: PlanDay['exercises'][number], patch: Partial<LogDraft>) =>
+    saveDayDrafts(key, { ...(logDrafts[key] || {}), [i]: { ...draftFor(key, i, e), ...patch } })
+  // Saves the weight rows for a session already saved. Returns an error message, or '' when saved.
+  const insertWeights = async (rows: LogInsert[]): Promise<string> => {
+    if (!rows.length) return ''
+    const { error } = await supabase.from('exercise_logs').insert(rows)
+    return error ? error.message || 'please try again' : ''
+  }
+  const retryWeights = async () => {
+    if (!weightsRetry) return
+    setRetryingWeights(true)
+    const err = await insertWeights(weightsRetry.rows)
+    setRetryingWeights(false)
+    if (err) { setWeightsRetry({ ...weightsRetry, error: err }); return }
+    setWeightsRetry(null)
+    showToast('✓ Weights saved')
+    loadData(['sessions'])
+  }
+  // Under the plan day after a save whose weights failed: the session is saved, retry the weights only
+  const weightsBanner = (key: string) => weightsRetry?.key === key ? (
+    <div className="bg-red-950/40 border border-red-800 rounded-xl px-3 py-2.5 mb-3 space-y-2" role="alert">
+      <p className="text-xs text-red-300">Session saved, but the weights weren&apos;t: {weightsRetry.error}</p>
+      <div className="flex gap-2">
+        <button type="button" onClick={retryWeights} disabled={retryingWeights}
+          className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white text-sm font-medium py-2 rounded-lg">
+          {retryingWeights ? 'Saving…' : 'Retry saving weights'}
+        </button>
+        <button type="button" onClick={() => setWeightsRetry(null)}
+          className="px-3 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-lg">Dismiss</button>
+      </div>
+    </div>
+  ) : null
+  // The sets × reps @ kg row under a ticked exercise (not for timed / distance exercises).
+  // Boxes keep what is typed and save on leaving the box (so "12.5" can be typed); −/+ redraw them.
+  const renderWeightRow = (key: string, i: number, e: PlanDay['exercises'][number]) => {
+    if (!exerciseLogsOn || isTimedOrDistance(e)) return null
+    const d = draftFor(key, i, e)
+    const last = lastLogFor(e, datedLogs, exLibrary)
+    const box = 'min-w-0 bg-gray-800 text-white text-center rounded-lg px-1 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
+    const step = 'w-9 h-9 shrink-0 rounded-lg bg-gray-800 border border-gray-700 text-white text-base leading-none hover:bg-gray-700'
+    const num = (v: number | null) => (v == null ? '' : String(v))
+    return (
+      <div className="pl-11 pr-3 pb-2.5 -mt-1">
+        {/* Two groups that each stay on one line; on a narrow phone the weight group moves under the first */}
+        <div className="flex items-end gap-x-4 gap-y-2 flex-wrap">
+          <div className="shrink-0">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Sets × reps</p>
+            <div className="flex items-center gap-1.5">
+              <input type="text" inputMode="numeric" aria-label={`${e.name} sets`} className={`${box} w-12`}
+                key={`sets:${key}:${i}:${d.sets}`} defaultValue={num(d.sets)}
+                onBlur={ev => setDraft(key, i, e, { sets: numberFromInput(ev.target.value, 'sets') })} />
+              <span className="text-gray-500 text-sm">×</span>
+              <input type="text" inputMode="numeric" aria-label={`${e.name} reps`} className={`${box} w-12`}
+                key={`reps:${key}:${i}:${d.reps}`} defaultValue={num(d.reps)}
+                onBlur={ev => setDraft(key, i, e, { reps: numberFromInput(ev.target.value, 'reps') })} />
+            </div>
+          </div>
+          <div className="shrink-0">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Weight (kg)</p>
+            <div className="flex items-center gap-1.5">
+              <button type="button" aria-label={`${e.name}: less weight`} className={step}
+                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, -1) })}>−</button>
+              <input type="text" inputMode="decimal" aria-label={`${e.name} weight in kg`} className={`${box} w-16`} placeholder="–"
+                key={`weight:${key}:${i}:${d.weight}`} defaultValue={num(d.weight)}
+                onBlur={ev => setDraft(key, i, e, { weight: numberFromInput(ev.target.value, 'weight') })} />
+              <button type="button" aria-label={`${e.name}: more weight`} className={step}
+                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, 1) })}>+</button>
+            </div>
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-500 mt-1">
+          {last ? <>Last time: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
+        </p>
+      </div>
+    )
+  }
+
   // "Mark done for <client>": saves a session for the client like the client's own Done ✓
   // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
   // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
@@ -639,12 +780,24 @@ export default function ClientDetailPage() {
     if (markForm.star_rating > 0 && !isCoach) {
       await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
     }
+    // Weight / reps of the ticked exercises (#80), after the session. If this fails the session stays
+    // saved and the weights can be retried on their own (weightsBanner).
+    let weightsErr = ''
+    if (exerciseLogsOn && day && tickKey && ticked.length && companyId) {
+      const shown = ticked.filter(i => day.exercises[i])
+      const drafts: Record<number, LogDraft> = Object.fromEntries(shown.map(i => [i, draftFor(tickKey, i, day.exercises[i])]))
+      const rows = rowsToSave({ exercises: day.exercises, ticked: shown, drafts, sessionId: session.id, clientId, companyId, loggedBy: user.id, library: exLibrary })
+      weightsErr = await insertWeights(rows)
+      setWeightsRetry(weightsErr ? { key: tickKey, rows, error: weightsErr } : null)
+    }
+    if (tickKey) saveDayDrafts(tickKey, null) // saved with the session now (or kept in weightsRetry)
     setSavingMark(false)
     closeMarkForm()
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
     if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
-    showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
+    if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
+    else showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
     loadData(['sessions'])
   }
 
@@ -2422,6 +2575,7 @@ const handleResetPassword = async () => {
           )
           if (isDone) return (
             <div className="border-t border-gray-800 pt-3">
+              {weightsBanner(key)}
               {sent}
               <button type="button" onClick={() => { setMarkError(''); setMarkAgainKey(key) }}
                 className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Log another session for {day!.day}</button>
@@ -2429,6 +2583,7 @@ const handleResetPassword = async () => {
           )
           return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
+              {weightsBanner(key)}
               {sent}
               {coveringBadge()}
               <button type="button" onClick={() => openMarkForm(key)}
@@ -2534,11 +2689,14 @@ const handleResetPassword = async () => {
                               return (
                                 <li key={i}>
                                   {canTick ? (
-                                    <button type="button" role="checkbox" aria-checked={ticked}
-                                      onClick={() => toggleCoachTick(plan.id, d.day, i)}
-                                      className="w-full min-h-[44px] flex items-start gap-3 text-left px-3 py-2.5">
-                                      {body}
-                                    </button>
+                                    <>
+                                      <button type="button" role="checkbox" aria-checked={ticked}
+                                        onClick={() => toggleCoachTick(plan.id, d.day, i)}
+                                        className="w-full min-h-[44px] flex items-start gap-3 text-left px-3 py-2.5">
+                                        {body}
+                                      </button>
+                                      {ticked && renderWeightRow(`${plan.id}:${d.day}`, i, e)}
+                                    </>
                                   ) : (
                                     <div className="flex items-start gap-3 px-3 py-2">{body}</div>
                                   )}
@@ -2700,6 +2858,14 @@ const handleResetPassword = async () => {
                             })()}
                           </p>
                         )}
+                        {/* Weight / reps per exercise (#80): "Squat 3×10 @ 12 kg" */}
+                        {logsBySession[session.id]?.length ? (
+                          <ul className="mt-1.5 space-y-0.5">
+                            {[...logsBySession[session.id]].sort((a, b) => a.position - b.position).map(l => (
+                              <li key={l.id} className="text-xs text-gray-300">{logLine(l)}</li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
@@ -2806,6 +2972,15 @@ const handleResetPassword = async () => {
             ) : chartData && (
 <ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
+            {/* Weight per exercise (#80): top weight per month, last 6 months */}
+            {exerciseLogsOn && (() => {
+              const thisMonth = localDateIso().slice(0, 7)
+              const months = lastMonths(thisMonth, 6)
+              const progress = monthlyProgress(datedLogs, exLibrary).filter(p => p.months.some(m => m.topWeight && m.month >= months[0]))
+              if (!progress.length) return null
+              return <ExerciseProgressChart progress={progress} months={months} thisMonth={thisMonth}
+                labels={months.map(m => formatDate(`${m}-01`, country ?? 'IN', 'month'))} />
+            })()}
           </div>
         )}
         </>)}
