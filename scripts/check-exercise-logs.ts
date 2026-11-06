@@ -7,7 +7,7 @@ import {
   type DatedLog, parseSets, parseReps, parseWeight, isTimedOrDistance, matchExercise, resolveExerciseId,
   lastLogFor, prefill, stepWeight, numberFromInput, rowsToSave, logDetail, logLine, monthlyProgress,
   changeThisMonth, changeText, lastMonths, topWeightSeries,
-  weekOf, weeklyProgress, changeThisPeriod, lastWeeks, withWeightIn, strengthReport,
+  weekOf, weeklyProgress, changeThisPeriod, lastWeeks, withWeightIn, strengthReport, changeSinceStart, fromFirstWeight,
 } from '../lib/exercise-logs'
 import { withoutCalories } from '../lib/progress-share'
 
@@ -167,21 +167,69 @@ check('with weight in last 3 weeks (plank has none)', withWeightIn(weekly, lastW
 console.log('— PDF: Strength by exercise')
 const rep = strengthReport(logs, library, '2026-11-08')!
 check('table months', rep.months, ['2026-09', '2026-10', '2026-11'])
-check('rows (plank left out: no weight)', rep.rows.map(r => [r.name, r.values, r.change, r.first]),
+check('rows (plank left out: no weight)', rep.rows.map(r => [r.name, r.values, r.sinceStart, r.first]),
   [['Back squat', [null, 45, 50], 11, false], ['Sled Push', [null, 50, 60], 20, false]])
-check('chart = most logged, 6 months', [rep.chart?.name, rep.chart?.data], ['Back squat', [null, null, null, null, 45, 50]])
+check('chart = most logged, from its first month', [rep.chart?.name, rep.chart?.months, rep.chart?.data], ['Back squat', ['2026-10', '2026-11'], [45, 50]])
+check('both start in Oct: header since Oct', rep.since, '2026-10')
 const firstOnly = strengthReport([log({ exercise_name: 'Goblet Squat', session_date: '2026-11-03', weight: 12 })], library, '2026-11-08')!
-check('first month', firstOnly.rows.map(r => [r.name, r.values, r.change, r.first]), [['Goblet Squat', [null, null, 12], null, true]])
+check('first month: New, no trend line', firstOnly.rows.map(r => [r.name, r.values, r.sinceStart, r.first, r.trend]), [['Goblet Squat', [null, null, 12], null, true, null]])
+check('only New rows: no "Since" header', firstOnly.since, null)
 check('one month only: no chart', firstOnly.chart, null)
-check('logs after the report week are left out', strengthReport(logs, library, '2026-10-31')!.rows.map(r => [r.name, r.values, r.change]),
+check('logs after the report week are left out', strengthReport(logs, library, '2026-10-31')!.rows.map(r => [r.name, r.values, r.sinceStart]),
   [['Barbell Back Squat', [null, null, 45], null], ['sled push', [null, null, 50], null]])
 check('nothing to show', strengthReport([], library, '2026-11-08'), null)
 const down = strengthReport([
   log({ exercise_name: 'Squat', session_date: '2026-10-10', weight: 50 }),
   log({ exercise_name: 'Squat', session_date: '2026-11-03', weight: 45 }),
 ], library, '2026-11-08')!
-check('down this month', down.rows[0].change, -10)
-check('no weight this month: no change, not first', [down.rows[0].first, strengthReport([log({ exercise_name: 'Squat', session_date: '2026-10-10', weight: 50 })], library, '2026-11-08')!.rows[0].change], [false, null])
+check('down since start', down.rows[0].sinceStart, -10)
+const octOnly = strengthReport([log({ exercise_name: 'Squat', session_date: '2026-10-10', weight: 50 })], library, '2026-11-08')!.rows[0]
+check('one month with a weight (not this month): New, no change', [octOnly.first, octOnly.sinceStart, octOnly.start], [true, null, '2026-10'])
+
+// Partial current month lighter than last month: compared with the first month, not last month
+const curls = strengthReport([
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-09-05', weight: 5 }),
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-10-05', weight: 6 }),
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-10-20', weight: 7 }),
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-11-03', weight: 5.5 }),
+], library, '2026-11-06')!
+check('light partial month: % vs first month (5 → 5.5), not vs last month (7)', [curls.rows[0].sinceStart, curls.rows[0].first], [10, false])
+check('light partial month: trend Sep → Nov', curls.rows[0].trend, [5, 7, 5.5])
+const curlsNow = monthlyProgress([
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-09-05', weight: 5 }),
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-10-05', weight: 7 }),
+  log({ exercise_name: 'Bicep Curl', session_date: '2026-11-03', weight: 5 }),
+], library)[0]
+check('Oct 7 → Nov 5: −29% vs last month (coach tab), 0% since Sep 5 (PDF)', [changeThisPeriod(curlsNow, '2026-11'), changeSinceStart(curlsNow, lastMonths('2026-11', 6))], [-29, 0])
+
+// Gap months: break in the trend line; leading empty months trimmed
+const gappy = strengthReport([
+  log({ exercise_name: 'Leg Press', session_date: '2026-08-10', weight: 80 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-08-20', weight: 80 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-10-10', weight: 90 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-11-03', weight: 100 }),
+], library, '2026-11-06')!
+check('gap month: trend has a gap', gappy.rows[0].trend, [80, null, 90, 100])
+check('chart starts at the first month with a weight (Aug, not Jun)', [gappy.chart?.months, gappy.chart?.data], [['2026-08', '2026-09', '2026-10', '2026-11'], [80, null, 90, 100]])
+check('since start Aug 80 → Nov 100', [gappy.rows[0].sinceStart, gappy.rows[0].start], [25, '2026-08'])
+const legs = monthlyProgress([log({ exercise_name: 'Leg Press', session_date: '2026-09-10', weight: 80 })], library)[0]
+check('trim leading empty months', fromFirstWeight(legs, lastMonths('2026-11', 6)), ['2026-09', '2026-10', '2026-11'])
+const old = strengthReport([
+  log({ exercise_name: 'Leg Press', session_date: '2026-03-10', weight: 60 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-10-10', weight: 90 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-11-03', weight: 100 }),
+], library, '2026-11-06')!
+check('weights older than 6 months not used', [old.rows[0].start, old.rows[0].sinceStart, old.chart?.months], ['2026-10', 11, ['2026-10', '2026-11']])
+
+// Rows starting in different months: header "Progress" (since = null)
+const mixed = strengthReport([
+  log({ exercise_name: 'Leg Press', session_date: '2026-09-10', weight: 80 }),
+  log({ exercise_name: 'Leg Press', session_date: '2026-11-03', weight: 100 }),
+  log({ exercise_name: 'Bench Press', session_date: '2026-10-10', weight: 30 }),
+  log({ exercise_name: 'Bench Press', session_date: '2026-11-04', weight: 35 }),
+], library, '2026-11-06')!
+check('mixed start months: header Progress', [mixed.since, mixed.rows.map(r => [r.name, r.start, r.sinceStart])],
+  [null, [['Bench Press', '2026-10', 17], ['Leg Press', '2026-09', 25]]])
 
 console.log('— PDF: no calories in the message')
 check('after minutes', withoutCalories('Done 3 of 3\n\n⏱ 180 min · 🔥 about 1,234 kcal (estimate)\n\nGreat week'), 'Done 3 of 3\n\n⏱ 180 min\n\nGreat week')

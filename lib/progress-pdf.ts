@@ -107,6 +107,45 @@ async function chartImage(kind: 'bar' | 'line', labels: string[], data: (number 
   return copy
 }
 
+// Small trend line in a table row: orange line, a dot on the last point, a break where a month has
+// no weight. Scaled between the row's lowest and highest weight (flat line in the middle if equal).
+// `slots` = months in the longest row, so every row uses the same month width and ends at the right edge.
+function sparkline(ctx: CanvasRenderingContext2D, data: (number | null)[], slots: number, x: number, y: number, w: number, h: number) {
+  const vals = data.filter((v): v is number => v != null)
+  if (vals.length < 2) return
+  const lo = Math.min(...vals), hi = Math.max(...vals)
+  const pad = 5
+  const step = (w - 2 * pad) / Math.max(slots - 1, 1)
+  const px = (i: number) => x + w - pad - (data.length - 1 - i) * step
+  const py = (v: number) => (hi === lo ? y + h / 2 : y + h - pad - ((v - lo) / (hi - lo)) * (h - 2 * pad))
+  ctx.save()
+  ctx.strokeStyle = ORANGE
+  ctx.fillStyle = ORANGE
+  ctx.lineWidth = 3
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  let drawing = false
+  data.forEach((v, i) => {
+    if (v == null) { drawing = false; return }
+    if (drawing) ctx.lineTo(px(i), py(v))
+    else { ctx.moveTo(px(i), py(v)); drawing = true }
+  })
+  ctx.stroke()
+  // A point with no neighbour on either side (gaps around it) still shows as a small dot
+  data.forEach((v, i) => {
+    if (v != null && data[i - 1] == null && data[i + 1] == null && i !== data.length - 1) {
+      ctx.beginPath(); ctx.arc(px(i), py(v), 4, 0, Math.PI * 2); ctx.fill()
+    }
+  })
+  let last = data.length - 1
+  while (data[last] == null) last--
+  ctx.beginPath()
+  ctx.arc(px(last), py(data[last]!), 5, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   const pages: HTMLCanvasElement[] = []
   let ctx!: CanvasRenderingContext2D
@@ -216,14 +255,17 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   }
   y += 50 + chartH + 40
 
-  // Strength by exercise (#80): heaviest weight per month, last 3 months, and a chart of the most
-  // logged exercise. Kept together on one page.
+  // Strength by exercise (#80): heaviest weight per month, last 3 months, change since the first
+  // month, a small trend line per row, and a chart of the most logged exercise. Kept together on one page.
   const st = input.strength
   if (st && st.rows.length) {
     const rowH = 50
-    const colW = 140
-    const changeW = 200
-    const nameW = W - 2 * M - colW * st.months.length - changeW
+    const colW = 130
+    const changeW = 160
+    const trendW = 150
+    const nameW = W - 2 * M - colW * st.months.length - changeW - trendW
+    const changeX = W - M - trendW // right edge of the change column
+    const trendSlots = Math.max(...st.rows.map(r => r.trend?.length ?? 0))
     ensure(70 + rowH * (st.rows.length + 1) + 20)
     heading('Strength by exercise')
     ctx.fillStyle = GRAY
@@ -236,7 +278,8 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     ctx.fillText('Exercise', M, y + 30)
     ctx.textAlign = 'right'
     st.months.forEach((m, i) => ctx.fillText(formatDate(`${m}-01`, input.country, 'month'), M + nameW + colW * (i + 1) - 10, y + 30))
-    ctx.fillText('This month', W - M, y + 30)
+    ctx.fillText(st.since ? `Since ${formatDate(`${st.since}-01`, input.country, 'month')}` : 'Progress', changeX, y + 30)
+    ctx.fillText('Trend', W - M, y + 30)
     ctx.textAlign = 'left'
     y += rowH
     ctx.fillStyle = LINE
@@ -251,14 +294,14 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
         ctx.fillStyle = v == null ? GRAY : DARK
         ctx.fillText(v == null ? '—' : weightText(v), M + nameW + colW * (i + 1) - 10, y + 28)
       })
-      const [txt, color] = r.change != null
-        ? [r.change > 0 ? `▲ ${changeText(r.change)}` : r.change < 0 ? `▼ ${changeText(r.change)}` : `= ${changeText(r.change)}`,
-           r.change > 0 ? GREEN : r.change < 0 ? RED : GRAY]
-        : [r.first ? 'first month' : '—', GRAY]
+      const [txt, color] = r.sinceStart != null
+        ? [changeText(r.sinceStart), r.sinceStart > 0 ? GREEN : r.sinceStart < 0 ? RED : GRAY]
+        : [r.first ? 'New' : '—', GRAY]
       ctx.fillStyle = color
-      ctx.font = font(24, r.change != null ? 700 : 400)
-      ctx.fillText(txt, W - M, y + 28)
+      ctx.font = font(24, r.sinceStart != null ? 700 : 400)
+      ctx.fillText(txt, changeX, y + 28)
       ctx.textAlign = 'left'
+      if (r.trend) sparkline(ctx, r.trend, trendSlots, W - M - 120, y + 2, 120, 32)
       y += rowH
       ctx.fillStyle = LINE
       ctx.fillRect(M, y - 8, W - 2 * M, 1)
@@ -269,7 +312,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
       ensure(50 + h + 30)
       ctx.fillStyle = GRAY
       ctx.font = font(22, 600)
-      ctx.fillText(`${st.chart.name.toUpperCase()} · LAST ${st.chart.months.length} MONTHS (KG)`, M, y + 22, W - 2 * M)
+      ctx.fillText(`${st.chart.name.toUpperCase()} · ${st.chart.months.length === 1 ? 'THIS MONTH' : `LAST ${st.chart.months.length} MONTHS`} (KG)`, M, y + 22, W - 2 * M)
       const chartLabels = st.chart.months.map(m => formatDate(`${m}-01`, input.country, 'month'))
       ctx.drawImage(await chartImage('line', chartLabels, st.chart.data, W - 2 * M, h, false), M, y + 50)
       y += 50 + h + 40
