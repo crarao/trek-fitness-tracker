@@ -335,17 +335,39 @@ export function withWeightIn(progress: ExerciseProgress[], periods: string[]): E
 export type StrengthRow = {
   name: string
   values: (number | null)[] // top weight per table month (null = "—")
-  change: number | null     // this month vs the last earlier month with a weight
-  first: boolean            // weight this month and none before: "first month"
+  start: string             // first month with a weight in the chart window ("2026-09")
+  sinceStart: number | null // latest month with a weight vs `start`, whole % (null when `first`)
+  first: boolean            // only one month with a weight in the chart window: "New"
+  trend: (number | null)[] | null // top weight per month from `start` to the report month (null = gap); null under 2 points
 }
 export type StrengthReport = {
   months: string[]          // table months, oldest first ("2026-09", "2026-10", "2026-11")
+  since: string | null      // every row starts in this month: header "Since Sep"; else null ("Progress")
   rows: StrengthRow[]
-  chart: { name: string; months: string[]; data: (number | null)[] } | null
+  chart: { name: string; months: string[]; data: (number | null)[] } | null // months start at its first weight
 }
 
-// Up to `rows` exercises with a weight in the last `months` months (most logged first), and a line
-// chart of the most logged one over `chartMonths` months when it has at least two months to show.
+// Months of `window` from the first one where this exercise has a weight (leading empty months left out)
+export function fromFirstWeight(p: ExerciseProgress, window: string[]): string[] {
+  const i = window.findIndex(m => p.points.some(x => x.period === m && x.topWeight))
+  return i < 0 ? [] : window.slice(i)
+}
+
+// "Since start": top weight in the latest month with a weight vs the first month with a weight, both
+// inside `window`. Not affected by a light, partly done current month the way "vs last month" is.
+// null when there is only one month with a weight (nothing to compare with).
+export function changeSinceStart(p: ExerciseProgress, window: string[]): number | null {
+  const set = new Set(window)
+  const withWeight = p.points.filter(x => set.has(x.period) && x.topWeight)
+  if (withWeight.length < 2) return null
+  const first = withWeight[0].topWeight!, last = withWeight[withWeight.length - 1].topWeight!
+  return Math.round(((last - first) / first) * 100)
+}
+
+// Up to `rows` exercises with a weight in the last `months` months (most logged first), each with its
+// change since its first month and a small trend line over `chartMonths` months, and a line chart of
+// the most logged one when it has at least two months to show. Chart and trend lines start at the
+// exercise's first month with a weight.
 // Only logs up to `upTo` (the report week's last day) count. null when there is nothing to show.
 export function strengthReport(
   logs: DatedLog[], library: Exercise[], upTo: string,
@@ -356,14 +378,19 @@ export function strengthReport(
   const progress = withWeightIn(monthlyProgress(logs.filter(l => l.session_date.slice(0, 10) <= upTo), library), months)
     .slice(0, opts.rows ?? 6)
   if (!progress.length) return null
+  const chartMonths = lastMonths(thisMonth, Math.max(opts.chartMonths ?? 6, months.length))
   const rows = progress.map(p => {
-    const change = changeThisPeriod(p, thisMonth)
-    const hasNow = !!p.points.find(x => x.period === thisMonth)?.topWeight
-    const earlier = p.points.some(x => x.period < thisMonth && x.topWeight)
-    return { name: p.name, values: topWeightSeries(p, months), change, first: hasNow && !earlier }
+    const own = fromFirstWeight(p, chartMonths)
+    const trend = topWeightSeries(p, own)
+    const points = trend.filter(v => v != null).length
+    return {
+      name: p.name, values: topWeightSeries(p, months), start: own[0],
+      sinceStart: changeSinceStart(p, chartMonths), first: points === 1, trend: points >= 2 ? trend : null,
+    }
   })
-  const chartMonths = lastMonths(thisMonth, opts.chartMonths ?? 6)
-  const data = topWeightSeries(progress[0], chartMonths)
-  const chart = data.filter(v => v != null).length >= 2 ? { name: progress[0].name, months: chartMonths, data } : null
-  return { months, rows, chart }
+  const since = rows.some(r => !r.first) && rows.every(r => r.start === rows[0].start) ? rows[0].start : null
+  const chartOwn = fromFirstWeight(progress[0], chartMonths)
+  const data = topWeightSeries(progress[0], chartOwn)
+  const chart = data.filter(v => v != null).length >= 2 ? { name: progress[0].name, months: chartOwn, data } : null
+  return { months, since, rows, chart }
 }
