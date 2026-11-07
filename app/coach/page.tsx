@@ -231,7 +231,10 @@ export default function CoachHomePage() {
           <section className="space-y-2">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today&apos;s batches</h2>
-              <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+              <span className="flex gap-3">
+                <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className="text-xs text-orange-400 hover:text-orange-300">All of today →</button>
+                <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+              </span>
             </div>
             {todaysBatches.length === 0 ? (
               <p className="text-sm text-gray-500 bg-gray-900 border border-gray-800 rounded-2xl px-4 py-3">No batches today.</p>

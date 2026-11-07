@@ -1602,7 +1602,10 @@ export default function CompanyAdminPage() {
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3 mb-2">
               <p className="text-xs text-gray-500 uppercase tracking-wider">Attendance <span className="normal-case text-gray-600">· {formatDate(new Date(), country, 'weekday')}</span></p>
-              <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+              <span className="flex gap-3">
+                <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className="text-xs text-orange-400 hover:text-orange-300">All of today →</button>
+                <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+              </span>
             </div>
             {todaysBatches.length === 0 ? <p className="text-sm text-gray-500">No batches today.</p> : (
               <div className="flex flex-wrap gap-2">
