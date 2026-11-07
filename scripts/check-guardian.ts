@@ -3,7 +3,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-guardian.ts --outDir /tmp/cg --module commonjs --target es2020 --skipLibCheck && node /tmp/cg/scripts/check-guardian.js
 
-import { reminderText, reminderRecipient, hasGuardian, feeReminder } from '../lib/guardian'
+import { reminderText, reminderRecipient, hasGuardian, feeReminder, upiProblem, cleanUpiId } from '../lib/guardian'
 import { memberWord, isDojo, staffWord, ptWord } from '../lib/labels'
 import { generatedStudentLogin, isGeneratedLogin, isPhoneLogin, isNoLogin } from '../lib/phone'
 
@@ -93,6 +93,10 @@ check('overdue → hidden', '', feeReminder({ ...feeBase, daysLeft: -1 }) === nu
 check('no parent phone → hidden (no fallback to student)', '', feeReminder({ ...feeBase, student: { ...stu, guardian_phone: null } }) === null)
 check('invalid parent phone → hidden', '', feeReminder({ ...feeBase, student: { ...stu, guardian_phone: '123' } }) === null)
 check('no amount → hidden', '', feeReminder({ ...feeBase, amount: 0 }) === null)
+
+check('UPI ok: demodojo@okicici, demo.dojo-1@ybl, empty', '', !upiProblem('demodojo@okicici') && !upiProblem('demo.dojo-1@ybl') && !upiProblem(''))
+check('UPI refused: abc, a@b, x@y.com, @okicici', '', !!upiProblem('abc') && !!upiProblem('a@b') && !!upiProblem('x@y.com') && !!upiProblem('@okicici'))
+check('cleanUpiId removes spaces', cleanUpiId(' demo dojo@upi '), cleanUpiId(' demo dojo@upi ') === 'demodojo@upi')
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)

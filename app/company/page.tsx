@@ -115,6 +115,8 @@ export default function CompanyAdminPage() {
   const [loading, setLoading] = useState(true)
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
+  // companies.upi_id (super admin sets it): adds the UPI lines to the dojo fee reminder
+  const [upiId, setUpiId] = useState('')
   // Individual coach company (company_type = 'coach'): no coaches, coach assignment or "logged by" names
   const [coachCompany, setCoachCompany] = useState(false)
   // companies.business_type (super admin): martial_arts = a dojo, "Students" instead of "Members" (lib/labels.ts)
@@ -257,10 +259,12 @@ export default function CompanyAdminPage() {
       company_type?: string | null
       business_type?: string | null
       multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null // db/2026-11-01-multi-country.md
+      upi_id?: string | null // db/2026-11-07-upi-id.md
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
     setCompanyName(company?.name || '')
+    setUpiId(company?.upi_id || '')
     setCoachCompany(isCoachCompany(company))
     setBusinessType(company?.business_type ?? null)
     if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
@@ -1978,7 +1982,7 @@ export default function CompanyAdminPage() {
                   // (lib/guardian.ts feeReminder). Otherwise the row keeps its usual Remind / Follow Up / View button.
                   const fee = dojo && status === 'expiring' && m
                     ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
-                        currency: m.currency || currency, dojoName: companyName, country })
+                        currency: m.currency || currency, dojoName: companyName, country, upiId })
                     : null
 
                   const handleAction = () => {

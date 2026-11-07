@@ -104,3 +104,14 @@ export function feeReminder(opts: {
   ]
   return { waDigits: to, text: lines.join('\n') }
 }
+
+// UPI ID of the gym (companies.upi_id, db/2026-11-07-upi-id.md), e.g. demodojo@okicici. Same shape as the DB check:
+// 2–256 letters / digits / . _ - before the @, 2–64 letters / digits after it. Spaces are removed, case kept.
+export function cleanUpiId(raw: string | null | undefined): string {
+  return (raw || '').replace(/\s+/g, '')
+}
+export function upiProblem(raw: string | null | undefined): string {
+  const v = cleanUpiId(raw)
+  if (!v) return ''
+  return /^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9]{2,64}$/.test(v) ? '' : 'UPI ID looks like name@bank, e.g. demodojo@okicici'
+}
