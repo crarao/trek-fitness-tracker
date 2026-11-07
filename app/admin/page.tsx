@@ -11,6 +11,7 @@ import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricin
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel, isDojo } from '@/lib/labels'
 import BranchesEditor from '@/app/branches-editor'
+import { cleanUpiId, upiProblem } from '@/lib/guardian'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
@@ -48,6 +49,7 @@ type Company = {
   banner_url?: string | null
   banner_has_branding?: boolean | null // banner already has the gym's name / logo (absent before db/2026-10-31-banner-branding.md)
   business_type?: string | null
+  upi_id?: string | null   // dojo fee reminders (absent before db/2026-11-07-upi-id.md)
 }
 
 type ContactRequest = {
@@ -503,6 +505,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         }
       }
     }
+    const upiError = 'upi_id' in editingCompany ? upiProblem(editingCompany.upi_id) : ''
+    if (upiError) { showToast(upiError, 'error'); return }
     setSavingCompany(true)
     const editBaseCurrency = normalizeCurrency(editingCompany.currency || currencyForCountry(normalizeCountry(editingCompany.country)))
     const { error } = await supabase
@@ -540,6 +544,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         ...(editingCompany.business_type !== companies.find(c => c.id === editingCompany.id)?.business_type
           ? { business_type: businessType(editingCompany.business_type) } : {}),
         slug: slug || null,
+        // Only once the upi_id column exists (db/2026-11-07-upi-id.md)
+        ...('upi_id' in editingCompany ? { upi_id: cleanUpiId(editingCompany.upi_id) || null } : {}),
       })
       .eq('id', editingCompany.id)
     setSavingCompany(false)
@@ -1281,6 +1287,21 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                             </div>
                           )
                         })()}
+
+                        {/* UPI ID: added to the dojo fee reminder (lib/guardian.ts feeReminder) */}
+                        <div>
+                          <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">UPI ID <span className="normal-case text-gray-600">— shown in fee reminders to parents</span></label>
+                          <input type="text" placeholder="e.g. demodojo@okicici" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                            value={editingCompany.upi_id || ''}
+                            disabled={!('upi_id' in editingCompany)}
+                            onChange={e => setEditingCompany({ ...editingCompany, upi_id: cleanUpiId(e.target.value) })}
+                            className={`w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border text-sm disabled:opacity-50 ${upiProblem(editingCompany.upi_id) ? 'border-red-500' : 'border-gray-700'}`} />
+                          {!('upi_id' in editingCompany)
+                            ? <p className="text-xs text-gray-600 mt-1">Run db/2026-11-07-upi-id.md first.</p>
+                            : upiProblem(editingCompany.upi_id)
+                            ? <p className="text-xs text-red-400 mt-1">{upiProblem(editingCompany.upi_id)}</p>
+                            : <p className="text-xs text-gray-500 mt-1">Empty = the reminder has no UPI lines.</p>}
+                        </div>
 
                         {/* Logo + banner, with a preview of the phone login */}
                         <div>
