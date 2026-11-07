@@ -122,7 +122,10 @@ export default function AttendanceMonthPage() {
             {/* Today's batches: open the roll call */}
             {month >= monthRange(today).from && (
               <section className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Today&apos;s batches</p>
+                <div className="flex items-baseline justify-between gap-3 mb-2">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Today&apos;s batches</p>
+                  <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className="text-xs text-orange-400 hover:text-orange-300">All of today →</button>
+                </div>
                 {todays.length === 0 ? <p className="text-sm text-gray-500">No batches today.</p> : (
                   <div className="flex flex-wrap gap-2">
                     {todays.map(b => (

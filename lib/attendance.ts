@@ -172,3 +172,64 @@ export function buildAttendanceMessage(opts: {
   const toLabel = to.toParent ? (relation && name ? `${relation} (${name})` : relation || name || 'Parent') : client.full_name
   return { text: out.join('\n'), toPhone: to.phone, toLabel }
 }
+
+// ── One shared view of the day (attendance across every batch) ──────────────────────────────────────────────
+// A student may come to two classes on one day (exam week, an extra class), so a second mark is allowed, but the
+// screens warn: "Already came today · Kids 5 PM · by Sensei Ravi". No database rule blocks it.
+
+// The student's present rows on this date in batches other than this one
+export function cameElsewhere(rows: AttendanceRow[], profileId: string, batchId: string, date: string): AttendanceRow[] {
+  return rows.filter(r => r.present && r.profile_id === profileId && r.class_date === date && r.batch_id !== batchId)
+}
+
+// "Kids 5 PM · by Sensei Ravi" for each other batch the student came to (batch names / who marked it, when known)
+export function elsewhereText(
+  others: AttendanceRow[],
+  batchName: (id: string) => string,
+  markedByName: (id: string | null | undefined) => string,
+): string {
+  return others.map(r => [batchName(r.batch_id), markedByName(r.marked_by) ? `by ${markedByName(r.marked_by)}` : ''].filter(Boolean).join(' · ')).join('; ')
+}
+
+export type DayEntry = {
+  student: RosterStudent
+  present: boolean
+  dropIn: boolean              // came, but this isn't their home batch
+  markedBy: string | null      // who marked this batch's row
+  elsewhere: AttendanceRow[]   // present in other batches the same day
+}
+
+// Every batch on the day, each with its home students and the drop-ins who came. Batches that don't usually meet
+// that day still show when someone was marked in them (an extra class). A student who came to two batches shows in
+// both, with `elsewhere` filled in. `came` counts each student once; `twice` = students marked in 2+ batches.
+export function dayBoard<B extends Pick<Batch, 'id' | 'days' | 'is_archived' | 'name' | 'start_time'>>(opts: {
+  date: string
+  batches: B[]
+  students: RosterStudent[]
+  rows: AttendanceRow[]
+}): { groups: { batch: B; entries: DayEntry[]; came: number; extra: boolean }[]; came: number; twice: number } {
+  const day = opts.rows.filter(r => r.class_date === opts.date)
+  const present = day.filter(r => r.present)
+  const meeting = new Set(batchesOn(opts.batches, opts.date).map(b => b.id))
+  const used = new Set(present.map(r => r.batch_id))
+  const shown = sortBatches(opts.batches.filter(b => meeting.has(b.id) || used.has(b.id)))
+  const active = opts.students.filter(s => !s.archived_at)
+  const groups = shown.map(batch => {
+    const here = day.filter(r => r.batch_id === batch.id)
+    const ro = roster({ batchId: batch.id, date: opts.date, students: active, rows: here })
+    const entry = (student: RosterStudent, isPresent: boolean, dropIn: boolean): DayEntry => ({
+      student, present: isPresent, dropIn,
+      markedBy: here.find(r => r.profile_id === student.id)?.marked_by ?? null,
+      elsewhere: cameElsewhere(present, student.id, batch.id, opts.date),
+    })
+    const entries = [...ro.home.map(h => entry(h.student, h.present, false)), ...ro.dropIns.map(s => entry(s, true, true))]
+    return { batch, entries, came: ro.came, extra: !meeting.has(batch.id) }
+  })
+  const activeIds = new Set(active.map(s => s.id))
+  const perStudent = new Map<string, Set<string>>()
+  for (const r of present) {
+    if (!activeIds.has(r.profile_id) || !shown.some(b => b.id === r.batch_id)) continue
+    perStudent.set(r.profile_id, (perStudent.get(r.profile_id) || new Set()).add(r.batch_id))
+  }
+  return { groups, came: perStudent.size, twice: [...perStudent.values()].filter(s => s.size > 1).length }
+}

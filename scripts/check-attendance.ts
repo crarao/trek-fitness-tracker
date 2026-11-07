@@ -2,7 +2,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-attendance.ts --outDir /tmp/ca --module commonjs --target es2020 --skipLibCheck && node /tmp/ca/scripts/check-attendance.js
 
-import { weekdayOf, batchesOn, scheduledDates, roster, tapRow, monthStats, statsText, buildAttendanceMessage, type AttendanceRow } from '../lib/attendance'
+import { weekdayOf, batchesOn, scheduledDates, roster, tapRow, monthStats, statsText, buildAttendanceMessage, cameElsewhere, elsewhereText, dayBoard, type AttendanceRow } from '../lib/attendance'
 
 let failed = 0
 const check = (label: string, value: unknown, expected: unknown) => {
@@ -77,6 +77,28 @@ console.log(noParent.text.split('\n').map(l => '      ' + l).join('\n'))
 const lastMonthMsg = buildAttendanceMessage({ client: { full_name: 'Sam Carter', phone: '+14155550134' }, companyName: 'Peak Dojo', rows: [], homeBatch: seniors, today, month: '2026-10-10', country: 'US' })
 check('past month, none: says the month', lastMonthMsg.text.includes('No classes attended in October.'), true)
 check('no parent → student, none yet', [noParent.toPhone, noParent.text.includes('We hope to see you soon!')], ['14155550134', true])
+
+console.log('\n6. the whole day: came elsewhere + dayBoard')
+// Thursday: Kids (17:00) and Seniors (19:00) meet. Diya (home Seniors) came to Kids too; Ishan (home Juniors) dropped in to Seniors
+const dayRows: AttendanceRow[] = [
+  { ...r('c', 'k', today, true, true), marked_by: 'ravi' },
+  { ...r('c', 's', today), marked_by: 'anu' },
+  r('a', 's', today, true, true),
+  r('b', 's', today, false),
+  r('c', 'j', '2026-11-11'),
+]
+check('Diya came elsewhere (seen from Seniors)', cameElsewhere(dayRows, 'c', 's', today).map(x => x.batch_id), ['k'])
+check('untapped / other days not counted', cameElsewhere(dayRows, 'b', 'k', today), [])
+check('warning text', elsewhereText(cameElsewhere(dayRows, 'c', 's', today), id => id === 'k' ? 'Kids 5 PM' : id, id => id === 'ravi' ? 'Sensei Ravi' : ''), 'Kids 5 PM · by Sensei Ravi')
+check('warning text, marker unknown', elsewhereText(cameElsewhere(dayRows, 'c', 'k', today), () => 'Seniors 7 PM', () => ''), 'Seniors 7 PM')
+const board = dayBoard({ date: today, batches: [juniors, seniors, kids, old], students, rows: dayRows })
+check('groups: today\'s batches by time', board.groups.map(g => g.batch.name), ['Kids', 'Seniors'])
+check('Seniors: home + drop-in', board.groups[1].entries.map(e => `${e.student.full_name}:${e.present}:${e.dropIn}`), ['Diya Shah:true:false', 'Ishan Rao:true:true'])
+check('Diya in Seniors warns about Kids', board.groups[1].entries[0].elsewhere.map(x => x.batch_id), ['k'])
+check('marked by kept', board.groups[1].entries[0].markedBy, 'anu')
+check('came counts each student once', [board.came, board.twice], [2, 1])
+const extra = dayBoard({ date: today, batches: [juniors, seniors], students, rows: [r('a', 'j', today)] })
+check('extra class on a non-class day shows', extra.groups.map(g => `${g.batch.name}:${g.extra}`), ['Juniors:true', 'Seniors:false'])
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
