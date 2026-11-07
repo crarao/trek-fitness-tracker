@@ -16,7 +16,7 @@ import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type Lead
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
-import { GUARDIAN_RELATIONS, reminderRecipient, reminderText } from '@/lib/guardian'
+import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
 
@@ -1974,7 +1974,18 @@ export default function CompanyAdminPage() {
                     none:     { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
                   }[status]
 
+                  // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
+                  // (lib/guardian.ts feeReminder). Otherwise the row keeps its usual Remind / Follow Up / View button.
+                  const fee = dojo && status === 'expiring' && m
+                    ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
+                        currency: m.currency || currency, dojoName: companyName, country })
+                    : null
+
                   const handleAction = () => {
+                    if (fee) {
+                      window.open(`https://wa.me/${fee.waDigits}?text=${encodeURIComponent(fee.text)}`, '_blank')
+                      return
+                    }
                     // To the parent when a valid parent phone is set, else the member (lib/guardian.ts). Country code + number
                     // for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts). No parent: as always.
                     const to = reminderRecipient(client, country)
@@ -2103,8 +2114,8 @@ export default function CompanyAdminPage() {
                         ) : (
                           <button
                             onClick={handleAction}
-                            className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${actionStyle.cls}`}>
-                            {actionStyle.label}
+                            className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${fee ? 'border-green-700 text-green-400 hover:bg-green-900/30' : actionStyle.cls}`}>
+                            {fee ? 'Send reminder' : actionStyle.label}
                           </button>
                         )}
                       </td>

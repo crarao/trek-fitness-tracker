@@ -7,6 +7,7 @@
 
 import { type Country, formatDate } from './locale'
 import { splitE164, waDigits as toWaDigits } from './phone'
+import { formatMoney } from './currency'
 
 export type GuardianFields = {
   full_name?: string | null
@@ -66,4 +67,40 @@ export function reminderText(opts: {
   return opts.status === 'expiring'
     ? `Hi ${memberFirst}, your membership at ${companyName} expires on ${date}. Renew now to keep going! ${emoji}`
     : `Hi ${memberFirst}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! ${emoji}`
+}
+
+// Fee reminder to a dojo student's parent (owner / partner dashboard "Send reminder" button).
+// Shown only when: the gym is a dojo, the fee is due today or within the next 7 days (not overdue),
+// the parent phone is a WhatsApp number (no fallback to the student's own phone) and an amount is saved.
+// Returns null when the button should be hidden. No UPI ID column exists yet: pass upiId once it does,
+// then the two UPI lines appear; without it they are left out.
+export const FEE_REMINDER_DAYS = 7
+
+export function feeReminder(opts: {
+  student: GuardianFields
+  dueDate: string | null | undefined   // 'YYYY-MM-DD' (latest membership end date)
+  daysLeft: number | null              // days from today to dueDate (0 = today, negative = overdue)
+  amount: number | null | undefined
+  currency: string | null | undefined
+  dojoName: string
+  country: Country | null
+  upiId?: string | null
+}): { waDigits: string; text: string } | null {
+  const { student, dueDate, daysLeft, amount } = opts
+  if (!dueDate || daysLeft == null || daysLeft < 0 || daysLeft > FEE_REMINDER_DAYS) return null
+  if (!amount || amount <= 0) return null
+  const to = toWaDigits(student.guardian_phone, opts.country)
+  if (!to) return null
+  const parent = (student.guardian_name || '').trim().split(/\s+/)[0] || 'Parent'
+  const name = (student.full_name || '').trim().replace(/\s+/g, ' ')
+  const upi = (opts.upiId || '').trim()
+  const lines = [
+    `Namaste ${parent} 🙏`,
+    '',
+    `A gentle reminder from *${opts.dojoName.trim()}*: ${name}'s fee of *${formatMoney(amount, opts.currency || 'INR')}* is due on *${formatDate(dueDate, opts.country ?? 'IN', 'medium')}*.`,
+    '',
+    ...(upi ? [`Pay via UPI: *${upi}*`, `Please add "${name}" in the payment note.`, ''] : []),
+    'If already paid, please ignore. Thank you! 🥋',
+  ]
+  return { waDigits: to, text: lines.join('\n') }
 }

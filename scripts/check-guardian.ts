@@ -3,7 +3,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-guardian.ts --outDir /tmp/cg --module commonjs --target es2020 --skipLibCheck && node /tmp/cg/scripts/check-guardian.js
 
-import { reminderText, reminderRecipient, hasGuardian } from '../lib/guardian'
+import { reminderText, reminderRecipient, hasGuardian, feeReminder } from '../lib/guardian'
 import { memberWord, isDojo, staffWord, ptWord } from '../lib/labels'
 import { generatedStudentLogin, isGeneratedLogin, isPhoneLogin, isNoLogin } from '../lib/phone'
 
@@ -72,6 +72,27 @@ for (const [bt, one, many, pt] of [['martial_arts', 'Sensei', 'Senseis', 'studen
   const w = staffWord(bt)
   check(`staffWord(${bt}) / ptWord`, [w, ptWord(bt)], w.one === one && w.many === many && ptWord(bt) === pt)
 }
+
+console.log('\n6. feeReminder (dojo "Send reminder", due within 7 days)')
+const stu = { full_name: 'Aarav  Reddy', phone: '+919123456789', guardian_name: 'Priya Reddy', guardian_phone: '+919876543210' }
+const feeBase = { student: stu, dueDate: '2026-11-15', daysLeft: 3, amount: 1500, currency: 'INR', dojoName: 'Demo Dojo', country: 'IN' as const }
+const f1 = feeReminder(feeBase)
+console.log(`   message (no UPI ID):\n${f1?.text}`)
+check('exact message, no UPI lines', f1, f1?.waDigits === '919876543210' && f1.text === [
+  'Namaste Priya 🙏', '',
+  "A gentle reminder from *Demo Dojo*: Aarav Reddy's fee of *₹1,500* is due on *15 Nov 2026*.", '',
+  'If already paid, please ignore. Thank you! 🥋'].join('\n'))
+const f2 = feeReminder({ ...feeBase, upiId: 'demodojo@upi' })
+check('with UPI ID → two UPI lines', f2?.text, !!f2?.text.includes('Pay via UPI: *demodojo@upi*\nPlease add "Aarav Reddy" in the payment note.\n\nIf already paid'))
+check('no parent name → "Parent"', '', !!feeReminder({ ...feeBase, student: { ...stu, guardian_name: '' } })?.text.startsWith('Namaste Parent 🙏'))
+check('Indian grouping 1,25,000', '', !!feeReminder({ ...feeBase, amount: 125000 })?.text.includes('*₹1,25,000*'))
+check('due today (0) → shown', '', feeReminder({ ...feeBase, daysLeft: 0 }) !== null)
+check('due in 7 days → shown', '', feeReminder({ ...feeBase, daysLeft: 7 }) !== null)
+check('due in 8 days → hidden', '', feeReminder({ ...feeBase, daysLeft: 8 }) === null)
+check('overdue → hidden', '', feeReminder({ ...feeBase, daysLeft: -1 }) === null)
+check('no parent phone → hidden (no fallback to student)', '', feeReminder({ ...feeBase, student: { ...stu, guardian_phone: null } }) === null)
+check('invalid parent phone → hidden', '', feeReminder({ ...feeBase, student: { ...stu, guardian_phone: '123' } }) === null)
+check('no amount → hidden', '', feeReminder({ ...feeBase, amount: 0 }) === null)
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
