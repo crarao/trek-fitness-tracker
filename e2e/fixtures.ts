@@ -120,21 +120,37 @@ export const ROLE_HOME: Record<Role, string> = {
 export type Login = { id: string; password: string }
 
 // QA_LOGINS = JSON: { "gymOwner": { "id": "<phone or email>", "password": "..." }, "gymCoach": {...}, ... }
+// Also accepted per role: "phone" / "email" / "identifier" / "login" / "username" for the id, "pass" / "pw" for the
+// password, or a pair ["<id>", "<password>"].
+const ID_KEYS = ['id', 'identifier', 'phone', 'email', 'login', 'username', 'user']
+const PASSWORD_KEYS = ['password', 'pass', 'pw']
+
 export function qaLogin(role: Role): Login {
   const raw = process.env.QA_LOGINS
   if (!raw) throw new Error('QA_LOGINS is not set. Put it in .env.e2e locally, or the QA_LOGINS secret in GitHub Actions.')
-  let all: Record<string, Partial<Login> & { identifier?: string }>
+  let all: Record<string, unknown>
   try {
     all = JSON.parse(raw)
   } catch {
-    throw new Error('QA_LOGINS is not valid JSON. Expected {"gymOwner":{"id":"…","password":"…"}, …}')
+    throw new Error('QA_LOGINS is not valid JSON (one line, straight quotes). Expected {"gymOwner":{"id":"…","password":"…"}, …}')
   }
   const entry = all[role]
-  const id = entry?.id ?? entry?.identifier
-  if (!entry || !id || !entry.password) {
-    throw new Error(`QA_LOGINS has no "${role}" login (needs "id" and "password"). Roles found: ${Object.keys(all).join(', ') || 'none'}`)
+  if (entry == null) {
+    throw new Error(`QA_LOGINS has no "${role}" login. Roles found: ${Object.keys(all).join(', ') || 'none'}`)
   }
-  return { id: String(id), password: String(entry.password) }
+  if (Array.isArray(entry) && entry.length >= 2 && entry[0] && entry[1]) {
+    return { id: String(entry[0]), password: String(entry[1]) }
+  }
+  const obj = (typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+  const pick = (keys: string[]) => keys.map(k => obj[k]).find(v => v != null && String(v).trim() !== '')
+  const id = pick(ID_KEYS)
+  const password = pick(PASSWORD_KEYS)
+  if (!id || !password) {
+    // Field names only, never values
+    throw new Error(`QA_LOGINS "${role}" needs an id (${ID_KEYS.join(' / ')}) and a password (${PASSWORD_KEYS.join(' / ')}). ` +
+      `Fields found: ${Object.keys(obj).join(', ') || 'none'}`)
+  }
+  return { id: String(id).trim(), password: String(password) }
 }
 
 // Fill the login form on whatever /login page is open and press Sign In
