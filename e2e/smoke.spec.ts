@@ -25,7 +25,7 @@ test.describe('@smoke', () => {
 
     test('S3 wrong password @smoke', async ({ page }) => {
       const { id } = qaLogin('gymOwner')
-      await page.goto(gymUrl('qa-gym', '/login'))
+      await page.goto(gymUrl('qagym', '/login'))
       await submitLogin(page, id, `wrong-${Date.now()}`)
       await expect(page.getByTestId('login-error')).toBeVisible()
       expect(new URL(page.url()).pathname).toBe('/login')
@@ -38,7 +38,7 @@ test.describe('@smoke', () => {
   })
 
   test('S5 branded login @smoke', async ({ page }) => {
-    await page.goto(gymUrl('qa-gym', '/login'))
+    await page.goto(gymUrl('qagym', '/login'))
     await expect(page.getByRole('heading', { name: 'QA Gym' }).first()).toBeVisible()
   })
 
@@ -57,11 +57,11 @@ test.describe('@smoke', () => {
 
   test('S8 owner pages @smoke', async ({ page }) => {
     await loginAs(page, 'gymOwner')
-    await page.goto(gymUrl('qa-gym', '/company/leads'))
+    await page.goto(gymUrl('qagym', '/company/leads'))
     // The list opens on "Due"; the seeded lead may not have a follow-up today, so look at all open leads
     await page.getByTestId('leads-filter-open').click()
     await expect(page.getByTestId('page-leads')).toContainText('QA Lead')
-    await page.goto(gymUrl('qa-gym', '/company/today'))
+    await page.goto(gymUrl('qagym', '/company/today'))
     await expect(page.getByTestId('page-today')).toBeVisible()
   })
 
@@ -73,7 +73,7 @@ test.describe('@smoke', () => {
   test('S10 coach home + role guard @smoke', async ({ page }) => {
     await loginAs(page, 'gymCoach')
     await expect(page.getByTestId('page-coach')).toBeVisible()
-    await page.goto(gymUrl('qa-gym', '/company'))
+    await page.goto(gymUrl('qagym', '/company'))
     await page.waitForURL(url => url.pathname === '/coach')
     await expect(page.getByTestId('page-coach')).toBeVisible()
   })
@@ -106,9 +106,9 @@ test.describe('@smoke', () => {
     await expect(page.getByTestId('page-company')).toBeVisible()
     await expect(page.getByText(/\bStudents\b/).filter({ visible: true }).first()).toBeVisible()
     await expect(page.locator(member('QA Student'))).toBeVisible()
-    await page.goto(gymUrl('qa-dojo', '/company/batches'))
+    await page.goto(gymUrl('qadojo', '/company/batches'))
     await expect(page.getByTestId('page-batches')).toContainText('QA Daily')
-    await page.goto(gymUrl('qa-dojo', '/company/attendance/today'))
+    await page.goto(gymUrl('qadojo', '/company/attendance/today'))
     await expect(page.getByTestId('page-attendance-today')).toBeVisible()
   })
 
@@ -118,9 +118,9 @@ test.describe('@smoke', () => {
   })
 
   test('S15 wrong gym address @smoke', async ({ page }) => {
-    // The solo owner's login is real, but not for qa-gym's address: refused and signed out
+    // The solo owner's login is real, but not for qagym's address: refused and signed out
     const { id, password } = qaLogin('soloOwner')
-    await page.goto(gymUrl('qa-gym', '/login'))
+    await page.goto(gymUrl('qagym', '/login'))
     await submitLogin(page, id, password)
     await expect(page.getByTestId('login-error')).toBeVisible()
     expect(new URL(page.url()).pathname).not.toBe('/company')

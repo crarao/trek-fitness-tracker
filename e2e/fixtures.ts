@@ -94,8 +94,8 @@ export function rootHost(): string {
   return baseUrl().host.replace(/^www\./, '')
 }
 
-// A gym's own address: gymUrl('qa-gym', '/login') → https://qa-gym.getcoachboard.com/login
-// (locally http://qa-gym.localhost:3000/login, which lib/tenant.ts reads the same way)
+// A gym's own address: gymUrl('qagym', '/login') → https://qagym.getcoachboard.com/login
+// (locally http://qagym.localhost:3000/login, which lib/tenant.ts reads the same way)
 export function gymUrl(slug: string, path = '/'): string {
   const u = baseUrl()
   return `${u.protocol}//${slug}.${rootHost()}${path}`
@@ -106,9 +106,9 @@ export function gymUrl(slug: string, path = '/'): string {
 export type Role = 'gymOwner' | 'gymPartner' | 'gymCoach' | 'soloOwner' | 'dojoOwner' | 'dojoSensei'
 
 export const ROLE_GYM: Record<Role, string> = {
-  gymOwner: 'qa-gym', gymPartner: 'qa-gym', gymCoach: 'qa-gym',
-  soloOwner: 'qa-solo',
-  dojoOwner: 'qa-dojo', dojoSensei: 'qa-dojo',
+  gymOwner: 'qagym', gymPartner: 'qagym', gymCoach: 'qagym',
+  soloOwner: 'qasolo',
+  dojoOwner: 'qadojo', dojoSensei: 'qadojo',
 }
 
 export const ROLE_HOME: Record<Role, string> = {
