@@ -6,7 +6,14 @@ import { defineConfig, devices } from '@playwright/test'
 import dotenv from 'dotenv'
 
 const envFile = path.join(__dirname, '.env.e2e')
+// A value already set in the shell wins over .env.e2e (dotenv never overrides), so say which one is used
+const fromShell = process.env.E2E_BASE_URL
 if (fs.existsSync(envFile)) dotenv.config({ path: envFile, quiet: true })
+if (!process.env.TEST_WORKER_INDEX) {
+  const source = fromShell ? 'set in this shell / CI (overrides .env.e2e)'
+    : fs.existsSync(envFile) ? '.env.e2e' : 'not set anywhere'
+  console.log(`Smoke tests against: ${process.env.E2E_BASE_URL || '(none)'}  [${source}]`)
+}
 
 const CI = !!process.env.CI
 
