@@ -45,3 +45,8 @@ Reference Files/
 
 # personal Claude Code settings (stay on each machine)
 .claude/settings.local.json
+
+# Playwright smoke tests (reports and failure screenshots / videos / traces)
+/playwright-report/
+/test-results/
+/blob-report/

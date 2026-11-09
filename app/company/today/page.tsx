@@ -218,7 +218,7 @@ function TodaySchedule() {
         ) : problem ? (
           <p className="text-sm text-gray-300 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">{problem}</p>
         ) : (
-          <>
+          <div data-testid="page-today" className="space-y-4">
             {/* Summary */}
             <div className="grid grid-cols-3 gap-2">
               {([
@@ -276,7 +276,7 @@ function TodaySchedule() {
                 <ul className="space-y-1.5">{noTime.map(r => row(r, false, r.reason === 'no-plan' ? 'No plan this week' : r.workoutTime ? `Time "${r.workoutTime}" not readable` : 'No workout time on plan'))}</ul>
               </section>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

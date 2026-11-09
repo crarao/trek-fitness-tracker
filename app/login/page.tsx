@@ -259,6 +259,7 @@ function LoginForm() {
                     className="rounded-xl focus:ring-orange-500 py-3" />
                 )}
                 <input
+                  data-testid="login-identifier"
                   type="text"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
@@ -273,6 +274,7 @@ function LoginForm() {
               <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Password</label>
               <div className="relative">
                 <input
+                  data-testid="login-password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -291,12 +293,13 @@ function LoginForm() {
             </div>
 
             {shownError && (
-              <div className="bg-red-950 border border-red-800 rounded-xl px-4 py-3">
+              <div data-testid="login-error" className="bg-red-950 border border-red-800 rounded-xl px-4 py-3">
                 <p className="text-red-400 text-sm">{shownError}</p>
               </div>
             )}
 
             <button
+              data-testid="login-submit"
               onClick={handleLogin}
               disabled={loading}
               className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm">

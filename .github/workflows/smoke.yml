@@ -1,0 +1,45 @@
+# Smoke tests against production (CLAUDE.md → Smoke tests). Read-only: the fixture blocks every write.
+name: Smoke tests
+
+on:
+  # Vercel posts a deployment status after each deploy; run only for a successful Production deploy
+  deployment_status:
+  # Daily 07:30 IST: catches breaks from Supabase-side changes (SQL / RLS) that aren't deploys
+  schedule:
+    - cron: '0 2 * * *'
+  # By hand from the Actions tab or the GitHub app
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: npx playwright test
+        env:
+          E2E_BASE_URL: https://www.getcoachboard.com
+          QA_LOGINS: ${{ secrets.QA_LOGINS }}
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

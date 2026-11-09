@@ -211,7 +211,7 @@ export default function CoachHomePage() {
   const coachLine = (r: TodayRow) => (r.primaryCoach === 'You' ? 'You' : r.primaryCoach ? `Primary: ${r.primaryCoach}` : `No primary ${sw.one.toLowerCase()}`)
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div data-testid="page-coach" className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-800 px-4 py-4">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">

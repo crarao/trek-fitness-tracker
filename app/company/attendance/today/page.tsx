@@ -200,7 +200,7 @@ function TodayAttendance() {
         ) : problem ? (
           <p className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">{problem}</p>
         ) : (
-          <>
+          <div data-testid="page-attendance-today" className="space-y-4">
             {activeBranches.length > 1 && (
               <div className="flex gap-1.5 flex-wrap">
                 {[{ id: 'all', name: 'All branches' }, ...activeBranches].map(b => (
@@ -270,7 +270,7 @@ function TodayAttendance() {
                 )}
               </section>
             ))}
-          </>
+          </div>
         )}
       </div>
     </div>

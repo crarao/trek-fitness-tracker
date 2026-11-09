@@ -1725,7 +1725,7 @@ const handleResetPassword = async () => {
   )
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div data-testid="page-client" className="min-h-screen bg-gray-950 text-white">
       {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
       {newPlanSheetOpen && client && (() => {
         const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'
