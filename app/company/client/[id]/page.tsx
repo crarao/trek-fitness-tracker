@@ -5,7 +5,8 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint } from '@/lib/phone'
+import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint, usernameOf, isPhoneLogin } from '@/lib/phone'
+import UsernameField, { type UsernameStatus } from '@/app/username-field'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, monthStats, statsText, monthRange, addDays, batchesOn as batchesMeetingOn, tapRow, buildAttendanceMessage } from '@/lib/attendance'
@@ -202,6 +203,10 @@ export default function ClientDetailPage() {
   const [resetMessage, setResetMessage] = useState('')
   const [resetting, setResetting] = useState(false)
   const [showResetPasswordValue, setShowResetPasswordValue] = useState(false)
+  // Create login (client added without one): username + password, /api/create-login
+  const [showCreateLogin, setShowCreateLogin] = useState(false)
+  const [createLogin, setCreateLogin] = useState<{ username: string; password: string; saving: boolean; error: string }>({ username: '', password: '', saving: false, error: '' })
+  const [createLoginStatus, setCreateLoginStatus] = useState<UsernameStatus>('empty')
   const [loading, setLoading] = useState(true)
   const [memberships, setMemberships] = useState<Membership[]>([])
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -1237,6 +1242,24 @@ const handleResetPassword = async () => {
 
 
 
+  // Give a no-login client a username + password (the same Auth user gets a real login; nothing is deleted)
+  const handleCreateLogin = async () => {
+    if (createLoginStatus === 'taken') { setCreateLogin({ ...createLogin, error: 'That username is taken. Pick one of the suggestions' }); return }
+    if (createLogin.password.length < 6) { setCreateLogin({ ...createLogin, error: 'Password must be at least 6 characters' }); return }
+    setCreateLogin({ ...createLogin, saving: true, error: '' })
+    const response = await fetch('/api/create-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: clientId, username: createLogin.username, password: createLogin.password })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    if (!response.ok || result.error) { setCreateLogin({ ...createLogin, saving: false, error: result.error || `Couldn't create the login (${response.status})` }); return }
+    showToast(`Login created ✓ ${result.username}`)
+    setShowCreateLogin(false)
+    setCreateLogin({ username: '', password: '', saving: false, error: '' })
+    loadData(['client'])
+  }
+
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
 
   // Phone as saved: +<code><digits> (lib/phone.ts). Typed with a + : read as is; otherwise with the picked / home code.
@@ -1862,7 +1885,11 @@ const handleResetPassword = async () => {
                       <div role="menu" className="absolute right-0 top-12 z-50 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden py-1">
                         <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); openEditClient() }}
                           className={`${menuItem} text-orange-400`}>Edit</button>
-                        {/* No login yet (coach-run member): nothing to reset */}
+                        {/* No login yet (coach-run member): Create login instead of Reset password */}
+                        {isNoLogin(client?.email) && (
+                          <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); setShowResetPassword(false); setShowCreateLogin(!showCreateLogin) }}
+                            className={`${menuItem} text-gray-200`}>Create login</button>
+                        )}
                         {!isNoLogin(client?.email) && (
                           <button role="menuitem" type="button" onClick={() => { setHeaderMenuOpen(false); setShowResetPassword(!showResetPassword) }}
                             className={`${menuItem} text-gray-200`}>Reset password</button>
@@ -2078,6 +2105,31 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
+
+{showCreateLogin && !isCoach && isNoLogin(client?.email) && (
+  <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
+    <div className="max-w-2xl mx-auto space-y-3">
+      <p className="text-xs text-gray-500 uppercase tracking-wider">Create login for {client?.full_name}</p>
+      <p className="text-xs text-gray-500">They log in with this username and password. Usernames are unique across CoachBoard. Their phone stays for contact only.</p>
+      <UsernameField value={createLogin.username} fullName={client?.full_name || ''}
+        onChange={v => setCreateLogin({ ...createLogin, username: v, error: '' })} onStatus={setCreateLoginStatus}
+        placeholder="Username, e.g. anand.k" />
+      <input type="text" placeholder="Password (min 6)" aria-label="Password" autoComplete="new-password"
+        value={createLogin.password}
+        onChange={e => setCreateLogin({ ...createLogin, password: e.target.value, error: '' })}
+        className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+      {createLogin.error && <p className="text-sm text-red-400">{createLogin.error}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={handleCreateLogin} disabled={createLogin.saving || !createLogin.username || createLoginStatus === 'invalid' || createLoginStatus === 'checking'}
+          className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
+          {createLogin.saving ? 'Creating...' : 'Create login'}
+        </button>
+        <button type="button" onClick={() => setShowCreateLogin(false)}
+          className="px-4 border border-gray-700 rounded-xl text-gray-400 hover:bg-gray-800 text-sm transition">Cancel</button>
+      </div>
+    </div>
+  </div>
+)}
 
 {showResetPassword && !isCoach && (
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
@@ -3545,6 +3597,12 @@ const handleResetPassword = async () => {
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
             <p className="text-sm text-white">{displayPhone(client?.phone, country) || '—'}</p>
             <p className="text-sm text-gray-400">{shownEmail(client?.email)}</p>
+            {/* How they log in (the coach is asked "what was my username?") */}
+            <p className="text-xs text-gray-500 mt-1">
+              {usernameOf(client?.email) ? <>Login: username <span className="text-gray-300">{usernameOf(client?.email)}</span></>
+                : isNoLogin(client?.email) ? (isCoach ? 'No login yet' : 'No login yet · ⋯ → Create login')
+                : isPhoneLogin(client?.email) ? 'Login: phone number' : client?.email ? 'Login: email' : ''}
+            </p>
           </div>
         </>
       )}

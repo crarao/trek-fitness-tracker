@@ -77,9 +77,70 @@ export function isNoLogin(email: string | null | undefined): boolean {
   return !!email && (email.endsWith(NO_LOGIN_DOMAIN) || isGeneratedLogin(email))
 }
 
-// The email to show for a client: '' for a no-login placeholder
+// The email to show for a client: '' for a no-login placeholder and for a username login (show usernameOf instead)
 export function shownEmail(email: string | null | undefined): string {
-  return email && !isNoLogin(email) ? email : ''
+  return email && !isNoLogin(email) && !isUsernameLogin(email) ? email : ''
+}
+
+// Username logins (clients): the client types a username + password. Stored in Supabase Auth as
+// <username>@user.getcoachboard.in, so Supabase's unique email is the guarantee that no two people (in any gym) share one.
+// Not a phone login (isPhoneLogin is false: the domain differs), so update-client never moves it when the phone changes.
+// Rules (usernameProblem): 3–20 characters, lowercase a–z, 0–9, dot, dash, underscore; starts and ends with a letter or
+// number; at least one letter (so it never looks like a phone number); no @ (so it never looks like an email).
+export const USERNAME_DOMAIN = '@user.getcoachboard.in'
+const RESERVED_USERNAMES = new Set(['admin', 'administrator', 'coachboard', 'support', 'help', 'root', 'owner', 'coach', 'sensei', 'partner', 'staff', 'test', 'user', 'login', 'client', 'student', 'member', 'null', 'undefined'])
+
+export function normalizeUsername(raw: string | null | undefined): string {
+  return (raw || '').trim().toLowerCase()
+}
+
+// null when the username is fine, else what's wrong (shown to the coach)
+export function usernameProblem(raw: string | null | undefined): string | null {
+  const u = normalizeUsername(raw)
+  if (u.length < 3) return 'Username must be at least 3 characters'
+  if (u.length > 20) return 'Username must be at most 20 characters'
+  if (u.includes('@')) return 'Username can\'t contain @'
+  if (!/^[a-z0-9._-]+$/.test(u)) return 'Use only letters, numbers, dot ( . ), dash ( - ) or underscore ( _ )'
+  if (!/^[a-z0-9].*[a-z0-9]$/.test(u)) return 'Start and end the username with a letter or number'
+  if (!/[a-z]/.test(u)) return 'Username needs at least one letter (a phone number is not a username)'
+  if (RESERVED_USERNAMES.has(u)) return 'That username is reserved. Pick another'
+  return null
+}
+
+export function usernameEmail(username: string): string {
+  return `${normalizeUsername(username)}${USERNAME_DOMAIN}`
+}
+
+export function isUsernameLogin(email: string | null | undefined): boolean {
+  return !!email && email.toLowerCase().endsWith(USERNAME_DOMAIN)
+}
+
+// The username of a username login, else null
+export function usernameOf(email: string | null | undefined): string | null {
+  return isUsernameLogin(email) ? email!.slice(0, -USERNAME_DOMAIN.length).toLowerCase() : null
+}
+
+// What the login page should do with what was typed: an email (has @), a username (has a letter), else a phone
+export function loginInputKind(input: string): 'email' | 'username' | 'phone' {
+  const t = input.trim()
+  if (t.includes('@')) return 'email'
+  return /[a-z]/i.test(t) ? 'username' : 'phone'
+}
+
+// Username ideas from a full name ("Anand Kumar Rao" → anand.r, anand.rao, anandr, anand), valid ones only
+export function suggestUsernames(fullName: string | null | undefined): string[] {
+  const parts = (fullName || '').toLowerCase().normalize('NFKD').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean)
+  if (!parts.length) return []
+  const first = parts[0]
+  const last = parts.length > 1 ? parts[parts.length - 1] : ''
+  const ideas = last ? [`${first}.${last[0]}`, `${first}.${last}`, `${first}${last[0]}`, `${first}${last}`, first] : [first, `${first}.fit`]
+  return [...new Set(ideas.map(x => x.slice(0, 20)))].filter(x => !usernameProblem(x))
+}
+
+// Numbered versions of a username to offer when it is taken (anand.k → anand.k2, anand.k3 …), valid ones only
+export function numberedUsernames(base: string, count = 8): string[] {
+  const b = normalizeUsername(base).replace(/[^a-z0-9._-]/g, '').slice(0, 18)
+  return Array.from({ length: count }, (_, i) => `${b}${i + 2}`).filter(x => !usernameProblem(x))
 }
 
 // +<code><digits>, e.g. +919876543210
