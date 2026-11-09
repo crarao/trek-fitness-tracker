@@ -21,7 +21,7 @@ test.describe('@smoke', () => {
 
   test.describe('wrong password', () => {
     // Supabase answers a wrong password with 400, which Chromium logs as a console error. Expected here only.
-    test.use({ allowedConsoleErrors: [/status of 400/, /\/auth\/v1\/token/] })
+    test.use({ allowedConsoleErrors: /status of 400|\/auth\/v1\/token/ })
 
     test('S3 wrong password @smoke', async ({ page }) => {
       const { id } = qaLogin('gymOwner')

@@ -7,7 +7,7 @@
 import { test as base, expect, type Page } from '@playwright/test'
 
 // Known console noise to ignore, for every test. Keep it empty unless a message is understood and harmless;
-// add a regex with a comment saying why. A single test can allow more with test.use({ allowedConsoleErrors: [...] }).
+// add a regex with a comment saying why. A single test can allow one more pattern with test.use({ allowedConsoleErrors: /.../ }).
 export const CONSOLE_ALLOW_LIST: RegExp[] = []
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
@@ -23,18 +23,19 @@ export function isAllowedRequest(method: string, url: string): boolean {
 }
 
 type Fixtures = {
-  allowedConsoleErrors: RegExp[]
+  allowedConsoleErrors: RegExp | undefined
   guard: { blocked: string[]; errors: string[]; badResponses: string[] }
 }
 
 export const test = base.extend<Fixtures>({
-  allowedConsoleErrors: [[], { option: true }],
+  // One regex, not an array: test.use() reads an array value as [value, options]
+  allowedConsoleErrors: [undefined, { option: true }],
 
   guard: [async ({ page, allowedConsoleErrors }, use, testInfo) => {
     const blocked: string[] = []
     const errors: string[] = []
     const badResponses: string[] = []
-    const allow = [...CONSOLE_ALLOW_LIST, ...allowedConsoleErrors]
+    const allow = allowedConsoleErrors ? [...CONSOLE_ALLOW_LIST, allowedConsoleErrors] : CONSOLE_ALLOW_LIST
 
     // 1. Write guard
     for (const pattern of ['**/rest/v1/**', '**/api/**', '**/storage/v1/**']) {
