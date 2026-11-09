@@ -871,7 +871,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
           const toneCls = { good: 'border-green-800 bg-green-950/30', warn: 'border-amber-800 bg-amber-950/20', bad: 'border-red-900 bg-red-950/30' }
           const actionCls = { good: 'bg-green-600 text-white', warn: 'bg-amber-500 text-gray-950', bad: 'bg-red-600 text-white' }
           return (
-            <div className="space-y-6">
+            <div data-testid="page-admin" className="space-y-6">
               {testCount > 0 && (
                 <label className={`flex items-center gap-2 text-xs w-fit px-3 py-1.5 rounded-lg border ${dashIncludeTest ? 'border-amber-700 bg-amber-950/40 text-amber-200' : 'border-gray-800 text-gray-400'}`}>
                   <input type="checkbox" checked={dashIncludeTest} onChange={e => setDashIncludeTest(e.target.checked)} className="accent-orange-500" />

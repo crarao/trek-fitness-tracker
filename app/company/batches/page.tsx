@@ -252,7 +252,7 @@ export default function BatchesPage() {
             Branches and batches aren&apos;t set up yet. CoachBoard will switch them on for your account.
           </div>
         ) : (
-          <>
+          <div data-testid="page-batches" className="space-y-4">
             {shownBranches.length === 0 && (
               <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">
                 No branches yet.
@@ -266,7 +266,7 @@ export default function BatchesPage() {
                 {showArchived ? 'Hide archived' : 'Show archived'}
               </button>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

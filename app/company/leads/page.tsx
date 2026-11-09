@@ -474,7 +474,7 @@ export default function LeadsPage() {
           <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
             <div className="flex gap-1 flex-wrap">
               {FILTERS.map(f => (
-                <button key={f.key} onClick={() => setFilter(f.key)}
+                <button key={f.key} data-testid={`leads-filter-${f.key}`} onClick={() => setFilter(f.key)}
                   className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
                     filter === f.key ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'}`}>
                   {f.label}
@@ -501,9 +501,9 @@ export default function LeadsPage() {
               ))}
             </div>
           ) : visible.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-500 text-sm">{emptyText}</div>
+            <div data-testid="page-leads" className="px-6 py-12 text-center text-gray-500 text-sm">{emptyText}</div>
           ) : (
-            <ul className="divide-y divide-gray-800">
+            <ul data-testid="page-leads" className="divide-y divide-gray-800">
               {visible.map(lead => {
                 const st = STATUS_STYLE[lead.status]
                 const details = [sourceLabel(lead.source), interestLabel(lead.interest)].filter(Boolean).join(' · ')

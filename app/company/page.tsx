@@ -1683,7 +1683,7 @@ export default function CompanyAdminPage() {
 
       {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted. Gyms only */}
       {trainModule && !coachCompany && (
-        <div className="px-4 sm:px-8 pt-3">
+        <div data-testid="coaches-section" className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
             <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
               className="w-full flex items-center justify-between text-left">
@@ -1993,7 +1993,7 @@ export default function CompanyAdminPage() {
               ))}
             </div>
           ) : filteredClients.length === 0 ? (
-            <div className="px-6 py-12 text-center text-gray-500 text-sm">
+            <div data-testid="page-company" className="px-6 py-12 text-center text-gray-500 text-sm">
               {activeFilter === 'archived'
                 ? `No archived ${mw.many.toLowerCase()}.`
                 : clients.length === 0
@@ -2003,7 +2003,7 @@ export default function CompanyAdminPage() {
                 : `No ${activeFilter} ${mw.many.toLowerCase()}.`}
             </div>
           ) : (
-            <div className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
+            <div data-testid="page-company" className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
@@ -2064,6 +2064,7 @@ export default function CompanyAdminPage() {
 
                   return (
                     <tr key={client.id}
+                      data-testid="member-row" data-name={client.full_name}
                       className={`transition cursor-pointer ${openingClientId === client.id
                         ? 'bg-orange-500/10 outline outline-1 -outline-offset-1 outline-orange-500/60'
                         : openingClientId ? 'opacity-50' : 'hover:bg-gray-800/50 active:bg-gray-800'}`}

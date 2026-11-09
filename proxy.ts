@@ -69,7 +69,14 @@ export async function proxy(request: NextRequest) {
     if (!company) {
       // No such gym: main site. Built from the Host header and set by hand: NextResponse.redirect
       // shortens a URL on nextUrl's own origin to "/", which would keep the visitor on this address.
-      return new NextResponse(null, { status: 307, headers: { Location: `${request.nextUrl.protocol}//${rootHost(host)}/` } })
+      const mainSite = `${request.nextUrl.protocol}//${rootHost(host)}/`
+      // Local dev only: the server's own URL is localhost:3000 (= the main site), and Next shortens a
+      // Location on its own host to "/", which loops on qagym.localhost:3000. Forward with a tiny page instead.
+      if (rootHost(host) === request.nextUrl.host) {
+        return new NextResponse(`<!doctype html><meta http-equiv="refresh" content="0;url=${mainSite}"><a href="${mainSite}">CoachBoard</a>`,
+          { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+      }
+      return new NextResponse(null, { status: 307, headers: { Location: mainSite } })
     }
     tenantId = company.id
     if (path === '/') {
