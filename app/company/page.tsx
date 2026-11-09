@@ -200,6 +200,8 @@ export default function CompanyAdminPage() {
   // Coach being renamed / given a new phone (one at a time)
   const [editCoach, setEditCoach] = useState<{ id: string; full_name: string; phone: string; phoneLogin: boolean } | null>(null)
   const [savingEditCoach, setSavingEditCoach] = useState(false)
+  // Coach whose password is being reset (one at a time)
+  const [resetCoach, setResetCoach] = useState<{ id: string; password: string; saving: boolean; error: string } | null>(null)
   const [editCoachError, setEditCoachError] = useState('')
   const [savingCoach, setSavingCoach] = useState(false)
   const [coachMessage, setCoachMessage] = useState('')
@@ -502,6 +504,23 @@ export default function CompanyAdminPage() {
     showToast(phoneChanged ? `Saved ✓ ${name.split(' ')[0]} now logs in with ${phone}` : `${sw.one} saved ✓`)
     setEditCoach(null)
     if (companyId) fetchCoaches(companyId)
+  }
+
+  // Owner / partner sets a new password for a coach login (api/reset-password allows their own gym's coaches)
+  const handleResetCoachPassword = async () => {
+    if (!resetCoach) return
+    if (resetCoach.password.length < 6) { setResetCoach({ ...resetCoach, error: 'Password must be at least 6 characters' }); return }
+    setResetCoach({ ...resetCoach, saving: true, error: '' })
+    const response = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: resetCoach.id, newPassword: resetCoach.password })
+    })
+    const result = await response.json().catch(() => ({ error: 'Network error' }))
+    if (!response.ok || result.error) { setResetCoach({ ...resetCoach, saving: false, error: "Couldn't reset: " + (result.error || response.status) }); return }
+    const name = (coachById[resetCoach.id]?.full_name || sw.one).split(' ')[0]
+    showToast(`Password reset ✓ Tell ${name} the new password`)
+    setResetCoach(null)
   }
 
   const handleToggleCoach = (coach: Coach) => {
@@ -1710,6 +1729,29 @@ export default function CompanyAdminPage() {
                           </div>
                         </li>
                       )
+                      if (resetCoach?.id === c.id) return (
+                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+                          <p className="text-sm text-white">New password for {c.full_name}</p>
+                          <p className="text-[11px] text-gray-500">
+                            They log in with {c.email && !isPhoneLogin(c.email) ? c.email : `their phone ${displayPhone(c.phone, country)}`}. Tell them the new password; they can change it after logging in.
+                          </p>
+                          <input type="text" placeholder="New password (min 6)" aria-label="New password" autoComplete="new-password"
+                            value={resetCoach.password}
+                            onChange={e => setResetCoach({ ...resetCoach, password: e.target.value, error: '' })}
+                            className="w-full bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                          {resetCoach.error && <p className="text-xs text-red-400">{resetCoach.error}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={handleResetCoachPassword} disabled={resetCoach.saving}
+                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
+                              {resetCoach.saving ? 'Resetting...' : 'Reset password'}
+                            </button>
+                            <button type="button" onClick={() => setResetCoach(null)}
+                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
+                              Cancel
+                            </button>
+                          </div>
+                        </li>
+                      )
                       return (
                         <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
                           <div className="min-w-0">
@@ -1721,10 +1763,16 @@ export default function CompanyAdminPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <button type="button" onClick={() => { setEditCoachError(''); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
+                            <button type="button" onClick={() => { setEditCoachError(''); setResetCoach(null); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
                               className="text-xs text-orange-400 hover:text-orange-300 transition">
                               Edit
                             </button>
+                            {!c.archived_at && (
+                              <button type="button" onClick={() => { setEditCoach(null); setResetCoach({ id: c.id, password: '', saving: false, error: '' }) }}
+                                className="text-xs text-gray-300 hover:text-white transition">
+                                Password
+                              </button>
+                            )}
                             <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
                               {c.archived_at ? 'Off' : 'Active'}
                             </span>

@@ -18,11 +18,23 @@ export async function POST(request: Request) {
     const { userId, newPassword } = await request.json()
     if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 })
 
-    // Only staff of the client's own gym (or super admin) can reset a password
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+    }
+
+    // Only staff of the client's own gym (or super admin) can reset a password.
+    // Owner / partners may also reset a coach login of their own gym (coaches have no reset otherwise).
     const { caller, error: callerError } = await getCaller(STAFF)
     if (callerError) return callerError
-    const notAllowed = await checkCanManageClient(caller, userId)
-    if (notAllowed) return notAllowed
+    const { data: target } = await supabaseAdmin.from('profiles').select('role, company_id').eq('id', userId).single()
+    if (target?.role === 'coach') {
+      if (caller.role !== 'super_admin' && (!caller.companyId || target.company_id !== caller.companyId)) {
+        return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+      }
+    } else {
+      const notAllowed = await checkCanManageClient(caller, userId)
+      if (notAllowed) return notAllowed
+    }
 
     const { error } = await supabaseAdmin.auth.admin.updateUserById(
       userId,
