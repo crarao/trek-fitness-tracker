@@ -39,6 +39,9 @@ export default function CoachHomePage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [openingId, setOpeningId] = useState<string | null>(null)
+  // Change password (the owner sets the first one: for phone logins it's the phone number)
+  const [showPassword, setShowPassword] = useState(false)
+  const [pwForm, setPwForm] = useState({ next: '', confirm: '', saving: false, message: '', ok: false })
   const today = localDateIso()
 
   useEffect(() => { load() }, [])
@@ -114,6 +117,16 @@ export default function CoachHomePage() {
     setSessions((sessionsRes.data || []) as CoachSession[])
     setMembershipEnd(Object.fromEntries(((membershipRes.data || []) as MembershipStatus[]).map(m => [m.profile_id, m.end_date])))
     setLoading(false)
+  }
+
+  const handleChangePassword = async () => {
+    if (pwForm.next.length < 6) { setPwForm({ ...pwForm, message: 'Password must be at least 6 characters', ok: false }); return }
+    if (pwForm.next !== pwForm.confirm) { setPwForm({ ...pwForm, message: 'Passwords do not match', ok: false }); return }
+    setPwForm({ ...pwForm, saving: true, message: '' })
+    const { error } = await supabase.auth.updateUser({ password: pwForm.next })
+    if (error) { setPwForm({ ...pwForm, saving: false, message: 'Error: ' + error.message, ok: false }); return }
+    setPwForm({ next: '', confirm: '', saving: false, message: 'Password changed ✓ Use it next time you log in.', ok: true })
+    setTimeout(() => { setShowPassword(false); setPwForm(p => ({ ...p, message: '' })) }, 2500)
   }
 
   const handleLogout = async () => {
@@ -216,11 +229,33 @@ export default function CoachHomePage() {
               <p className="text-xs text-gray-400">{formatDate(today, country, 'weekday')}</p>
             </div>
           </div>
-          <button data-nav onClick={handleLogout}
-            className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition shrink-0">
-            Logout
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={() => setShowPassword(!showPassword)} aria-expanded={showPassword}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              Password
+            </button>
+            <button data-nav onClick={handleLogout}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              Logout
+            </button>
+          </div>
         </div>
+        {showPassword && (
+          <div className="max-w-2xl mx-auto mt-4 space-y-2">
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Change password</p>
+            <input type="password" placeholder="New password (min 6)" autoComplete="new-password" aria-label="New password"
+              value={pwForm.next} onChange={e => setPwForm({ ...pwForm, next: e.target.value, message: '' })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            <input type="password" placeholder="Confirm new password" autoComplete="new-password" aria-label="Confirm new password"
+              value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value, message: '' })}
+              className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            {pwForm.message && <p className={`text-xs ${pwForm.ok ? 'text-green-400' : 'text-red-400'}`}>{pwForm.message}</p>}
+            <button type="button" onClick={handleChangePassword} disabled={pwForm.saving}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2.5 rounded-xl text-sm transition disabled:opacity-50">
+              {pwForm.saving ? 'Saving...' : 'Update password'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-5 space-y-4">
