@@ -1329,6 +1329,16 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Today's schedule: PT sessions by workout time, who trained (read-only). Not for dojos (attendance instead) */}
+      {trainModule && ptCount > 0 && !dojo && (
+        <div className="px-4 sm:px-8 pt-3">
+          <button type="button" data-nav onClick={() => router.push('/company/today')}
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            {coachCompany ? 'Who you’re training today, by time' : 'PT sessions by time and coach'} <span className="text-white font-medium">→ {coachCompany ? 'My day' : 'Today’s schedule'}</span>
+          </button>
+        </div>
+      )}
+
       {trainModule && ptCount > 0 && !attendanceMode && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
