@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { tenantSlugFromHost } from '@/lib/tenant'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
-import { type PhoneCountry, phoneCountry, validLocalDigits, loginEmailFor, phoneHint } from '@/lib/phone'
+import { type PhoneCountry, phoneCountry, validLocalDigits, loginEmailFor, phoneHint, loginInputKind, usernameEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
@@ -47,8 +47,9 @@ function LoginForm() {
   const savedPhoneCode = useSyncExternalStore(noSubscribe, readPhoneCode, () => 'IN' as PhoneCountry)
   const [pickedPhoneCode, setPhoneCode] = useState<PhoneCountry | null>(null)
   const phoneCode = pickedPhoneCode ?? savedPhoneCode
-  // Typing an @ means an email login: the country code doesn't apply
-  const isEmail = identifier.includes('@')
+  // Typing an @ means an email login, a letter a username login (lib/phone.ts loginInputKind): the country code doesn't apply
+  const inputKind = loginInputKind(identifier)
+  const notPhone = inputKind !== 'phone'
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
@@ -115,11 +116,12 @@ function LoginForm() {
     )
   }
 
-  // Email as typed; a phone number becomes its login identifier (lib/phone.ts loginEmailFor).
+  // Email as typed; a username or a phone number becomes its login identifier (lib/phone.ts usernameEmail / loginEmailFor).
   // null = a phone number with the wrong number of digits for the picked country.
   const toEmail = (input: string): string | null => {
     const cleaned = input.trim()
-    if (cleaned.includes('@')) return cleaned
+    if (loginInputKind(cleaned) === 'email') return cleaned
+    if (loginInputKind(cleaned) === 'username') return usernameEmail(cleaned)
     const local = validLocalDigits(phoneCode, cleaned)
     return local ? loginEmailFor(phoneCode, local) : null
   }
@@ -128,12 +130,12 @@ function LoginForm() {
     setTried(true)
     const email = toEmail(identifier)
     if (!email) {
-      setError(`Enter your email, or your phone number (${phoneHint(phoneCode)} after the country code)`)
+      setError(`Enter your username, email, or phone number (${phoneHint(phoneCode)} after the country code)`)
       return
     }
     setLoading(true)
     setError('')
-    if (!isEmail) rememberPhoneCode(phoneCode)
+    if (!notPhone) rememberPhoneCode(phoneCode)
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
@@ -252,9 +254,9 @@ function LoginForm() {
 
           <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 space-y-4">
             <div>
-              <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Phone or Email</label>
+              <label className="text-xs font-medium text-gray-400 mb-1.5 block uppercase tracking-wider">Username, phone or email</label>
               <div className="flex gap-2">
-                {!isEmail && (
+                {!notPhone && (
                   <CountryCodePicker value={phoneCode} onChange={setPhoneCode}
                     className="rounded-xl focus:ring-orange-500 py-3" />
                 )}
@@ -265,7 +267,8 @@ function LoginForm() {
                   onChange={(e) => setIdentifier(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                   className="w-full min-w-0 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-600"
-                  placeholder={phoneCode === 'IN' ? '9999999999 or you@example.com' : 'Phone or you@example.com'}
+                  placeholder={phoneCode === 'IN' ? 'Username or 9999999999' : 'Username, phone or email'}
+                  autoCapitalize="none" autoCorrect="off" spellCheck={false}
                 />
               </div>
             </div>

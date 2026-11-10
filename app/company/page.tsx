@@ -10,7 +10,8 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { formatMoney, formatMoneyCompact, currencySymbol, groupByCurrency, formatMoneyByCurrency, normalizeCurrency, CURRENCIES } from '@/lib/currency'
 import { type Country, COUNTRIES, normalizeCountry, formatDate, loginMethod, phonePlaceholder, daysUntil, localDateIso, parseDate } from '@/lib/locale'
-import { type PhoneCountry, validLocalDigits, loginEmailFor, clientPhoneValue, displayPhone, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail } from '@/lib/phone'
+import { type PhoneCountry, validLocalDigits, clientPhoneValue, displayPhone, splitE164, staffLogin, isPhoneLogin, phoneHint, shownEmail, normalizeUsername, usernameProblem, usernameEmail, usernameOf } from '@/lib/phone'
+import UsernameField, { type UsernameStatus } from '@/app/username-field'
 import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
@@ -154,7 +155,7 @@ export default function CompanyAdminPage() {
   const [trialInfo, setTrialInfo] = useState<{ trial_end: string; is_active: boolean; is_trial: boolean } | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [newClient, setNewClient] = useState({
-    full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
+    full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '', username: '',
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member', primary_coach_id: '',
@@ -185,6 +186,8 @@ export default function CompanyAdminPage() {
   const [openingClientId, setOpeningClientId] = useState<string | null>(null)
   const [showSettingsPasswords, setShowSettingsPasswords] = useState(false)
   const [showNewClientPassword, setShowNewClientPassword] = useState(false)
+  // Add member: the username box's check (app/username-field.tsx)
+  const [newUsernameStatus, setNewUsernameStatus] = useState<UsernameStatus>('empty')
   const [searchQuery, setSearchQuery] = useState('')
   const [showRevenueDrillIn, setShowRevenueDrillIn] = useState(false)
   const [showPlanBreakdown, setShowPlanBreakdown] = useState(false)
@@ -631,15 +634,21 @@ export default function CompanyAdminPage() {
     return own && allowedCurrencies.includes(own) ? own : baseCurrency
   }
 
-  // How the new member will log in: an email, an Indian phone, or not at all (coach-run member, login can come later)
-  const newClientLogin = (): { kind: 'email' | 'phone'; email: string; shown: string } | { kind: 'none' } | { kind: 'bad-email' } => {
+  // How the new member will log in: a username (every country), an email (outside India only), or not at all
+  // (coach-run member, Create login later). The phone is for contact / WhatsApp only: new members never get a phone login.
+  // Existing phone logins keep working (lib/phone.ts, login page).
+  const newClientLogin = (): { kind: 'email' | 'username'; email: string; shown: string } | { kind: 'none' } | { kind: 'bad-email' } | { kind: 'bad-username'; problem: string } => {
     const place = newClientPlace()
-    const entered = newClient.email.trim()
+    const u = normalizeUsername(newClient.username)
+    if (u) {
+      const problem = usernameProblem(u)
+      return problem ? { kind: 'bad-username', problem } : { kind: 'username', email: usernameEmail(u), shown: u }
+    }
+    const entered = loginMethod(place.country) === 'phone' ? '' : newClient.email.trim()
     if (entered) {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entered) ? { kind: 'email', email: entered, shown: entered } : { kind: 'bad-email' }
     }
-    const indianDigits = loginMethod(place.country) === 'phone' && place.phoneCountry === 'IN' ? validLocalDigits('IN', newClient.phone) : null
-    return indianDigits ? { kind: 'phone', email: loginEmailFor('IN', indianDigits), shown: indianDigits } : { kind: 'none' }
+    return { kind: 'none' }
   }
 
   // Child with parent details (only once the guardian columns exist): ticked by default for a dojo
@@ -672,12 +681,20 @@ export default function CompanyAdminPage() {
     }
 
     // A login is optional: the coach can enter everything and share progress themselves.
-    // Login rule comes from the client's country (lib/locale.ts loginMethod; the gym's country unless multi-country):
-    // India → email if given, else the 10-digit phone (lib/phone.ts loginEmailFor)
-    // UAE / US / Canada → email if given; their phone is for contact only
-    // Neither → no login (newClientLogin)
+    // A username (any country) if given; else, outside India (lib/locale.ts loginMethod), an email if given;
+    // else no login (newClientLogin). The phone is for contact only.
     const place = newClientPlace()
     const login = newClientLogin()
+    if (login.kind === 'bad-username') {
+      setMessage('Error: ' + login.problem)
+      setSaving(false)
+      return
+    }
+    if (login.kind === 'username' && (newUsernameStatus === 'taken' || newUsernameStatus === 'checking')) {
+      setMessage(newUsernameStatus === 'taken' ? `Error: Username ${login.shown} is taken. Pick one of the suggestions` : 'Checking the username… try again in a second')
+      setSaving(false)
+      return
+    }
     if (login.kind === 'bad-email') {
       setMessage('Error: That email doesn\'t look right. Fix it, or leave it empty to add the ' + mw.one.toLowerCase() + ' without a login')
       setSaving(false)
@@ -693,7 +710,9 @@ export default function CompanyAdminPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        ...(login.kind === 'none' ? { no_login: true } : { email: login.email, password: newClient.password }),
+        ...(login.kind === 'none' ? { no_login: true }
+          : login.kind === 'username' ? { username: login.shown, password: newClient.password }
+          : { email: login.email, password: newClient.password }),
         full_name: newClient.full_name,
         company_id: companyId,
         role: 'client',
@@ -764,7 +783,7 @@ export default function CompanyAdminPage() {
       showToast(`${mw.one} added ✓`)
     }
     setNewClient({
-      full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '',
+      full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '', username: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
       client_type: 'member', primary_coach_id: '',
@@ -2110,7 +2129,7 @@ export default function CompanyAdminPage() {
                                 <p className="text-xs text-gray-500">{homeBatchLine(branchById[client.branch_id || ''] || (client.batch_id ? branchById[batchById[client.batch_id]?.branch_id || ''] : null), batchById[client.batch_id || ''], country)}</p>
                               )}
                               <p className="text-xs text-gray-500">
-                                {displayPhone(client.phone, country) || shownEmail(client.email)}
+                                {displayPhone(client.phone, country) || shownEmail(client.email) || (usernameOf(client.email) ? `Username ${usernameOf(client.email)}` : '')}
                                 {/* PT plan progress this week, on the second line so the row stays phone-width */}
                                 {trainModule && client.client_type === 'pt' && (() => {
                                   const a = weekAdherence[client.id]
@@ -2238,12 +2257,15 @@ export default function CompanyAdminPage() {
                   <input type="tel" placeholder={`${phonePlaceholder(country ?? 'IN')} (optional)`}
                     value={newClient.phone}
                     onChange={e => setNewClient({ ...newClient, phone: e.target.value })}
-                    className="bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                    className={`${loginMethod(newClientPlace().country) === 'phone' ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
                 )}
-                <input type="email" placeholder="Email (optional)"
-                  value={newClient.email}
-                  onChange={e => setNewClient({ ...newClient, email: e.target.value })}
-                  className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                {/* Email: outside India only, and only as a login when no username is given (India: username or no login) */}
+                {loginMethod(newClientPlace().country) !== 'phone' ? (
+                  <input type="email" placeholder="Email (optional)"
+                    value={newClient.email}
+                    onChange={e => setNewClient({ ...newClient, email: e.target.value })}
+                    className={`${multiCountry ? 'col-span-2 ' : ''}bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600`} />
+                ) : null}
                 {guardianColumns && (
                   // Parent / guardian (any business type; ticked by default only for a dojo). The parent's phone is
                   // contact only, never a login, so siblings can share it.
@@ -2334,8 +2356,14 @@ export default function CompanyAdminPage() {
                     )}
                   </>
                 )}
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 mb-1 block">Login (optional) · username + password</label>
+                  <UsernameField value={newClient.username} fullName={newClient.full_name}
+                    onChange={v => setNewClient({ ...newClient, username: v })} onStatus={setNewUsernameStatus}
+                    placeholder="Username, e.g. anand.k (leave empty for no login)" />
+                </div>
                 {newClientLogin().kind !== 'none' && <div className="col-span-2 relative">
-                  <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Temporary password"
+                  <input type={showNewClientPassword ? 'text' : 'password'} placeholder="Password (min 6)"
                     value={newClient.password}
                     onChange={e => setNewClient({ ...newClient, password: e.target.value })}
                     className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 pr-10 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
@@ -2350,11 +2378,11 @@ export default function CompanyAdminPage() {
                 <p className="col-span-2 -mt-1 text-xs text-gray-500">
                   {(() => {
                     const l = newClientLogin()
-                    if (l.kind === 'email' || l.kind === 'phone') return <>Client logs in with: <span className="text-gray-300 font-medium">{l.shown}</span></>
-                    if (l.kind === 'bad-email') return <span className="text-amber-400">Check the email, or leave it empty for no login</span>
-                    return loginMethod(newClientPlace().country) === 'phone'
-                      ? 'No login: you enter their sessions and share progress. Add an email or a 10-digit +91 phone to give them a login.'
-                      : 'No login: you enter their sessions and share progress. Add an email to give them a login (phone is for contact only).'
+                    if (l.kind === 'username') return <>{mw.one} logs in with username <span className="text-gray-300 font-medium">{l.shown}</span> and this password. Phone is for contact only.</>
+                    if (l.kind === 'email') return <>{mw.one} logs in with: <span className="text-gray-300 font-medium">{l.shown}</span></>
+                    if (l.kind === 'bad-email') return <span className="text-amber-400">Check the email, or leave it empty</span>
+                    if (l.kind === 'bad-username') return null
+                    return `No login: you enter their sessions and share progress. Give them a login any time from their page → ⋯ → Create login.`
                   })()}
                 </p>
                 <select

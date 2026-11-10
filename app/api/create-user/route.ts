@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 import { getCaller, STAFF, forbidden, checkPrimaryCoach } from '@/lib/auth-server'
 import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
-import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164 } from '@/lib/phone'
+import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164, normalizeUsername, usernameEmail, usernameProblem } from '@/lib/phone'
+import { takenUsernames, freeSuggestions, isDuplicateLogin } from '@/lib/username-server'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { isDojo } from '@/lib/labels'
 import { checkPlacement } from '@/lib/placement-server'
@@ -29,7 +30,9 @@ const noLogin = body.no_login === true && role === 'client'
 // gets a generated login (lib/phone.ts generatedStudentLogin): the parent's phone is never a login, so siblings can share it.
 const hasGuardianFields = role === 'client' && ('guardian_phone' in body || 'guardian_name' in body || 'guardian_relation' in body)
 const childNoPhone = noLogin && hasGuardianFields && !!body.guardian_phone && !phone
-const email: string = childNoPhone ? generatedStudentLogin() : noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : body.email
+// Username login (clients): the login email is built here from the username (lib/phone.ts usernameEmail), never sent
+const username = role === 'client' && !noLogin && typeof body.username === 'string' && body.username.trim() ? normalizeUsername(body.username) : null
+const email: string = childNoPhone ? generatedStudentLogin() : noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : username ? usernameEmail(username) : body.email
 const password: string = childNoPhone ? randomBytes(12).toString('base64url') : noLogin ? randomBytes(24).toString('base64url') : body.password
 
   // Super admin can create any login. Gym staff can only add clients and coaches to their own gym.
@@ -109,6 +112,15 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     if ('error' in placed) return NextResponse.json({ error: placed.error }, { status: 400 })
     Object.assign(placement, placed)
   }
+  // Username: same rules as the form, and free across every gym (Supabase Auth's unique email is the final check below)
+  if (username) {
+    const problem = usernameProblem(username)
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 })
+    if (typeof password !== 'string' || password.length < 6) return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+    if ((await takenUsernames(supabaseAdmin, [username])).has(username)) {
+      return NextResponse.json({ error: `Username ${username} is taken`, suggestions: await freeSuggestions(supabaseAdmin, username, full_name || '') }, { status: 409 })
+    }
+  }
   if (coachCompany && (role === 'coach' || role === 'partner')) {
     return NextResponse.json({ error: COACH_COMPANY_NO_STAFF }, { status: 400 })
   }
@@ -154,6 +166,9 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
   })
 
   if (authError) {
+    if (username && isDuplicateLogin(authError.message)) {
+      return NextResponse.json({ error: `Username ${username} is taken`, suggestions: await freeSuggestions(supabaseAdmin, username, full_name || '') }, { status: 409 })
+    }
     return NextResponse.json({ error: authError.message }, { status: 400 })
   }
 
