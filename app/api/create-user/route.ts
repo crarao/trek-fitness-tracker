@@ -8,6 +8,8 @@ import { takenUsernames, freeSuggestions, isDuplicateLogin } from '@/lib/usernam
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { isDojo } from '@/lib/labels'
 import { checkPlacement } from '@/lib/placement-server'
+import { gradingOn, validIsoDate } from '@/lib/belts'
+import { checkBelt, addGradeHistory } from '@/lib/belts-server'
 import { randomUUID, randomBytes } from 'crypto'
 
 export async function POST(request: Request) {
@@ -112,6 +114,20 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     if ('error' in placed) return NextResponse.json({ error: placed.error }, { status: 400 })
     Object.assign(placement, placed)
   }
+  // Belt (dojos with Grading on, lib/belts.ts): the student's belt when they join + since when; history row 'joined' below
+  const belt: { current_rank_id?: string; rank_achieved_on?: string | null } = {}
+  if (role === 'client' && body.current_rank_id) {
+    if (!gradingOn(companyRow as { grading_enabled?: boolean | null } | null)) {
+      return NextResponse.json({ error: 'Grading is off for this gym' }, { status: 400 })
+    }
+    const ok = await checkBelt(supabaseAdmin, company_id, String(body.current_rank_id))
+    if ('error' in ok) return NextResponse.json({ error: ok.error }, { status: 400 })
+    if (body.rank_achieved_on && !validIsoDate(body.rank_achieved_on)) {
+      return NextResponse.json({ error: 'Enter a valid "Belt since" date' }, { status: 400 })
+    }
+    belt.current_rank_id = String(body.current_rank_id)
+    belt.rank_achieved_on = body.rank_achieved_on || null
+  }
   // Username: same rules as the form, and free across every gym (Supabase Auth's unique email is the final check below)
   if (username) {
     const problem = usernameProblem(username)
@@ -187,12 +203,25 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   ...guardian,
   ...clientBasics,
   ...placement,
+  ...belt,
   ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
 })
 
   if (profileError) {
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
     return NextResponse.json({ error: profileError.message }, { status: 400 })
+  }
+
+  // Belt history: the first row ('joined'). The student is kept if this fails; the form says so
+  if (belt.current_rank_id) {
+    const historyError = await addGradeHistory(supabaseAdmin, {
+      company_id, student_id: authData.user.id, rank_id: belt.current_rank_id,
+      achieved_on: belt.rank_achieved_on ?? null, source: 'joined', created_by: caller.userId,
+    })
+    if (historyError) {
+      console.error('Belt history insert error:', historyError)
+      return NextResponse.json({ success: true, userId: authData.user.id, warning: "Belt saved, but its history row wasn't" })
+    }
   }
 
   return NextResponse.json({ success: true, userId: authData.user.id })

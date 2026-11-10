@@ -17,6 +17,7 @@ import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type Lead
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions, defaultBeltId } from '@/lib/belts'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
@@ -135,6 +136,9 @@ export default function CompanyAdminPage() {
   const [branchFilter, setBranchFilter] = useState<string>('all')
   // Dojo attendance (#78): today's present rows; null = attendance not set up yet (then sessions as before)
   const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
+  // Belt grading (companies.grading_enabled, super admin; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
+  const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
+  const beltsOn = beltRanks.length > 0
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -167,6 +171,8 @@ export default function CompanyAdminPage() {
     age: '', gender: '', medical_conditions: '',
     // Dojo with branches & batches: branch and home batch ('' = none)
     branch_id: '', batch_id: '',
+    // Belt grading on: belt ('' = the first belt, White) and since when (null = the membership start date)
+    rank_id: '', belt_since: null as string | null,
   })
   // "Convert to member" from the Leads page (/company?fromLead=<id>): the enquiry the Add Member form was prefilled from
   const [fromLead, setFromLead] = useState<{ id: string; name: string; source: string | null } | null>(null)
@@ -265,6 +271,7 @@ export default function CompanyAdminPage() {
       business_type?: string | null
       multi_country_enabled?: boolean | null; allowed_currencies?: string[] | null // db/2026-11-01-multi-country.md
       upi_id?: string | null // db/2026-11-07-upi-id.md
+      grading_enabled?: boolean | null // supabase/migrations/20261110120000_belt_grading.sql
     }
     const company = (profile as unknown as { companies: CompanyRow | null }).companies
 
@@ -273,6 +280,7 @@ export default function CompanyAdminPage() {
     setCoachCompany(isCoachCompany(company))
     setBusinessType(company?.business_type ?? null)
     if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
+    if (gradingOn(company)) fetchBeltRanks(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
     setTrainModule(!!company?.client_module_enabled)
@@ -290,6 +298,13 @@ export default function CompanyAdminPage() {
       is_active: company?.is_active as boolean,
       is_trial: company?.is_trial ?? true
     })
+  }
+
+  // Belt grading: the gym's belts, ladder order. An error = no belts yet: the Belt fields stay hidden
+  const fetchBeltRanks = async (cId: string) => {
+    const { data, error } = await supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId).order('rank_order')
+    if (error) { console.error('Belt ranks error:', error); return }
+    setBeltRanks((data || []) as BeltRank[])
   }
 
   // Branches & batches (dojos only for now). An error = the tables don't exist yet: everything stays hidden
@@ -730,6 +745,11 @@ export default function CompanyAdminPage() {
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
         // Dojo with branches & batches: branch and home batch (checked on the server)
         ...(dojo && batchesOn ? { branch_id: newClient.branch_id || null, batch_id: newClient.batch_id || null } : {}),
+        // Belt grading on: the belt they join with (default White) and since when (default the start date)
+        ...(beltsOn ? {
+          current_rank_id: newClient.rank_id || defaultBeltId(beltRanks),
+          rank_achieved_on: (newClient.belt_since ?? newClient.start_date) || null,
+        } : {}),
         // Parent details (Child ticked, guardian columns only); stored like phone (+<code><digits>)
         ...(child ? {
           guardian_name: newClient.guardian_name.trim(),
@@ -782,6 +802,7 @@ export default function CompanyAdminPage() {
     } else {
       showToast(`${mw.one} added ✓`)
     }
+    if (result.warning) showToast(`${mw.one} added. ${result.warning}`, 'error')
     setNewClient({
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '', username: '',
       plan_type: '1 Month', amount_paid: '',
@@ -791,6 +812,7 @@ export default function CompanyAdminPage() {
       child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
       age: '', gender: '', medical_conditions: '',
       branch_id: '', batch_id: '',
+      rank_id: '', belt_since: null,
     })
     setShowForm(false)
     setSaving(false)
@@ -2354,6 +2376,26 @@ export default function CompanyAdminPage() {
                         </select>
                       </>
                     )}
+                  </>
+                )}
+                {beltsOn && (
+                  // Belt grading: the belt they join with (White for a beginner) and since when (default the start date below)
+                  <>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Belt</label>
+                      <select value={newClient.rank_id || defaultBeltId(beltRanks)} aria-label="Belt"
+                        onChange={e => setNewClient({ ...newClient, rank_id: e.target.value })}
+                        className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm">
+                        {beltOptions(beltRanks).map(r => <option key={r.id} value={r.id}>{beltLabel(r)}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 mb-1 block">Belt since</label>
+                      <input type="date" aria-label="Belt since"
+                        value={newClient.belt_since ?? newClient.start_date}
+                        onChange={e => setNewClient({ ...newClient, belt_since: e.target.value })}
+                        className="w-full bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                    </div>
                   </>
                 )}
                 <div className="col-span-2">
