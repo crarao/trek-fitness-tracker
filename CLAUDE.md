@@ -60,6 +60,7 @@ companies
   ├── allowed_currencies (text[], default {INR}) ← currencies the gym takes; base always included
   ├── business_type (gym | martial_arts | yoga | pilates | cycling | trek | general) ← super admin sets it (Create / Edit company, lib/labels.ts BUSINESS_TYPES); empty counts as general. martial_arts = a dojo: Students wording, parent details ticked by default, reminders to the parent
   ├── company_type (gym | coach, default gym) ← super admin only; 'coach' = individual coach (#60), see lib/company-type.ts
+  ├── grading_enabled (bool, default false) ← super admin only (belt grading; on for DSSKA via the SQL, no Super Admin switch yet). Off = no belt fields anywhere
   ├── upi_id (text, nullable) ← super admin sets it; added to the dojo fee reminder to parents (db/2026-11-07-upi-id.md). Owners can't change it
   ├── banner_has_branding (bool, default false) ← super admin switch: the uploaded banner already has the gym's name / logo, so the login shows it whole without name / tagline / logo on top (db/2026-10-31-banner-branding.md; readable logged out)
   └── slug (unique, nullable)          ← super admin sets it; gym address <slug>.getcoachboard.com (lib/tenant.ts) and login link /login/<slug> (→ /login?company=<slug>). Rules in lib/company-slug.ts, DB guard db/2026-10-31-company-slug.md
@@ -74,6 +75,7 @@ profiles (one per user, linked to a company)
   ├── country, currency (clients)      ← client's own country / default payment currency (= the gym's unless multi-country); clients can't change them
   ├── branch_id → branches, batch_id → batches (clients, nullable) ← a dojo student's branch and home batch (#77, db/2026-11-03-branches-batches.md); they can attend any batch. Clients / coaches can't change them (protect_profile_columns); must be in the same gym, batch at that branch
   ├── guardian_name, guardian_phone, guardian_relation (clients, nullable) ← parent / guardian (Dojo Build 1, #53, db/2026-11-03-guardian.md); phone stored like phone (+E.164); relation Mother / Father / Guardian. Reminders and progress shares go to this phone when it's valid
+  ├── current_rank_id → belt_ranks, rank_achieved_on (date) (clients, nullable) ← the student's CURRENT belt and since when (belt grading). Belt must be in the same gym (FK on (company_id, current_rank_id)); clients / coaches can't change them (protect_profile_columns)
   └── fitness fields: goal, age, gender, height_cm, weight_kg,
       fitness_level, food_preference (Vegetarian | Non-Vegetarian | Eggetarian | Vegan | Jain),
       meals_per_day (smallint 2–6), available_days,
@@ -129,6 +131,17 @@ attendance (#78; never deleted: untap = present false)
   ├── present (bool), is_drop_in (bool: not their home batch)
   ├── marked_by → profiles (who tapped last), marked_at
   └── unique (batch_id, profile_id, class_date)
+
+belt_ranks (a gym's belt ladder; supabase/migrations/20261110120000_belt_grading.sql)
+  ├── company_id → companies, rank_order (unique per gym), belt_name, kyu (null = White), color_hex, min_months_from_previous
+  └── is_active (turn off instead of deleting; a belt used by a student or history can't be deleted: FK), created_at
+
+student_grades (belt history: one row each time profiles.current_rank_id changes)
+  ├── company_id, student_id → profiles, rank_id → belt_ranks (same gym), achieved_on (date, null = unknown)
+  ├── source (joined | backfill | manual | exam), exam_id → grading_exams (null; exams are Phase 2)
+  └── created_by → profiles, created_at
+
+grading_exams, grading_exam_candidates (Phase 2: exam scheduling, parent notices, results; tables exist, no UI yet)
 
 exercise_logs (weight / reps per exercise per session, #80)
   ├── session_id → logged_sessions, client_id → profiles, company_id → companies (copies, checked by RLS)
@@ -418,6 +431,8 @@ Playwright smoke tests (`e2e/smoke.spec.ts`, shared fixture `e2e/fixtures.ts`, c
 **Generated child logins (`lib/phone.ts`):** a child added with no phone of their own gets `generatedStudentLogin()` = `student-<8 a–z / 0–9>@getcoachboard.in` and a random 16-character password (made in `create-user`), `profiles.phone` null, so siblings can share a parent's phone. `isGeneratedLogin()` spots them; they are not phone logins (`isPhoneLogin` false, so `update-client` never moves them) and count as "no login" (`isNoLogin`, `shownEmail`). Never shown anywhere; Super Admin shows "No login (child)". The phone-login rule for everyone else is unchanged.
 
 **Today's schedule (`/company/today[?date=]`, rules in `lib/today-schedule.ts`):** read-only day view for owner / partners (proxy: `/company`), linked from the dashboard above the Training card when the Train module is on and the gym has PT clients. Gyms and individual coaches (`isCoachCompany`: titled "My day", no coach names, coach filter or "covered by"); never dojos (they use Attendance → All of today). Data: PT clients (not archived, latest membership not ended before the day; no membership = kept), plans that started in the 6 days up to the day, that day's `logged_sessions`, staff via `loadGymStaff` — 5 reads in parallel, nothing added to the dashboard's own load. **Workout time is per plan** (`weekly_plans.workout_time`, text: `18:30` from the time picker or older free text, read with `timeMinutes`), so one time for the plan's whole week. Expected = the plan covering the day (`planCovering`) has a workout day on it (or is an undatable "Day 1, Day 2…" plan); rest day / no plan = not expected. Status: a session that day = **Trained** (newest session names the logger, `loggedByLabel`; amber "covered by X" when staff other than the client's primary coach logged it); else past day = **Not logged**, future = **Expected**, today = Not logged once `GRACE_MINUTES` (60) passed after the workout time, else Expected (no readable time = Expected). Bottom sections: "Also trained" (trained on a rest day / with no plan) and "No time set" (expected with no readable time, then no plan this week). Coach filter = clients whose primary coach is that person plus anyone they logged that day; "No coach" chip for clients without one. Today / now = device time (IST for Indian gyms), like the rest of the app.
+
+**Belt grading (Phase 1, `supabase/migrations/20261110120000_belt_grading.sql`, run on Mumbai 10 Nov):** gated by `companies.grading_enabled` (`gradingOn()` in `lib/belts.ts`; on for DSSKA). **Current belt + history rule:** `profiles.current_rank_id` / `rank_achieved_on` hold the CURRENT belt (fast for lists); `student_grades` is the history log, and every change of `current_rank_id` appends a row, written only by the server (`create-user` / `update-client`, `lib/belts-server.ts`): Add Student = `joined` (default White, belt since = the membership start date), first belt set later = `backfill`, a change = `manual`; the same belt with a corrected date fixes `achieved_on` on its latest row. A set belt can be changed, not cleared; existing students without one show "Belt not set" (never auto-assigned). Phase 1 UI is only the Belt + "Belt since" fields on Add Student and the student's Profile tab (Edit, owner / partner; read-only line for everyone else). Labels: `beltLabel` ("White", "Yellow – 8th kyu"). No chips, exams or results yet (Phase 2). Check: `scripts/check-belts.ts`. RLS: `belt_ranks` / `grading_exams` readable by the whole gym; `student_grades` / `grading_exam_candidates` by staff (incl. coaches) and the student themselves; writes owner / partner (+ super admin).
 
 **Membership latest record:** Always sort by `start_date DESC`, take index `[0]`. This is the active plan.
 

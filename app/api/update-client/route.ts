@@ -6,6 +6,8 @@ import { COUNTRIES } from '@/lib/locale'
 import { splitE164, loginEmailFor, isPhoneLogin, toE164 } from '@/lib/phone'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { checkPlacement } from '@/lib/placement-server'
+import { gradingOn, gradeSource, validIsoDate } from '@/lib/belts'
+import { checkBelt, addGradeHistory } from '@/lib/belts-server'
 
 export async function POST(request: Request) {
   const supabaseAdmin = createClient(
@@ -107,6 +109,36 @@ export async function POST(request: Request) {
     updates.batch_id = placed.batch_id
   }
 
+  // Belt + "Belt since" (dojos with Grading on, lib/belts.ts). A set belt can be changed, not cleared.
+  // History (student_grades) is written after the profile saves: a new belt = a new row ('backfill' if there was none,
+  // else 'manual'); the same belt with a corrected date = the date fixed on its latest row.
+  let beltChange: { companyId: string; previous: string | null; rankId: string; date: string | null; rankChanged: boolean; dateChanged: boolean } | null = null
+  if ('current_rank_id' in body || 'rank_achieved_on' in body) {
+    const co = await loadCompany()
+    if (!gradingOn(co as { grading_enabled?: boolean | null } | null)) {
+      return NextResponse.json({ error: 'Grading is off for this gym' }, { status: 400 })
+    }
+    const { data: target } = await supabaseAdmin.from('profiles').select('*').eq('id', user_id).single()
+    const t = target as { company_id?: string | null; current_rank_id?: string | null; rank_achieved_on?: string | null } | null
+    const previous = t?.current_rank_id ?? null
+    const rankId: string | null = 'current_rank_id' in body ? (body.current_rank_id || null) : previous
+    const date: string | null = 'rank_achieved_on' in body ? (body.rank_achieved_on || null) : (t?.rank_achieved_on ?? null)
+    if (!rankId) {
+      if (previous) return NextResponse.json({ error: 'Pick a belt' }, { status: 400 })
+      if (date) return NextResponse.json({ error: 'Pick the belt first, then the date' }, { status: 400 })
+    } else {
+      const ok = await checkBelt(supabaseAdmin, t?.company_id, rankId, previous)
+      if ('error' in ok) return NextResponse.json({ error: ok.error }, { status: 400 })
+      if (date && !validIsoDate(date)) return NextResponse.json({ error: 'Enter a valid "Belt since" date' }, { status: 400 })
+      updates.current_rank_id = rankId
+      updates.rank_achieved_on = date
+      beltChange = {
+        companyId: t!.company_id!, previous, rankId, date,
+        rankChanged: rankId !== previous, dateChanged: date !== (t?.rank_achieved_on ?? null),
+      }
+    }
+  }
+
   // Update profile row. .select() so a save that touched no row (wrong id) shows as an error, not "Saved"
   if (Object.keys(updates).length) {
     const { data: saved, error: profileError } = await supabaseAdmin
@@ -117,6 +149,23 @@ export async function POST(request: Request) {
 
     if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
     if (!saved?.length) return NextResponse.json({ error: "Couldn't save: the client wasn't found" }, { status: 400 })
+  }
+
+  let warning: string | undefined
+  if (beltChange?.rankChanged) {
+    const historyError = await addGradeHistory(supabaseAdmin, {
+      company_id: beltChange.companyId, student_id: user_id, rank_id: beltChange.rankId,
+      achieved_on: beltChange.date, source: gradeSource(beltChange.previous), created_by: caller.userId,
+    })
+    if (historyError) { console.error('Belt history insert error:', historyError); warning = "Belt saved, but its history row wasn't" }
+  } else if (beltChange?.dateChanged) {
+    const { data: latest } = await supabaseAdmin.from('student_grades').select('id')
+      .eq('student_id', user_id).eq('rank_id', beltChange.rankId)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (latest) {
+      const { error: dateError } = await supabaseAdmin.from('student_grades').update({ achieved_on: beltChange.date }).eq('id', latest.id)
+      if (dateError) { console.error('Belt history date error:', dateError); warning = "Belt date saved, but its history row wasn't updated" }
+    }
   }
 
   // If phone changed and account is phone-based, update auth email to match.
@@ -135,5 +184,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, ...(warning ? { warning } : {}) })
 }

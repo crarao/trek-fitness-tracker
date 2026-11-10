@@ -23,6 +23,7 @@ import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions } from '@/lib/belts'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
@@ -67,6 +68,9 @@ type ClientProfile = {
   // Branch and home batch (db/2026-11-03-branches-batches.md): undefined before that SQL runs
   branch_id?: string | null
   batch_id?: string | null
+  // Current belt (belt grading, lib/belts.ts): undefined before that SQL runs
+  current_rank_id?: string | null
+  rank_achieved_on?: string | null
 }
 
 // Owner, partners and coaches of the gym (names for "by Coach X", the primary-coach dropdown)
@@ -233,8 +237,12 @@ export default function ClientDetailPage() {
     fitness_level: '', food_preference: '', meals_per_day: '', available_days: '',
     medical_conditions: '', emergency_contact_name: '', emergency_contact_phone: '',
     guardian_name: '', guardian_phone: '', guardian_relation: '',
-    branch_id: '', batch_id: ''
+    branch_id: '', batch_id: '',
+    rank_id: '', belt_since: ''
   })
+  // Belt grading (companies.grading_enabled; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
+  const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
+  const beltsOn = beltRanks.length > 0
   // Dojo branches & batches (db/2026-11-03-branches-batches.md): loaded with the client; empty / off before the SQL
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
@@ -522,6 +530,13 @@ export default function ClientDetailPage() {
           .single()
         setClient(clientData)
         if (clientData?.company_id) setCompanyId(clientData.company_id)
+        // Belt grading on: the gym's belts (Profile tab); an error = none yet, fields stay hidden
+        if (clientData?.company_id && gradingOn((clientData as { companies?: { grading_enabled?: boolean | null } }).companies)) {
+          const { data: ranks, error: ranksError } = await supabase.from('belt_ranks').select(BELT_RANK_COLUMNS)
+            .eq('company_id', clientData.company_id).order('rank_order')
+          if (ranksError) console.error('Belt ranks error:', ranksError)
+          else setBeltRanks((ranks || []) as BeltRank[])
+        }
         // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
         const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
         if (clientData?.company_id && isDojo(bt)) {
@@ -1069,6 +1084,28 @@ const handleSaveClientProfile = async () => {
       showToast("Couldn't save the batch: " + result.error, 'error')
       return
     }
+  }
+  // Belt + since when: through update-client (checks the belt, writes the history row), only when changed
+  if (beltsOn && client
+      && ((clientProfileForm.rank_id || null) !== (client.current_rank_id || null)
+          || (clientProfileForm.belt_since || null) !== (client.rank_achieved_on || null))) {
+    if (!clientProfileForm.rank_id && clientProfileForm.belt_since) {
+      setSavingClientProfile(false)
+      showToast('Pick the belt first, then the date', 'error')
+      return
+    }
+    const response = await fetch('/api/update-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: clientId, current_rank_id: clientProfileForm.rank_id || null, rank_achieved_on: clientProfileForm.belt_since || null })
+    })
+    const result = await response.json().catch(() => ({ error: "Couldn't save" }))
+    if (result.error) {
+      setSavingClientProfile(false)
+      showToast("Couldn't save the belt: " + result.error, 'error')
+      return
+    }
+    if (result.warning) showToast(result.warning, 'error')
   }
   // Parent / guardian: saved through update-client (checks the phone on the server), only once the columns exist
   if (client && 'guardian_phone' in client) {
@@ -3145,6 +3182,8 @@ const handleResetPassword = async () => {
                 guardian_relation: client?.guardian_relation || '',
                 branch_id: client?.branch_id || '',
                 batch_id: client?.batch_id || '',
+                rank_id: client?.current_rank_id || '',
+                belt_since: client?.rank_achieved_on || '',
               })
               setEditingClientProfile(true)
             }
@@ -3167,6 +3206,28 @@ const handleResetPassword = async () => {
               rows={2}
               className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm resize-none" />
           </div>}
+
+          {/* Belt + since when (belt grading on): a set belt can be changed, not cleared; each change is kept in the history */}
+          {beltsOn && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Belt</label>
+                <select value={clientProfileForm.rank_id} aria-label="Belt"
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, rank_id: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm">
+                  {!client?.current_rank_id && <option value="">Belt not set</option>}
+                  {beltOptions(beltRanks, client?.current_rank_id).map(r => <option key={r.id} value={r.id}>{beltLabel(r)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Belt since</label>
+                <input type="date" aria-label="Belt since"
+                  value={clientProfileForm.belt_since}
+                  onChange={e => setClientProfileForm({ ...clientProfileForm, belt_since: e.target.value })}
+                  className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+              </div>
+            </div>
+          )}
 
           {/* Age + Gender */}
           <div className="grid grid-cols-2 gap-3">
@@ -3478,6 +3539,20 @@ const handleResetPassword = async () => {
                   <p className="text-sm text-white">{batch ? `${batch.name}${batch.is_archived ? ' (archived)' : ''}` : '—'}</p>
                   {batch && batchWhen(batch, country) && <p className="text-xs text-gray-400">{batchWhen(batch, country)}</p>}
                 </div>
+              </div>
+            )
+          })()}
+
+          {/* Belt (belt grading on): read-only here, changed with Edit */}
+          {beltsOn && client && (() => {
+            const rank = beltRanks.find(r => r.id === client.current_rank_id)
+            return (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Belt</p>
+                <p className="text-sm text-white">
+                  {rank ? beltLabel(rank) : <span className="text-gray-400">Belt not set</span>}
+                  {rank && <span className="text-gray-400"> · since {client.rank_achieved_on ? formatDate(client.rank_achieved_on, country, 'medium') : '—'}</span>}
+                </p>
               </div>
             )
           })()}
