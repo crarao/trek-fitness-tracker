@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test:smoke": "playwright test",
-    "test:smoke:report": "playwright show-report"
+    "test:smoke:report": "playwright show-report",
+    "test:regression": "playwright test -c playwright.regression.config.ts",
+    "test:regression:report": "playwright show-report playwright-report-regression"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.85.0",

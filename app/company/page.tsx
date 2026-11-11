@@ -1088,7 +1088,7 @@ export default function CompanyAdminPage() {
               className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
               Logout
             </button>
-            <button
+            <button data-testid="add-member-open"
               onClick={() => { setShowForm(!showForm); setFromLead(null) }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
               + Add {mw.one}
@@ -1186,7 +1186,7 @@ export default function CompanyAdminPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
           <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
+          <p data-testid="slots" data-used={clients.length} data-limit={clientLimit} className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
         </div>
         <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
@@ -1972,7 +1972,7 @@ export default function CompanyAdminPage() {
                     )}
                   </button>
                 ))}
-                <button onClick={() => setActiveFilter('archived')}
+                <button data-testid="members-filter-archived" onClick={() => setActiveFilter('archived')}
                   className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
                     activeFilter === 'archived' ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
                   }`}>
@@ -2234,7 +2234,7 @@ export default function CompanyAdminPage() {
       </div>
       {/* Add Member Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto">
+        <div data-testid="add-member-form" className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto">
           <div className="px-4 py-6 max-w-lg mx-auto">
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-4">
@@ -2503,10 +2503,10 @@ export default function CompanyAdminPage() {
                 )}
               </div>
               {message && (
-                <p className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>
+                <p data-testid="add-member-message" className={`text-sm mt-3 ${message.includes('Error') ? 'text-red-400' : 'text-green-400'}`}>{message}</p>
               )}
               <div className="flex gap-2 mt-4">
-                <button onClick={handleCreateClient} disabled={saving}
+                <button data-testid="add-member-save" onClick={handleCreateClient} disabled={saving}
                   className="flex-1 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-2.5 rounded-lg transition disabled:opacity-50 text-sm">
                   {saving ? 'Creating...' : `Create ${mw.one}`}
                 </button>

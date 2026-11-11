@@ -197,7 +197,7 @@ export default function RollCallPage() {
               <h1 className="text-lg font-bold truncate">{batch?.name || 'Class'}</h1>
               <p className="text-xs text-gray-500 truncate">{[branch?.name, batch ? batchWhen(batch, country) : ''].filter(Boolean).join(' · ')}</p>
             </div>
-            {!loading && !problem && <p className="text-sm shrink-0"><span className="text-green-400 font-bold text-lg">{list.came}</span> <span className="text-gray-500">came</span></p>}
+            {!loading && !problem && <p className="text-sm shrink-0"><span data-testid="came-count" className="text-green-400 font-bold text-lg">{list.came}</span> <span className="text-gray-500">came</span></p>}
           </div>
           <div className="flex items-center justify-between mt-3">
             <button type="button" onClick={() => goDate(addDays(date, -1))} aria-label="Previous day"

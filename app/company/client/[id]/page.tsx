@@ -1971,7 +1971,7 @@ const handleResetPassword = async () => {
 
       {/* Edit Client Panel */}
       {showEditClient && !isCoach && (
-        <div className="bg-gray-900 border-b border-gray-800 px-6 py-5">
+        <div data-testid="edit-member-panel" className="bg-gray-900 border-b border-gray-800 px-6 py-5">
           <div className="max-w-2xl mx-auto space-y-4">
 
             {/* Client details */}
