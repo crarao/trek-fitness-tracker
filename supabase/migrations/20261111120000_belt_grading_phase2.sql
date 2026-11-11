@@ -5,7 +5,8 @@
 -- 2. After testing on the dev link, run in: Mumbai (prod) — coachboard-mumbai  nptxjfvkqjuekgkspemu
 --                                           https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
 -- Check the project ref in the address bar before pressing Run.
--- Status: NOT RUN YET (dev or prod).
+-- Status: ✅ RUN ON DEV 11 Nov 2026 (by Anand); Step 2 checks a–d all as expected.
+--         Mumbai (prod): NOT RUN YET — only when Phase 2 ships to main.
 --
 -- Anand runs this; Claude does not. ADDITIVE ONLY: 5 nullable columns, 1 check rule, 1 trigger,
 -- 2 database functions. No DROP / DELETE / TRUNCATE, no renames, no type changes.
