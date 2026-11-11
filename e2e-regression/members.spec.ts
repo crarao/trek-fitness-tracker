@@ -106,6 +106,8 @@ test.describe.serial('Members', () => {
     try {
       for (let i = 0; i < gap; i++) made.push(await createMember(page, companyId, e2eName('limit filler')))
       await page.reload()
+      // Wait until the dashboard knows its gym (member list loaded); tapping Add earlier sends company_id null
+      await expect(page.getByTestId('slots')).toHaveAttribute('data-used', String(Number(await page.getByTestId('slots').getAttribute('data-limit'))))
       await page.getByTestId('add-member-open').click()
       const form = page.getByTestId('add-member-form')
       await form.getByPlaceholder('Full name').fill(e2eName('over limit'))
