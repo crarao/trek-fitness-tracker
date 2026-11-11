@@ -13,6 +13,8 @@ import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
 import { memberWord, staffWord } from '@/lib/labels'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen, sortDays } from '@/lib/batches'
 import { type AttendanceRow, type RosterStudent, ATTENDANCE_COLUMNS, roster, tapRow, addDays, weekdayOf, cameElsewhere, elsewhereText } from '@/lib/attendance'
 
@@ -29,6 +31,8 @@ export default function RollCallPage() {
   const [problem, setProblem] = useState('')
   const [me, setMe] = useState<{ id: string; role: string; companyId: string } | null>(null)
   const [country, setCountry] = useState<Country>('IN')
+  // Belt grading on: the gym's belts by id (one read); empty = no chips
+  const [beltById, setBeltById] = useState<Record<string, BeltRank>>({})
   const [businessType, setBusinessType] = useState<string | null>(null)
   const [batch, setBatch] = useState<Batch | null>(null)
   const [branch, setBranch] = useState<Branch | null>(null)
@@ -59,16 +63,18 @@ export default function RollCallPage() {
       const { data: profile } = await supabase.from('profiles')
         .select('id, role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
-      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null } | null }).companies
-      const [ba, people, att, gymBatches, staffList] = await Promise.all([
+      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
+      const [ba, people, att, gymBatches, staffList, ranks] = await Promise.all([
         supabase.from('batches').select(BATCH_COLUMNS).eq('id', batchId).maybeSingle(),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
-        supabase.from('profiles').select('id, full_name, batch_id, archived_at').eq('company_id', profile.company_id)
+        supabase.from('profiles').select('id, full_name, batch_id, archived_at, current_rank_id').eq('company_id', profile.company_id)
           .eq('role', 'client').is('archived_at', null).order('full_name'),
         // The whole day across batches, to warn when a student already came to another class
         supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', profile.company_id).eq('class_date', date),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', profile.company_id),
         loadGymStaff(profile.company_id as string),
+        // Belt grading on: the gym's belts once, for the chips
+        gradingOn(co) ? supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', profile.company_id) : null,
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: profile.company_id as string })
@@ -85,6 +91,8 @@ export default function RollCallPage() {
       setRows((att.data || []) as AttendanceRow[])
       setAllBatches((gymBatches.data || []) as Batch[])
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
+      if (ranks?.error) console.error('Belt ranks error:', ranks.error)
+      setBeltById(beltsById((ranks && !ranks.error ? ranks.data || [] : []) as BeltRank[]))
       setLoading(false)
     })()
     return () => { live = false }
@@ -154,7 +162,10 @@ export default function RollCallPage() {
           {present ? '✓' : ''}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block truncate text-sm font-medium">{s.full_name}</span>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="truncate text-sm font-medium">{s.full_name}</span>
+            <BeltChip rank={beltById[s.current_rank_id || '']} />
+          </span>
           {also && <span className="block text-[11px] text-amber-300 truncate">⚠ {present ? 'Also came today' : 'Already came today'} · {also}</span>}
         </span>
         {dropIn && <span className="text-[11px] text-sky-300 border border-sky-900 bg-sky-950/60 px-1.5 py-0.5 rounded">Drop-in</span>}

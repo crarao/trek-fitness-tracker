@@ -22,7 +22,7 @@ export type AttendanceRow = {
 }
 export const ATTENDANCE_COLUMNS = 'id, company_id, batch_id, profile_id, class_date, present, is_drop_in, marked_by, marked_at'
 
-export type RosterStudent = { id: string; full_name: string; batch_id?: string | null; archived_at?: string | null }
+export type RosterStudent = { id: string; full_name: string; batch_id?: string | null; archived_at?: string | null; current_rank_id?: string | null }
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 

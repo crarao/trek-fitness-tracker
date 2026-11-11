@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import { type TodaySession, missedAndDue, loggerOf, sessionsByLogger } from '@/lib/todays-sessions'
 import { type ExercisesDone } from '@/lib/plan-structure'
@@ -17,7 +17,8 @@ import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type Lead
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
-import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions, defaultBeltId } from '@/lib/belts'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions, defaultBeltId, beltsById } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
@@ -51,6 +52,8 @@ type Client = {
   // Branch and home batch (db/2026-11-03-branches-batches.md): undefined before that SQL runs
   branch_id?: string | null
   batch_id?: string | null
+  // Current belt (belt grading, lib/belts.ts)
+  current_rank_id?: string | null
 }
 
 // Coach logins (ROADMAP #40): PT clients and plans only. Off = archived_at set (never deleted).
@@ -139,6 +142,7 @@ export default function CompanyAdminPage() {
   // Belt grading (companies.grading_enabled, super admin; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
   const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
   const beltsOn = beltRanks.length > 0
+  const beltById = useMemo(() => beltsById(beltRanks), [beltRanks])
   const [currency, setCurrency] = useState<string | null>(null)
   const [country, setCountry] = useState<Country | null>(null)
   // Multi-country gyms (super admin switch): clients have their own country / currency, payments any allowed currency.
@@ -2122,6 +2126,7 @@ export default function CompanyAdminPage() {
                           <div>
                             <div className="flex flex-wrap items-center gap-1.5">
                               <p className="font-medium text-white text-sm">{client.full_name}</p>
+                              {beltsOn && <BeltChip rank={beltById[client.current_rank_id || '']} showNone={activeFilter !== 'archived'} />}
                               {client.client_type === 'pt' && !dojo && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
                               )}
