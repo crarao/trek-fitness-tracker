@@ -79,7 +79,7 @@ test.describe.serial('Members', () => {
     // Only when that takes a few members: a big gap would mean creating dozens of rows on every run.
     const maxFill = Number(process.env.E2E_MAX_FILL || 5)
     const candidates: Role[] = ['gymOwner', 'soloOwner']
-    let pick: { role: Role; gap: number } | null = null
+    let pick: { role: Role; gap: number; limit: number } | null = null
     for (const role of candidates) {
       const page = await as(role)
       await page.goto('/company')
@@ -91,14 +91,14 @@ test.describe.serial('Members', () => {
       const limit = Number(await slots.getAttribute('data-limit'))
       const gap = limit - used
       console.log(`R13: ${role} ${used} active member(s), limit ${limit}, ${gap} free`)
-      if (!pick || gap < pick.gap) pick = { role, gap }
+      if (!pick || gap < pick.gap) pick = { role, gap, limit }
       await page.context().close()
     }
     console.log(`R13: smallest gap ${pick?.gap} free slot(s) (${pick?.role})`)
     test.skip(!pick || pick.gap > maxFill,
       `QA Gym / QA Solo have ${pick?.gap} free slots (over E2E_MAX_FILL=${maxFill}). Lower QA Solo's client limit on dev to its member count + 1 to run this.`)
 
-    const { role, gap } = pick!
+    const { role, gap, limit } = pick!
     const page = await as(role)
     await page.goto('/company')
     const companyId = await myCompanyId(role)
@@ -107,7 +107,8 @@ test.describe.serial('Members', () => {
       for (let i = 0; i < gap; i++) made.push(await createMember(page, companyId, e2eName('limit filler')))
       await page.reload()
       // Wait until the dashboard knows its gym (member list loaded); tapping Add earlier sends company_id null
-      await expect(page.getByTestId('slots')).toHaveAttribute('data-used', String(Number(await page.getByTestId('slots').getAttribute('data-limit'))))
+      await expect(page.getByTestId('slots')).toHaveAttribute('data-limit', String(limit))
+      await expect(page.getByTestId('slots')).toHaveAttribute('data-used', String(limit))
       await page.getByTestId('add-member-open').click()
       const form = page.getByTestId('add-member-form')
       await form.getByPlaceholder('Full name').fill(e2eName('over limit'))
