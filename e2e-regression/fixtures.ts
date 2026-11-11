@@ -39,7 +39,7 @@ const MOCK_PLAN_TEXT = WEEK.map(d => `${d} – E2E Full Body\n- Squat – 3×10\
 
 // ---------- Guard ----------
 
-export type Report = { blocked: string[]; errors: string[]; badResponses: string[]; aiMocked: number }
+export type Report = { blocked: string[]; errors: string[]; badResponses: string[]; aiMocked: number; refused: string[] }
 
 async function guardContext(context: BrowserContext, report: Report, allow: RegExp[]) {
   const bypass = process.env.E2E_VERCEL_BYPASS
@@ -90,8 +90,19 @@ async function guardContext(context: BrowserContext, report: Report, allow: RegE
       if ([...CONSOLE_ALLOW_LIST, ...allow].some(re => re.test(text) || re.test(where))) return
       report.errors.push(`console.error: ${text}${where}`)
     })
-    page.on('response', res => {
+    page.on('response', async res => {
       if (res.status() >= 500) report.badResponses.push(`${res.status()} ${res.request().method()} ${res.url()}`)
+      // A refused Supabase request: keep the database's own message and who the token was (for diagnosis)
+      if (res.status() >= 400 && res.status() < 500 && res.url().includes('/rest/v1/')) {
+        const auth = res.request().headers().authorization || ''
+        let who = 'no token'
+        try {
+          const c = JSON.parse(Buffer.from(auth.slice(7).split('.')[1], 'base64url').toString())
+          who = `sub ${c.sub ?? '-'} role ${c.role} session ${c.session_id ?? '-'} exp ${c.exp ? new Date(c.exp * 1000).toISOString() : '-'}`
+        } catch { /* not a JWT */ }
+        const body = (await res.text().catch(() => '')).slice(0, 300)
+        report.refused.push(`${res.status()} ${res.request().method()} ${res.url().split('?')[0]} [${who}] ${body}`)
+      }
     })
     page.on('dialog', d => d.accept()) // Archive asks "Archive X?" with confirm(); Delete is never clicked
   }
@@ -110,13 +121,17 @@ export const test = base.extend<Fixtures>({
   allowedConsoleErrors: [undefined, { option: true }],
 
   report: [async ({ context, allowedConsoleErrors }, provide, testInfo) => {
-    const report: Report = { blocked: [], errors: [], badResponses: [], aiMocked: 0 }
+    const report: Report = { blocked: [], errors: [], badResponses: [], aiMocked: 0, refused: [] }
     await guardContext(context, report, allowedConsoleErrors ? [allowedConsoleErrors] : [])
     await provide(report)
     const problems: string[] = []
     if (report.blocked.length) problems.push(`Blocked requests:\n  ${report.blocked.join('\n  ')}`)
     if (report.errors.length) problems.push(`Console / page errors:\n  ${report.errors.join('\n  ')}`)
     if (report.badResponses.length) problems.push(`Bad responses:\n  ${report.badResponses.join('\n  ')}`)
+    if (report.refused.length) {
+      await testInfo.attach('refused-requests', { body: report.refused.join('\n'), contentType: 'text/plain' })
+      if (testInfo.status !== testInfo.expectedStatus || problems.length) console.log(`Refused Supabase requests in "${testInfo.title}":\n  ${report.refused.join('\n  ')}`)
+    }
     if (problems.length) {
       await testInfo.attach('guard-report', { body: problems.join('\n\n'), contentType: 'text/plain' })
       throw new Error(problems.join('\n\n'))

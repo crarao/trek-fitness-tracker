@@ -84,6 +84,8 @@ test.describe.serial('Members', () => {
       const page = await as(role)
       await page.goto('/company')
       const slots = page.getByTestId('slots')
+      // The counter shows 0 until the member list has loaded: wait for a seeded member first
+      await expect(page.locator(`[data-testid="member-row"][data-name="${role === 'gymOwner' ? 'QA Active' : 'QA Solo Client'}"]`)).toBeVisible()
       await expect(slots).toBeVisible()
       const used = Number(await slots.getAttribute('data-used'))
       const limit = Number(await slots.getAttribute('data-limit'))

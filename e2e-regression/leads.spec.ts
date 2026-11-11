@@ -12,6 +12,7 @@ test.describe.serial('Leads', () => {
   test('R14 add an enquiry', async ({ as }) => {
     const page = await as('gymOwner')
     await page.goto('/company/leads')
+    await expect(page.getByTestId('page-leads')).toBeVisible() // list loaded (the gym is known) before adding
     await page.getByRole('button', { name: '+ Add enquiry' }).click()
     await page.getByPlaceholder('Name', { exact: true }).fill(name)
     await page.locator('input[type="tel"]').first().fill(fakeIndianMobile())
