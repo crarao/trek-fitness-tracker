@@ -1,7 +1,7 @@
 // Belt grading Phase 2, PR A (QA Dojo, dev only: grading is on for QA Dojo there): belt chips + belt history.
 // Own E2E student: joins as White, then moves to the next belt; archived at the end. Seeded records are not touched.
 import { test, expect, rest, e2eName, myCompanyId, createMember, callApi, archiveMember } from './fixtures'
-import { todayIST } from './helpers'
+import { todayIST, fakeIndianMobile } from './helpers'
 
 type Rank = { id: string; rank_order: number; belt_name: string; kyu: number | null; is_active: boolean }
 
@@ -115,6 +115,93 @@ test.describe.serial('Grading exam: schedule + pick', () => {
     await page.getByTestId('exam-cancel').click()
     await expect.poll(async () => (await rest('dojoOwner').get<{ status: string }>(`grading_exams?select=status&id=eq.${examId}`)).rows[0]?.status)
       .toBe('cancelled')
+  })
+
+  test.afterAll(async () => {
+    if (examId) await rest('dojoOwner').patch(`grading_exams?id=eq.${examId}&status=eq.scheduled`, { status: 'cancelled' })
+    for (const id of ids) await archiveMember('dojoOwner', id)
+  })
+})
+
+// Phase 2, PR C: notice → exam day (fee paid, Pass / Fail) → Save results (belts move, 'exam' history row)
+// → Save again changes nothing → Undo puts the belts back. Own E2E students; exam cancelled and students archived at the end.
+test.describe.serial('Grading exam: notices, results, undo', () => {
+  const passer = e2eName('grading pass')
+  const failer = e2eName('grading fail')
+  const ids: string[] = []
+  let examId = ''
+  type Prof = { current_rank_id: string | null; rank_achieved_on: string | null }
+  const profileOf = async (id: string) => (await rest('dojoOwner').get<Prof>(`profiles?select=current_rank_id,rank_achieved_on&id=eq.${id}`)).rows[0]
+  const examRows = async (id: string) => (await rest('dojoOwner').get<{ source: string; rank_id: string; voided_at: string | null }>(
+    `student_grades?select=source,rank_id,voided_at&student_id=eq.${id}&exam_id=eq.${examId}`)).rows
+
+  test('R23 notice, results, save twice, undo', async ({ as }) => {
+    const ranks = (await rest('dojoOwner').get<Rank>('belt_ranks?select=id,rank_order,belt_name,kyu,is_active&is_active=eq.true&order=rank_order')).rows
+    test.skip(ranks.length < 2, 'QA Dojo has no belt ladder on this database (grading not set up)')
+    const page = await as('dojoOwner')
+    await page.context().route('https://wa.me/**', r => r.abort())   // the WhatsApp tab is never really opened
+    await page.goto('/company')
+    const companyId = await myCompanyId('dojoOwner')
+    const since = new Date(Date.now() - 200 * 86_400_000).toISOString().slice(0, 10)
+    for (const name of [passer, failer]) {
+      ids.push(await createMember(page, companyId, name, { current_rank_id: ranks[0].id, rank_achieved_on: since,
+        guardian_name: 'E2E Parent', guardian_phone: fakeIndianMobile(), guardian_relation: 'Mother' }))
+    }
+    // An exam today (past dates are allowed), one fee
+    const made = await rest('dojoOwner').post<{ id: string }>('grading_exams', { company_id: companyId, exam_date: todayIST(), fee_amount: 500, status: 'scheduled' })
+    expect(made.status, 'could not add the E2E exam').toBeLessThan(300)
+    examId = made.rows[0].id
+    await page.goto(`/company/grading/${examId}`)
+    await expect(page.getByTestId('page-grading-exam')).toBeVisible()
+    for (const name of [passer, failer]) {
+      const box = page.getByRole('checkbox', { name: `${name} sits the exam` })
+      await box.click()
+      await expect(box).toHaveAttribute('aria-checked', 'true')
+    }
+
+    // Notices: Send opens WhatsApp to the parent and marks it sent
+    await page.getByTestId('step-notices').click()
+    const notice = page.locator(`[data-testid="notice-row"][data-name="${passer}"]`)
+    const send = notice.getByTestId('notice-send')
+    await expect(send).toHaveAttribute('href', /^https:\/\/wa\.me\/91\d{10}\?text=Namaste/)
+    const popup = page.waitForEvent('popup').catch(() => null)
+    await send.click()
+    await (await popup)?.close()
+    await expect(notice.getByTestId('notice-send-sent')).toBeVisible()
+
+    // Exam day: Save is off until both are marked
+    await page.getByTestId('step-day').click()
+    const save = page.getByTestId('results-save')
+    await expect(save).toBeDisabled()
+    const passRow = page.locator(`[data-testid="day-row"][data-name="${passer}"]`)
+    await passRow.getByLabel(`${passer} fee paid`).check()
+    await passRow.getByTestId('result-pass').click()
+    await expect(passRow.getByTestId('result-pass')).toHaveAttribute('aria-pressed', 'true')
+    await expect(save).toBeDisabled()
+    await page.locator(`[data-testid="day-row"][data-name="${failer}"]`).getByTestId('result-fail').click()
+    await expect(save).toBeEnabled()
+    page.once('dialog', d => d.accept())
+    await save.click()
+    await expect(page.getByTestId('results')).toBeVisible()
+
+    // The pass moved up one belt from the exam date, with an 'exam' history row; the fail didn't change
+    await expect.poll(async () => (await profileOf(ids[0]))?.current_rank_id).toBe(ranks[1].id)
+    expect((await profileOf(ids[0]))?.rank_achieved_on).toBe(todayIST())
+    expect(await examRows(ids[0])).toEqual([expect.objectContaining({ source: 'exam', rank_id: ranks[1].id, voided_at: null })])
+    expect((await profileOf(ids[1]))?.current_rank_id).toBe(ranks[0].id)
+    expect(await examRows(ids[1])).toEqual([])
+
+    // Save again (straight to the database function): nothing changes
+    const twice = await rest('dojoOwner').post<{ ok: boolean; already?: boolean }>('rpc/save_grading_results', { p_exam_id: examId })
+    expect(twice.status).toBeLessThan(300)
+    expect(await examRows(ids[0])).toHaveLength(1)
+
+    // Undo: the belt goes back, the exam row is kept but marked undone, the exam is open again
+    page.once('dialog', d => d.accept())
+    await page.getByTestId('results-undo').click()
+    await expect.poll(async () => (await profileOf(ids[0]))?.current_rank_id).toBe(ranks[0].id)
+    expect((await examRows(ids[0]))[0]?.voided_at).not.toBeNull()
+    await expect(page.getByTestId('results-save')).toBeVisible()
   })
 
   test.afterAll(async () => {

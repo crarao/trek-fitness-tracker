@@ -3,6 +3,12 @@
 // (one row each time current_rank_id changes: 'joined' on Add, 'backfill' when first set later, 'manual' on a change).
 // Shown only when companies.grading_enabled is true (super admin; on for DSSKA). Check: scripts/check-belts.ts
 
+import { type Country, formatDate, greet } from './locale'
+import { formatMoney } from './currency'
+import { pickRecipient, type GuardianFields } from './guardian'
+import { waDigits } from './phone'
+import { timeLabel } from './batches'
+
 export type BeltRank = {
   id: string
   rank_order: number
@@ -273,4 +279,104 @@ export function feeSummary(
     groups.set(Number(v), [...(groups.get(Number(v)) || []), beltLabel(r)])
   }
   return [base, ...[...groups].map(([v, names]) => `${names.join(', ')} ${money(v)}`)].join(' · ')
+}
+
+// ── PR C: parent messages (notice, result, cancelled). Pure: the page opens wa.me with the text ─────
+
+export type GradingParty = GuardianFields  // the student: full_name, phone, guardian_name / _phone
+
+// Who it goes to (pickRecipient: the parent when their phone is a WhatsApp number, else the student) + greeting name
+export function gradingRecipient(student: GradingParty, country: Country | null): { waDigits: string | null; greetName: string; toParent: boolean } {
+  const to = pickRecipient(student, raw => waDigits(raw, country))
+  const first = (n: string | null | undefined) => (n || '').trim().split(/\s+/)[0] || ''
+  return { waDigits: to.phone, greetName: to.toParent ? first(student.guardian_name) : first(student.full_name), toParent: to.toParent }
+}
+
+const firstOf = (n: string | null | undefined) => (n || '').trim().split(/\s+/)[0] || ''
+
+// Exam notice (decision: no he / she / they; the name is repeated). UPI lines only with a fee and the gym's UPI ID.
+export function gradingNoticeText(opts: {
+  student: GradingParty
+  exam: Pick<GradingExam, 'exam_date' | 'exam_time' | 'venue' | 'notes' | 'fee_amount' | 'belt_fees'>
+  from: Pick<BeltRank, 'belt_name' | 'kyu'> | null | undefined
+  to: Pick<BeltRank, 'id' | 'belt_name' | 'kyu'>
+  gymName: string
+  currency: string | null
+  country: Country | null
+  upiId?: string | null
+}): string {
+  const { exam, country } = opts
+  const r = gradingRecipient(opts.student, country)
+  const kid = firstOf(opts.student.full_name)
+  const when = [formatDate(exam.exam_date, country, 'weekday'), exam.exam_time ? timeLabel(exam.exam_time, country) : ''].filter(Boolean).join(', ')
+  const fee = beltFee(exam, opts.to.id)
+  const upi = (opts.upiId || '').trim()
+  const lines = [
+    greet(r.greetName, `${r.toParent ? `${kid}'s` : 'your'} belt grading is on *${when}*${exam.venue ? ` at ${exam.venue}` : ''}.`, country),
+    `Grading: ${beltLabel(opts.from)} → *${beltLabel(opts.to)}*`,
+    ...(fee != null && fee > 0 ? [`Exam fee: *${formatMoney(fee, opts.currency || 'INR')}*`] : []),
+    ...(fee != null && fee > 0 && upi ? [`Pay via UPI: *${upi}* (please add "${(opts.student.full_name || "").trim()}" in the payment note)`] : []),
+    ...((exam.notes || '').trim() ? ['', (exam.notes || '').trim()] : []),
+    '',
+    `— ${opts.gymName.trim()} 🥋`,
+  ]
+  return lines.join('\n')
+}
+
+// Result: pass → the new belt; fail → kind, no pronouns (wording agreed 12 Nov)
+export function gradingResultText(opts: {
+  student: GradingParty
+  result: 'pass' | 'fail'
+  examDate: string
+  from: Pick<BeltRank, 'belt_name' | 'kyu'> | null | undefined
+  to: Pick<BeltRank, 'belt_name' | 'kyu'>
+  gymName: string
+  country: Country | null
+}): string {
+  const r = gradingRecipient(opts.student, opts.country)
+  const kid = firstOf(opts.student.full_name)
+  const date = formatDate(opts.examDate, opts.country, 'dayMonth')
+  const body = opts.result === 'pass'
+    ? `${r.toParent ? kid : 'you'} passed the grading on ${date} and ${r.toParent ? 'is' : 'are'} now *${beltLabel(opts.to)}*. Well done! 🎉`
+    : r.toParent
+      ? `${kid} worked hard at the grading on ${date}. ${kid} stays ${beltLabel(opts.from)} for now and can try again at the next grading. Keep practising!`
+      : `you worked hard at the grading on ${date}. You stay ${beltLabel(opts.from)} for now and can try again at the next grading. Keep practising!`
+  return `${greet(r.greetName, body, opts.country)}\n— ${opts.gymName.trim()} 🥋`
+}
+
+// The exam was cancelled (sent to those who had the notice)
+export function gradingCancelText(opts: { student: GradingParty; examDate: string; gymName: string; country: Country | null }): string {
+  const r = gradingRecipient(opts.student, opts.country)
+  const kid = firstOf(opts.student.full_name)
+  const body = `${r.toParent ? `${kid}'s` : 'your'} belt grading on ${formatDate(opts.examDate, opts.country, 'dayMonth')} is cancelled. We will share the new date soon.`
+  return `${greet(r.greetName, body, opts.country)}\n— ${opts.gymName.trim()} 🥋`
+}
+
+export const waLink = (digits: string, text: string) => `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
+
+// Save results is allowed when every student on the list has Pass or Fail
+export function resultsReady(cands: Pick<ExamCandidate, 'result' | 'removed_at'>[]): boolean {
+  const on = cands.filter(c => !c.removed_at)
+  return on.length > 0 && on.every(c => c.result === 'pass' || c.result === 'fail')
+}
+
+// Save / Undo replies (rpc jsonb) → a sentence for the owner
+export function gradingRpcMessage(res: { ok?: boolean; error?: string; names?: string[]; promoted?: number; failed?: number; skipped?: number; undone?: number; already?: boolean } | null): string {
+  if (!res) return 'No reply from the server. Try again.'
+  if (res.ok) {
+    if (res.already) return 'Results were already saved.'
+    if (res.undone != null) return `Undone: ${res.undone} belt${res.undone === 1 ? '' : 's'} put back.`
+    return `Saved ✓ ${res.promoted ?? 0} promoted${res.failed ? `, ${res.failed} stay` : ''}${res.skipped ? `, ${res.skipped} already done` : ''}.`
+  }
+  const names = (res.names || []).join(', ')
+  switch (res.error) {
+    case 'missing_results': return `Mark Pass or Fail for: ${names}`
+    case 'belt_changed': return `Nothing saved. These belts changed since they were picked: ${names}. Untick and tick them again.`
+    case 'belt_changed_since': return `Can't undo: these belts changed after the exam: ${names}.`
+    case 'not_allowed': return 'Only the owner or a partner can do this.'
+    case 'cancelled': return 'This exam is cancelled.'
+    case 'not_completed': return 'Results are not saved yet.'
+    case 'no_candidates': return 'Nobody is on this exam.'
+    default: return `Couldn't save (${res.error || 'unknown'}).`
+  }
 }

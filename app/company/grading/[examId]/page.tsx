@@ -8,6 +8,11 @@
 // Tick saves a grading_exam_candidates row; untick sets removed_at (never erased). A student can be on one scheduled
 // exam at a time and a completed / cancelled exam is locked (both also enforced by the database trigger,
 // supabase/migrations/20261111120000_belt_grading_phase2.sql). Senseis see everything read-only.
+// PR C, three steps for a scheduled exam: Pick · Notices (WhatsApp to the parent, sets notice_sent_at) · Exam day
+// (Fee paid tick + Pass / Fail, saved as tapped; nothing changes on the students yet) → Save results =
+// rpc save_grading_results (all-or-nothing: pass = next belt + 'exam' history row, exam completed; safe twice).
+// Completed: each student's new belt / "stays", Tell parent (result_sent_at), Undo results (rpc undo_grading_results).
+// Cancelled: Tell parent: cancelled for those who had the notice (cancel_sent_at).
 
 import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -20,7 +25,8 @@ import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, timeLabel, sort
 import { addDays } from '@/lib/attendance'
 import {
   type BeltRank, type GradingExam, type ExamCandidate, BELT_RANK_COLUMNS, GRADING_EXAM_COLUMNS, beltFee, feeSummary,
-  gradingOn, beltsById, eligibility, notEligibleText, examStatusLabel, examDetailsChanged, attendanceShare,
+  gradingOn, beltsById, eligibility, notEligibleText, examStatusLabel, examDetailsChanged, attendanceShare, beltLabel,
+  gradingRecipient, gradingNoticeText, gradingResultText, gradingCancelText, waLink, resultsReady, gradingRpcMessage,
 } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
 import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE, feeBelts, beltFeesDraft } from '../exam-form'
@@ -28,8 +34,10 @@ import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE, feeBel
 type Student = {
   id: string; full_name: string; current_rank_id: string | null; rank_achieved_on: string | null
   branch_id: string | null; batch_id: string | null; created_at: string; archived_at: string | null
+  phone: string | null; guardian_name: string | null; guardian_phone: string | null
 }
-const STUDENT_COLUMNS = 'id, full_name, current_rank_id, rank_achieved_on, branch_id, batch_id, created_at, archived_at'
+const STUDENT_COLUMNS = 'id, full_name, current_rank_id, rank_achieved_on, branch_id, batch_id, created_at, archived_at, phone, guardian_name, guardian_phone'
+type Step = 'pick' | 'notices' | 'day'
 // Candidates are read with * so columns added later (Phase 2 SQL) are picked up without breaking older databases
 const CAND = '*'
 
@@ -44,6 +52,11 @@ export default function GradingExamPage() {
   const [currency, setCurrency] = useState('INR')
   const [businessType, setBusinessType] = useState<string | null>(null)
   const [canEdit, setCanEdit] = useState(false)
+  const [gymName, setGymName] = useState('')
+  const [upiId, setUpiId] = useState('')
+  const [step, setStep] = useState<Step | null>(null)   // null = pick the right one for the exam once it loads
+  const [reloadKey, setReloadKey] = useState(0)        // bump after Save / Undo results: read everything again
+  const [working, setWorking] = useState(false)
   const [exam, setExam] = useState<GradingExam | null>(null)
   const [ranks, setRanks] = useState<BeltRank[]>([])
   const [students, setStudents] = useState<Student[]>([])
@@ -81,7 +94,9 @@ export default function GradingExamPage() {
       const { data: profile } = await supabase.from('profiles')
         .select('role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
-      const co = (profile as unknown as { companies: { country?: string | null; currency?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
+      const co = (profile as unknown as { companies: { name?: string | null; upi_id?: string | null; country?: string | null; currency?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
+      setGymName(co?.name || '')
+      setUpiId(co?.upi_id || '')
       const cId = profile.company_id as string
       setCompanyId(cId)
       setCountry(normalizeCountry(co?.country))
@@ -126,6 +141,10 @@ export default function GradingExamPage() {
         people = [...people, ...((extra.data || []) as Student[])]
       }
       setExam(e)
+      // First step shown: Exam day once the date has come (or results), else Pick
+      // (only when someone is already picked: an empty list stays on Pick while you tick)
+      const anyPicked = ((cand.data || []) as ExamCandidate[]).some(c => !c.removed_at)
+      setStep(s => s ?? (e.exam_date <= localDateIso() && anyPicked ? 'day' : 'pick'))
       setRanks((rk.data || []) as BeltRank[])
       setStudents(people)
       setCandidates((cand.data || []) as ExamCandidate[])
@@ -143,7 +162,7 @@ export default function GradingExamPage() {
       setLoading(false)
     })()
     return () => { live = false }
-  }, [examId, router])
+  }, [examId, router, reloadKey])
 
   const beltById = useMemo(() => beltsById(ranks), [ranks])
   const batchById = useMemo(() => Object.fromEntries(batches.map(b => [b.id, b])), [batches])
@@ -274,6 +293,171 @@ export default function GradingExamPage() {
     if (error || !data?.length) { showToast(error ? "Couldn't cancel: " + error.message : "Couldn't cancel: not allowed for this login", 'error'); return }
     setExam(data[0] as GradingExam)
     showToast('Exam cancelled')
+  }
+
+  // ── PR C actions ─────────────────────────────────────────────────────────────────────────────────
+  const updateCandidate = async (c: ExamCandidate, fields: Record<string, unknown>) => {
+    const { data, error } = await supabase.from('grading_exam_candidates').update(fields).eq('id', c.id).select(CAND)
+    if (error || !data?.length) {
+      showToast(error ? "Couldn't save: " + error.message : "Couldn't save: not allowed for this login", 'error')
+      return false
+    }
+    const row = data[0] as ExamCandidate
+    setCandidates(l => l.map(x => (x.id === row.id ? row : x)))
+    return true
+  }
+  // Opening WhatsApp counts as sent (the link opens in a new tab; this page keeps the tick)
+  const markSent = (c: ExamCandidate, field: 'notice_sent_at' | 'result_sent_at' | 'cancel_sent_at') => {
+    if (canEdit) void updateCandidate(c, { [field]: new Date().toISOString() })
+  }
+  const setResult = (c: ExamCandidate, result: 'pass' | 'fail') => {
+    if (!editable) return
+    void updateCandidate(c, { result: c.result === result ? null : result })   // tap again = not marked
+  }
+  const setFeePaid = (c: ExamCandidate) => { if (canEdit) void updateCandidate(c, { fee_paid: !c.fee_paid }) }
+
+  const saveResults = async () => {
+    if (!exam || !editable || working) return
+    if (!confirm(`Save the results? Passing ${mw.many.toLowerCase()} move up one belt now.`)) return
+    setWorking(true)
+    const { data, error } = await supabase.rpc('save_grading_results', { p_exam_id: exam.id })
+    setWorking(false)
+    if (error) { showToast("Couldn't save: " + error.message, 'error'); return }
+    const res = data as Parameters<typeof gradingRpcMessage>[0]
+    showToast(gradingRpcMessage(res), res?.ok ? 'success' : 'error')
+    if (res?.ok) setReloadKey(k => k + 1)
+  }
+  const undoResults = async () => {
+    if (!exam || !canEdit || exam.status !== 'completed' || working) return
+    if (!confirm('Undo the results? Passing students go back to their old belt and the exam opens again.')) return
+    setWorking(true)
+    const { data, error } = await supabase.rpc('undo_grading_results', { p_exam_id: exam.id })
+    setWorking(false)
+    if (error) { showToast("Couldn't undo: " + error.message, 'error'); return }
+    const res = data as Parameters<typeof gradingRpcMessage>[0]
+    showToast(gradingRpcMessage(res), res?.ok ? 'success' : 'error')
+    if (res?.ok) { setStep('day'); setReloadKey(k => k + 1) }
+  }
+
+  // A WhatsApp button that marks the row as sent; no WhatsApp number → a note
+  const waButton = (r: Row, text: string, sentAt: string | null | undefined, field: 'notice_sent_at' | 'result_sent_at' | 'cancel_sent_at', label: string, testid: string) => {
+    const to = gradingRecipient(r.s, country)
+    const who = to.toParent ? `to ${to.greetName || 'parent'} (parent)` : `to ${to.greetName || mw.one.toLowerCase()}`
+    if (!to.waDigits) return <span className="text-[11px] text-gray-500">No WhatsApp number</span>
+    return (
+      <span className="flex items-center gap-2 shrink-0">
+        {sentAt && <span className="text-[11px] text-green-400" data-testid={`${testid}-sent`}>Sent ✓</span>}
+        {canEdit && (
+          <a href={waLink(to.waDigits, text)} target="_blank" rel="noopener noreferrer" data-testid={testid}
+            onClick={() => r.picked && markSent(r.picked, field)} title={who}
+            className={`text-xs px-3 py-1.5 rounded-lg font-medium ${sentAt ? 'text-gray-300 border border-gray-700' : 'bg-green-600 hover:bg-green-500 text-white'}`}>
+            {sentAt ? 'Again' : label}
+          </a>
+        )}
+      </span>
+    )
+  }
+
+  const beltLine = (r: Row) => {
+    const c = r.picked!
+    const from = beltById[c.from_rank_id || '']
+    const to = beltById[c.to_rank_id]
+    return (
+      <p className="text-[11px] text-gray-400 flex items-center gap-1 flex-wrap">
+        <BeltChip rank={from} /> <span aria-hidden="true">→</span> <BeltChip rank={to} />
+        {exam && (() => { const fee = beltFee(exam, c.to_rank_id); return fee ? <span className="text-gray-500"> · {formatMoney(fee, currency)}</span> : null })()}
+      </p>
+    )
+  }
+
+  // Notices step: one WhatsApp per student
+  const noticeRow = (r: Row) => {
+    const c = r.picked!
+    const text = gradingNoticeText({ student: r.s, exam: exam!, from: beltById[c.from_rank_id || ''], to: beltById[c.to_rank_id] ?? { id: c.to_rank_id, belt_name: 'next belt', kyu: null },
+      gymName, currency, country, upiId })
+    return (
+      <li key={r.s.id} data-testid="notice-row" data-name={r.s.full_name}
+        className="flex items-center gap-3 rounded-xl px-3 py-2.5 border bg-gray-900 border-gray-800">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-white truncate">{r.s.full_name}</p>
+          {beltLine(r)}
+        </div>
+        {waButton(r, text, c.notice_sent_at, 'notice_sent_at', 'Send', 'notice-send')}
+      </li>
+    )
+  }
+
+  // Exam day step: Fee paid + Pass / Fail, saved as tapped
+  const dayRow = (r: Row) => {
+    const c = r.picked!
+    const fee = exam ? beltFee(exam, c.to_rank_id) : null
+    const btn = (v: 'pass' | 'fail') => {
+      const on = c.result === v
+      const tone = v === 'pass' ? (on ? 'bg-green-600 text-white border-green-600' : 'text-green-300 border-gray-700') : (on ? 'bg-red-600 text-white border-red-600' : 'text-red-300 border-gray-700')
+      return (
+        <button type="button" aria-pressed={on} disabled={!editable} onClick={() => setResult(c, v)} data-testid={`result-${v}`}
+          className={`text-xs px-3 py-2 rounded-lg border font-medium disabled:opacity-60 ${tone}`}>
+          {v === 'pass' ? 'Pass' : 'Fail'}
+        </button>
+      )
+    }
+    return (
+      <li key={r.s.id} data-testid="day-row" data-name={r.s.full_name}
+        className={`rounded-xl px-3 py-2.5 border ${c.result === 'pass' ? 'bg-green-950/40 border-green-900' : c.result === 'fail' ? 'bg-red-950/30 border-red-900/60' : 'bg-gray-900 border-gray-800'}`}>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">{r.s.full_name}</p>
+            {beltLine(r)}
+          </div>
+          <div className="flex gap-1.5 shrink-0">{btn('pass')}{btn('fail')}</div>
+        </div>
+        {fee != null && fee > 0 && (
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400 w-fit">
+            <input type="checkbox" checked={!!c.fee_paid} disabled={!canEdit} onChange={() => setFeePaid(c)} aria-label={`${r.s.full_name} fee paid`}
+              className="w-4 h-4 accent-green-500" />
+            Fee paid ({formatMoney(fee, currency)})
+          </label>
+        )}
+      </li>
+    )
+  }
+
+  // Completed: the new belt or "stays", Tell parent
+  const resultRow = (r: Row) => {
+    const c = r.picked!
+    const from = beltById[c.from_rank_id || '']
+    const to = beltById[c.to_rank_id]
+    const pass = c.result === 'pass'
+    const text = exam && to ? gradingResultText({ student: r.s, result: pass ? 'pass' : 'fail', examDate: exam.exam_date, from, to, gymName, country }) : ''
+    return (
+      <li key={r.s.id} data-testid="result-row" data-name={r.s.full_name}
+        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border ${pass ? 'bg-green-950/40 border-green-900' : 'bg-gray-900 border-gray-800'}`}>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-white truncate">{r.s.full_name}</p>
+          <p className="text-[11px] flex items-center gap-1 flex-wrap">
+            {pass
+              ? <><span className="text-green-400">Passed · now</span> <BeltChip rank={to} /> <span className="text-gray-300">{beltLabel(to)}</span></>
+              : <span className="text-gray-400">Stays {beltLabel(from)}</span>}
+            {!c.fee_paid && exam && (beltFee(exam, c.to_rank_id) || 0) > 0
+              ? <span className="text-amber-300"> · fee not marked paid</span> : null}
+          </p>
+        </div>
+        {text && waButton(r, text, c.result_sent_at, 'result_sent_at', 'Tell parent', 'result-send')}
+      </li>
+    )
+  }
+
+  // Cancelled: tell those who had the notice
+  const cancelRow = (r: Row) => {
+    const c = r.picked!
+    const text = exam ? gradingCancelText({ student: r.s, examDate: exam.exam_date, gymName, country }) : ''
+    return (
+      <li key={r.s.id} data-testid="cancel-row" data-name={r.s.full_name}
+        className="flex items-center gap-3 rounded-xl px-3 py-2.5 border bg-gray-900 border-gray-800">
+        <p className="flex-1 min-w-0 text-sm font-medium text-white truncate">{r.s.full_name}</p>
+        {waButton(r, text, c.cancel_sent_at, 'cancel_sent_at', 'Tell parent', 'cancel-send')}
+      </li>
+    )
   }
 
   const studentRow = (r: Row) => {
@@ -414,33 +598,101 @@ export default function GradingExamPage() {
               aria-label={`Search ${mw.many.toLowerCase()}`}
               className="w-full bg-gray-900 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-800 text-sm placeholder-gray-500" />
 
-            <section className="space-y-2">
-              <h3 className="text-xs text-gray-500 uppercase tracking-wider">Picked ({pickedRows.length})</h3>
-              {pickedRows.length === 0
-                ? <p className="text-sm text-gray-500">{editable ? `Nobody yet. Tick the ${mw.many.toLowerCase()} below.` : 'Nobody picked.'}</p>
-                : <ul className="space-y-1.5">{pickedRows.map(studentRow)}</ul>}
-            </section>
+            {/* Scheduled: three steps. Completed: results. Cancelled: tell the parents who had the notice */}
+            {open && pickedTotal > 0 && (() => {
+              const live = candidates.filter(c => !c.removed_at)
+              const tabs: [Step, string][] = [
+                ['pick', `1 · Pick (${live.length})`],
+                ['notices', `2 · Notices (${live.filter(c => c.notice_sent_at).length}/${live.length})`],
+                ['day', `3 · Exam day (${live.filter(c => c.result).length}/${live.length})`],
+              ]
+              return (
+                <div className="grid grid-cols-3 gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1" role="tablist">
+                  {tabs.map(([k, label]) => (
+                    <button key={k} type="button" role="tab" aria-selected={(step ?? 'pick') === k} data-testid={`step-${k}`}
+                      onClick={() => setStep(k)}
+                      className={`text-[11px] sm:text-xs py-2 rounded-lg font-medium ${(step ?? 'pick') === k ? 'bg-orange-500 text-white' : 'text-gray-400'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
 
-            {open && (
-              <section className="space-y-2">
-                <h3 className="text-xs text-gray-500 uppercase tracking-wider">Can sit the exam ({canSit.length})</h3>
-                {canSit.length === 0
-                  ? <p className="text-sm text-gray-500">Nobody else is ready for this date.</p>
-                  : <ul className="space-y-1.5">{canSit.map(studentRow)}</ul>}
+            {exam.status === 'completed' ? (
+              <section className="space-y-2" data-testid="results">
+                <h3 className="text-xs text-gray-500 uppercase tracking-wider">
+                  Results · {pickedRows.filter(r => r.picked?.result === 'pass').length} passed · {pickedRows.filter(r => r.picked?.result === 'fail').length} stay
+                </h3>
+                <ul className="space-y-1.5">{pickedRows.map(resultRow)}</ul>
+                {canEdit && (
+                  <button type="button" onClick={undoResults} disabled={working} data-testid="results-undo"
+                    className="text-xs text-gray-400 border border-gray-700 hover:border-amber-600 hover:text-amber-300 px-3 py-2 rounded-lg disabled:opacity-60">
+                    Undo results
+                  </button>
+                )}
               </section>
-            )}
-
-            {open && notYet.length > 0 && (
+            ) : exam.status === 'cancelled' ? (
               <section className="space-y-2">
-                <h3 className="text-xs text-gray-500 uppercase tracking-wider">Not yet ({notYet.length})</h3>
-                <ul className="space-y-1.5">{notYet.map(studentRow)}</ul>
+                <h3 className="text-xs text-gray-500 uppercase tracking-wider">Tell the parents it&apos;s cancelled</h3>
+                {pickedRows.some(r => r.picked?.notice_sent_at)
+                  ? <ul className="space-y-1.5">{pickedRows.filter(r => r.picked?.notice_sent_at).map(cancelRow)}</ul>
+                  : <p className="text-sm text-gray-500">No notices were sent for this exam.</p>}
               </section>
-            )}
+            ) : (step ?? 'pick') === 'notices' && pickedTotal > 0 ? (
+              <section className="space-y-2">
+                <p className="text-xs text-gray-500">Tap Send: WhatsApp opens with the message to the parent (or the {mw.one.toLowerCase()} when there&apos;s no parent number). Send it there.</p>
+                <ul className="space-y-1.5">{pickedRows.map(noticeRow)}</ul>
+              </section>
+            ) : (step ?? 'pick') === 'day' && pickedTotal > 0 ? (
+              <section className="space-y-2">
+                <p className="text-xs text-gray-500">Tick Fee paid and mark Pass or Fail. Belts change only when you press Save results.</p>
+                <ul className="space-y-1.5">{pickedRows.map(dayRow)}</ul>
+                {canEdit && (() => {
+                  const ready = resultsReady(candidates)
+                  const live = candidates.filter(c => !c.removed_at)
+                  return (
+                    <div className="pt-2 space-y-1">
+                      <button type="button" onClick={saveResults} disabled={!ready || working} data-testid="results-save"
+                        className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-800 disabled:text-gray-500 text-white text-sm font-semibold rounded-xl py-3">
+                        {working ? 'Saving…' : 'Save results'}
+                      </button>
+                      {!ready && <p className="text-[11px] text-gray-500 text-center">{live.filter(c => !c.result).length} still to mark Pass or Fail</p>}
+                    </div>
+                  )
+                })()}
+              </section>
+            ) : (
+              <>
+                <section className="space-y-2">
+                  <h3 className="text-xs text-gray-500 uppercase tracking-wider">Picked ({pickedRows.length})</h3>
+                  {pickedRows.length === 0
+                    ? <p className="text-sm text-gray-500">{editable ? `Nobody yet. Tick the ${mw.many.toLowerCase()} below.` : 'Nobody picked.'}</p>
+                    : <ul className="space-y-1.5">{pickedRows.map(studentRow)}</ul>}
+                </section>
 
-            {open && (
-              <p className="text-[11px] text-gray-600">
-                Time on the current belt is counted to the exam date, 30 days a month. Each {mw.one.toLowerCase()} goes up one belt.
-              </p>
+                {open && (
+                  <section className="space-y-2">
+                    <h3 className="text-xs text-gray-500 uppercase tracking-wider">Can sit the exam ({canSit.length})</h3>
+                    {canSit.length === 0
+                      ? <p className="text-sm text-gray-500">Nobody else is ready for this date.</p>
+                      : <ul className="space-y-1.5">{canSit.map(studentRow)}</ul>}
+                  </section>
+                )}
+
+                {open && notYet.length > 0 && (
+                  <section className="space-y-2">
+                    <h3 className="text-xs text-gray-500 uppercase tracking-wider">Not yet ({notYet.length})</h3>
+                    <ul className="space-y-1.5">{notYet.map(studentRow)}</ul>
+                  </section>
+                )}
+
+                {open && (
+                  <p className="text-[11px] text-gray-600">
+                    Time on the current belt is counted to the exam date, 30 days a month. Each {mw.one.toLowerCase()} goes up one belt.
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
