@@ -5,7 +5,8 @@ import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, grad
   beltsById, beltChipText, isLightBelt, gradeSourceLabel, sortGradeHistory,
   nextBelt, daysBetween, eligibility, toGoText, notEligibleText, splitExams, examStatusLabel, examDetailsChanged, attendanceShare,
   beltFee, feeSummary,
-  gradingNoticeText, gradingResultText, gradingCancelText, gradingRecipient, resultsReady, gradingRpcMessage, waLink } from '../lib/belts'
+  gradingNoticeText, gradingResultText, gradingCancelText, gradingRecipient, resultsReady, gradingRpcMessage, waLink,
+  STANDARD_BELTS, beltFields } from '../lib/belts'
 
 let failed = 0
 const check = (label: string, value: unknown, ok: boolean) => {
@@ -144,6 +145,22 @@ check('results ready only when every student is marked (removed ignored)', '',
 check('rpc replies', '', gradingRpcMessage({ ok: true, promoted: 3, failed: 1 }) === 'Saved ✓ 3 promoted, 1 stay.'
   && gradingRpcMessage({ ok: false, error: 'belt_changed', names: ['Ravi'] }).includes('Ravi')
   && gradingRpcMessage({ ok: true, undone: 2 }) === 'Undone: 2 belts put back.')
+
+// PR D: standard ladder, belt form, dan labels
+check('standard ladder: 9 belts, White first, Brown 1st kyu last (6 months)', STANDARD_BELTS.length,
+  STANDARD_BELTS.length === 9 && STANDARD_BELTS[0].belt_name === 'White' && STANDARD_BELTS[8].kyu === 1 && STANDARD_BELTS[8].min_months_from_previous === 6)
+const black = { belt_name: 'Black', kyu: null, dan: 1 }
+check('dan label + chip', [beltLabel(black), beltChipText(black)], beltLabel(black) === 'Black – 1st dan' && beltChipText(black) === '1 dan')
+const bd = { id: null, belt_name: ' Black ', grade: 'dan' as const, number: '1', color_hex: '#111111', months: '12' }
+const bf = beltFields(bd, true)
+check('belt form: Black 1st dan', bf, typeof bf !== 'string' && bf.belt_name === 'Black' && bf.dan === 1 && bf.kyu === null && bf.color_hex === '#111111')
+check('belt form: dan before the SQL → refused', beltFields(bd, false), typeof beltFields(bd, false) === 'string')
+check('belt form: kyu 25 / no name / bad months refused', '',
+  typeof beltFields({ ...bd, grade: 'kyu', number: '25' }, true) === 'string'
+  && typeof beltFields({ ...bd, belt_name: '' }, true) === 'string'
+  && typeof beltFields({ ...bd, months: '2.5' }, true) === 'string')
+const wf = beltFields({ ...bd, belt_name: 'White', grade: 'none', number: '', months: '' }, false)
+check('belt form: White (no number, no wait), no dan key before the SQL', wf, typeof wf !== 'string' && wf.kyu === null && !('dan' in wf) && wf.min_months_from_previous === null)
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
