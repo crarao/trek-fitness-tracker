@@ -5,8 +5,8 @@
 --   1. Dev  — coachboard-dev     nnxrmaiinbmxfwzefbwx  https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
 --   2. Prod — coachboard-mumbai  nptxjfvkqjuekgkspemu  https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
 -- Status: ✅ RUN ON MUMBAI (prod) 10 Nov 2026 (by Anand); Step 2 checks all as expected. Do not run there again.
---         Dev: not confirmed. Run  select to_regclass('public.belt_ranks');  on dev — null = not there yet.
---         Dev has no 'dsska' company, so section 9 (seed) would stop the run: point it at the QA dojo's slug ('qadojo') for dev.
+--         Dev: tables already there (dev was copied from Mumbai after this ran; confirmed 11 Nov). Do not run on dev.
+--         Dev has no 'dsska' company, so no dev gym has a belt list or Grading on yet.
 -- Anand runs this; Claude does not. ADDITIVE ONLY: 4 new tables, 2 nullable columns on
 -- profiles, 1 column on companies, 1 trigger function brought up to date. No DROP / DELETE / TRUNCATE.
 --
