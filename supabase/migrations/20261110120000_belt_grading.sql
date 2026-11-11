@@ -1,9 +1,12 @@
 -- =====================================================================================
 -- Belt grading, Phase 1: all grading tables + the student's current belt + the Grading toggle
 --
--- ✅ RUN ON MUMBAI 10 Nov 2026 (by Anand); Step 2 checks all as expected. Do not run again.
--- Run in: Mumbai, project nptxjfvkqjuekgkspemu (check the address bar before running).
--- SQL Editor: https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
+-- Projects (check the project ref in the address bar before running):
+--   1. Dev  — coachboard-dev     nnxrmaiinbmxfwzefbwx  https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
+--   2. Prod — coachboard-mumbai  nptxjfvkqjuekgkspemu  https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
+-- Status: ✅ RUN ON MUMBAI (prod) 10 Nov 2026 (by Anand); Step 2 checks all as expected. Do not run there again.
+--         Dev: not confirmed. Run  select to_regclass('public.belt_ranks');  on dev — null = not there yet.
+--         Dev has no 'dsska' company, so section 9 (seed) would stop the run: point it at the QA dojo's slug ('qadojo') for dev.
 -- Anand runs this; Claude does not. ADDITIVE ONLY: 4 new tables, 2 nullable columns on
 -- profiles, 1 column on companies, 1 trigger function brought up to date. No DROP / DELETE / TRUNCATE.
 --
