@@ -5,7 +5,7 @@
 // otherwise the client. Progress shares (lib/progress-share.ts) and membership reminders (owner dashboard) both use
 // pickRecipient; each keeps its own phone reader, so neither message changes for clients without a parent.
 
-import { type Country, formatDate } from './locale'
+import { type Country, formatDate, greet } from './locale'
 import { splitE164, waDigits as toWaDigits } from './phone'
 import { formatMoney } from './currency'
 
@@ -61,12 +61,12 @@ export function reminderText(opts: {
   if (opts.toParent) {
     const parent = (opts.parentFirst || '').trim() || 'there'
     return opts.status === 'expiring'
-      ? `Hi ${parent}, ${memberFirst}'s fees at ${companyName} are due on ${date}. Please renew to continue classes. ${emoji}`
-      : `Hi ${parent}, ${memberFirst}'s membership at ${companyName} has lapsed. We'd love to have them back in class — reach out to renew! ${emoji}`
+      ? greet(parent, `${memberFirst}'s fees at ${companyName} are due on ${date}. Please renew to continue classes. ${emoji}`, opts.country)
+      : greet(parent, `${memberFirst}'s membership at ${companyName} has lapsed. We'd love to have them back in class — reach out to renew! ${emoji}`, opts.country)
   }
   return opts.status === 'expiring'
-    ? `Hi ${memberFirst}, your membership at ${companyName} expires on ${date}. Renew now to keep going! ${emoji}`
-    : `Hi ${memberFirst}, your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! ${emoji}`
+    ? greet(memberFirst, `your membership at ${companyName} expires on ${date}. Renew now to keep going! ${emoji}`, opts.country)
+    : greet(memberFirst, `your membership at ${companyName} has expired. We'd love to have you back — reach out to renew! ${emoji}`, opts.country)
 }
 
 // Fee reminder to a dojo student's parent (owner / partner dashboard "Send reminder" button).

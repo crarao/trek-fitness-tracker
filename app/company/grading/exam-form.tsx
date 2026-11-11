@@ -61,6 +61,7 @@ export function ExamForm({ draft, setDraft, venues, currency, saving, error, onS
         <label className={LABEL}>Exam fee ({currencySymbol(currency)}, optional)</label>
         <input type="number" inputMode="decimal" min={0} aria-label="Exam fee" value={draft.fee} placeholder="e.g. 500"
           onChange={e => setDraft({ ...draft, fee: e.target.value })} className={INPUT} />
+        <p className="text-[11px] text-gray-500 mt-1">Filled in when you tick someone. Each belt can have its own fee: change it on their row.</p>
       </div>
       <div>
         <label className={LABEL}>Notes (for the parents&apos; message)</label>

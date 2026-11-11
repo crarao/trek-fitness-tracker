@@ -1,5 +1,6 @@
 'use client'
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
@@ -1796,6 +1797,7 @@ const handleResetPassword = async () => {
 
   return (
     <div data-testid="page-client" className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
       {newPlanSheetOpen && client && (() => {
         const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'

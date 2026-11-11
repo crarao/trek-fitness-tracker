@@ -8,6 +8,7 @@
 // Nothing is deleted (CLAUDE.md Rule #1; the tables have no delete permission): branches and batches are archived.
 // Archiving keeps students' saved branch / batch; they still show, marked "(archived)", until changed.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -217,6 +218,7 @@ export default function BatchesPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"

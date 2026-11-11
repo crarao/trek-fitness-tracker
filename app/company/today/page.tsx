@@ -8,6 +8,7 @@
 // Loads: the profile, then 5 reads in parallel (PT clients, membership dates, plans that can cover the day,
 // that day's sessions, staff names). Database rules keep everything to the owner's own gym.
 
+import PageNav from '@/app/page-nav'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -179,6 +180,7 @@ function TodaySchedule() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       <div className="bg-gray-900 border-b border-gray-800 px-4 py-4 sticky top-0 z-30">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-3">

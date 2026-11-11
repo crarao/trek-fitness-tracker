@@ -4,6 +4,7 @@
 // batch's classes so far ("9 of 12"), grouped by branch and batch, plus today's batches to open a roll call.
 // Owner, partners and senseis (no money on this page). Read-only here: marking happens on the roll call page.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -101,6 +102,7 @@ export default function AttendanceMonthPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-10">
+      <PageNav />
       <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
         <div className="flex items-center gap-3 min-w-0">
           <button data-nav onClick={() => router.push(role === 'coach' ? '/coach' : '/company')}

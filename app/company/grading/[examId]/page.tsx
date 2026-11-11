@@ -9,6 +9,7 @@
 // exam at a time and a completed / cancelled exam is locked (both also enforced by the database trigger,
 // supabase/migrations/20261111120000_belt_grading_phase2.sql). Senseis see everything read-only.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -18,7 +19,7 @@ import { memberWord } from '@/lib/labels'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, timeLabel, sortBatches } from '@/lib/batches'
 import { addDays } from '@/lib/attendance'
 import {
-  type BeltRank, type GradingExam, type ExamCandidate, BELT_RANK_COLUMNS, GRADING_EXAM_COLUMNS, EXAM_CANDIDATE_COLUMNS,
+  type BeltRank, type GradingExam, type ExamCandidate, BELT_RANK_COLUMNS, GRADING_EXAM_COLUMNS, suggestedFee, candidateFee,
   gradingOn, beltsById, eligibility, notEligibleText, examStatusLabel, examDetailsChanged, attendanceShare,
 } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
@@ -29,6 +30,8 @@ type Student = {
   branch_id: string | null; batch_id: string | null; created_at: string; archived_at: string | null
 }
 const STUDENT_COLUMNS = 'id, full_name, current_rank_id, rank_achieved_on, branch_id, batch_id, created_at, archived_at'
+// Candidates are read with * so fee_amount (per-student fee SQL) is picked up once it exists, and nothing breaks before
+const CAND = '*'
 
 export default function GradingExamPage() {
   const router = useRouter()
@@ -56,6 +59,9 @@ export default function GradingExamPage() {
   const [batchFilter, setBatchFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState<Set<string>>(new Set())
+  // Fee per student (grading_exam_candidates.fee_amount): false until that SQL has run
+  const [feeOn, setFeeOn] = useState(false)
+  const [feeEdit, setFeeEdit] = useState<{ id: string; value: string } | null>(null)
   const [draft, setDraft] = useState<ExamDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -91,12 +97,12 @@ export default function GradingExamPage() {
       if (!live) return
       if (exError || !ex) { setProblem('This exam was not found.'); setLoading(false); return }
       const e = ex as GradingExam
-      const [rk, st, cand, others, br, ba, att, firstAtt] = await Promise.all([
+      const [rk, st, cand, others, br, ba, att, firstAtt, feeProbe] = await Promise.all([
         supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
         supabase.from('profiles').select(STUDENT_COLUMNS).eq('company_id', cId).eq('role', 'client')
           .is('archived_at', null).order('full_name'),
-        supabase.from('grading_exam_candidates').select(EXAM_CANDIDATE_COLUMNS).eq('exam_id', e.id),
+        supabase.from('grading_exam_candidates').select(CAND).eq('exam_id', e.id),
         // Other scheduled exams' lists: one exam per student at a time
         supabase.from('grading_exam_candidates').select('student_id, removed_at, grading_exams!inner(id, exam_date, status)')
           .eq('company_id', cId).neq('exam_id', e.id).is('removed_at', null).eq('grading_exams.status', 'scheduled'),
@@ -107,6 +113,7 @@ export default function GradingExamPage() {
           .gte('class_date', addDays(e.exam_date, -400)).lte('class_date', e.exam_date).limit(20000),
         supabase.from('attendance').select('class_date').eq('company_id', cId).eq('present', true)
           .order('class_date').limit(1),
+        supabase.from('grading_exam_candidates').select('fee_amount').limit(1),
       ])
       if (!live) return
       if (rk.error || cand.error || st.error) {
@@ -125,6 +132,7 @@ export default function GradingExamPage() {
       setRanks((rk.data || []) as BeltRank[])
       setStudents(people)
       setCandidates((cand.data || []) as ExamCandidate[])
+      setFeeOn(!feeProbe.error)
       if (others.error) console.error('Other exams error:', others.error)
       setElsewhere(Object.fromEntries(((others.data || []) as unknown as { student_id: string; grading_exams: { exam_date: string } | null }[])
         .map(o => [o.student_id, o.grading_exams?.exam_date || ''])))
@@ -201,13 +209,17 @@ export default function GradingExamPage() {
     let res
     if (r.picked) {
       res = await supabase.from('grading_exam_candidates').update({ removed_at: new Date().toISOString() })
-        .eq('id', r.picked.id).select(EXAM_CANDIDATE_COLUMNS)
+        .eq('id', r.picked.id).select(CAND)
     } else if (r.elig.kind === 'eligible' && !r.why) {
-      const fields = { removed_at: null, from_rank_id: r.elig.from.id, to_rank_id: r.elig.to.id }
+      const fields: Record<string, unknown> = { removed_at: null, from_rank_id: r.elig.from.id, to_rank_id: r.elig.to.id }
+      // The fee for this student, taken now: the last fee for the same belt on this exam, else the exam's
+      if (feeOn && (existing?.fee_amount == null || existing.to_rank_id !== r.elig.to.id)) {
+        fields.fee_amount = suggestedFee(candidates, r.elig.to.id, exam.fee_amount)
+      }
       res = existing
-        ? await supabase.from('grading_exam_candidates').update(fields).eq('id', existing.id).select(EXAM_CANDIDATE_COLUMNS)
+        ? await supabase.from('grading_exam_candidates').update(fields).eq('id', existing.id).select(CAND)
         : await supabase.from('grading_exam_candidates').insert({ ...fields, company_id: companyId, exam_id: exam.id, student_id: r.s.id })
-          .select(EXAM_CANDIDATE_COLUMNS)
+          .select(CAND)
     }
     setBusy(b => { const n = new Set(b); n.delete(r.s.id); return n })
     if (!res) return
@@ -247,7 +259,7 @@ export default function GradingExamPage() {
     let resent = false
     if (examDetailsChanged(exam, updated) && candidates.some(c => c.notice_sent_at && !c.removed_at)) {
       const r = await supabase.from('grading_exam_candidates').update({ notice_sent_at: null })
-        .eq('exam_id', exam.id).not('notice_sent_at', 'is', null).select(EXAM_CANDIDATE_COLUMNS)
+        .eq('exam_id', exam.id).not('notice_sent_at', 'is', null).select(CAND)
       if (!r.error) {
         const changed = (r.data || []) as ExamCandidate[]
         setCandidates(l => l.map(c => changed.find(x => x.id === c.id) ?? c))
@@ -267,6 +279,19 @@ export default function GradingExamPage() {
     if (error || !data?.length) { showToast(error ? "Couldn't cancel: " + error.message : "Couldn't cancel: not allowed for this login", 'error'); return }
     setExam(data[0] as GradingExam)
     showToast('Exam cancelled')
+  }
+
+  // Change one student's fee (any time before results; the exam's own fee is only the starting value)
+  const saveFee = async () => {
+    if (!feeEdit || !exam) return
+    const v = feeEdit.value.trim()
+    const fee = v === '' ? null : Number(v)
+    if (fee !== null && (!Number.isFinite(fee) || fee < 0)) { showToast('Fee must be a number', 'error'); return }
+    const { data, error } = await supabase.from('grading_exam_candidates').update({ fee_amount: fee }).eq('id', feeEdit.id).select(CAND)
+    if (error || !data?.length) { showToast(error ? "Couldn't save: " + error.message : "Couldn't save: not allowed for this login", 'error'); return }
+    const row = data[0] as ExamCandidate
+    setCandidates(l => l.map(c => (c.id === row.id ? row : c)))
+    setFeeEdit(null)
   }
 
   const studentRow = (r: Row) => {
@@ -289,6 +314,25 @@ export default function GradingExamPage() {
               {from ? <><BeltChip rank={from} />{to && <> <span aria-hidden="true">→</span> <BeltChip rank={to} /></>}</> : null}
               {r.why && !r.picked && <span className="text-gray-500">{from ? ' · ' : ''}{r.why}</span>}
             </p>
+            {/* Fee for this student (per-student fee SQL): tap to change */}
+            {r.picked && feeOn && exam && (feeEdit?.id === r.picked.id ? (
+              <span className="flex items-center gap-1.5 mt-1">
+                <input type="number" inputMode="decimal" min={0} autoFocus value={feeEdit.value} aria-label={`Fee for ${r.s.full_name}`}
+                  onChange={e => setFeeEdit({ ...feeEdit, value: e.target.value })}
+                  onKeyDown={e => { if (e.key === 'Enter') saveFee() }}
+                  className="w-24 bg-gray-800 text-white rounded-md px-2 py-1 text-xs border border-gray-700 outline-none focus:ring-2 focus:ring-orange-500" />
+                <button type="button" onClick={saveFee} className="text-xs text-orange-400 px-2 py-1">Save</button>
+                <button type="button" onClick={() => setFeeEdit(null)} className="text-xs text-gray-500 px-1 py-1">✕</button>
+              </span>
+            ) : (() => {
+              const fee = candidateFee(r.picked, exam.fee_amount)
+              return editable ? (
+                <button type="button" data-testid="candidate-fee" onClick={() => setFeeEdit({ id: r.picked!.id, value: fee != null ? String(fee) : '' })}
+                  className="text-[11px] text-gray-300 underline decoration-dotted underline-offset-2">
+                  {fee != null ? `Fee ${formatMoney(fee, currency)}` : 'No fee'} ✎
+                </button>
+              ) : <span className="text-[11px] text-gray-400">{fee != null ? `Fee ${formatMoney(fee, currency)}` : 'No fee'}</span>
+            })())}
             {(r.attendance || r.warn.length > 0) && (
               <p className="text-[11px] text-gray-500">
                 {r.attendance}
@@ -305,6 +349,7 @@ export default function GradingExamPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
@@ -361,7 +406,13 @@ export default function GradingExamPage() {
             )}
 
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-white">{mw.many} sitting: <span data-testid="picked-count">{pickedTotal}</span></h2>
+              <h2 className="text-sm font-semibold text-white">
+                {mw.many} sitting: <span data-testid="picked-count">{pickedTotal}</span>
+                {feeOn && pickedTotal > 0 && (() => {
+                  const total = rows.filter(r => r.picked).reduce((t, r) => t + (candidateFee(r.picked!, exam.fee_amount) || 0), 0)
+                  return total > 0 ? <span className="text-gray-400 font-normal"> · fees {formatMoney(total, currency)}</span> : null
+                })()}
+              </h2>
               {!canEdit && <span className="text-[11px] text-gray-500">View only</span>}
             </div>
 

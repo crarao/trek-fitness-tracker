@@ -5,6 +5,7 @@
 // to pick students (/company/grading/<exam id>). Senseis open this page read-only (proxy allows coach; RLS blocks writes).
 // Hidden when companies.grading_enabled is off or the gym has no belts. Exams are never deleted: Cancel = status 'cancelled'.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -132,6 +133,7 @@ export default function GradingExamsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"

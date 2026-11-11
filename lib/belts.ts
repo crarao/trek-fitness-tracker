@@ -143,6 +143,8 @@ export type ExamCandidate = {
   result_sent_at: string | null
   removed_at?: string | null
   cancel_sent_at?: string | null
+  fee_amount?: number | null   // this student's fee (20261112120000_belt_grading_fee_brown1.sql); null = the exam's fee
+  created_at?: string
 }
 // removed_at / cancel_sent_at: supabase/migrations/20261111120000_belt_grading_phase2.sql
 export const EXAM_CANDIDATE_COLUMNS = 'id, exam_id, student_id, from_rank_id, to_rank_id, fee_paid, result, notice_sent_at, result_sent_at, removed_at, cancel_sent_at'
@@ -243,4 +245,25 @@ export function attendanceShare(opts: {
   }
   if (!scheduled) return { attended: days.size, scheduled: 0, pct: null }
   return { attended: days.size, scheduled, pct: Math.min(100, Math.round((days.size / scheduled) * 100)) }
+}
+
+// ── Fee per student (12 Nov: each belt grade can cost differently) ──────────────────────────────────
+
+// The fee to fill in when a student is ticked: the last fee typed for the same next belt on this exam,
+// else the exam's fee (null = none)
+export function suggestedFee(
+  candidates: Pick<ExamCandidate, 'to_rank_id' | 'fee_amount' | 'removed_at' | 'created_at'>[],
+  toRankId: string,
+  examFee: number | null | undefined,
+): number | null {
+  const same = candidates.filter(c => c.to_rank_id === toRankId && !c.removed_at && c.fee_amount != null)
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+  if (same.length) return Number(same[0].fee_amount)
+  return examFee != null ? Number(examFee) : null
+}
+
+// What this student pays: their own fee, else the exam's
+export function candidateFee(c: Pick<ExamCandidate, 'fee_amount'>, examFee: number | null | undefined): number | null {
+  if (c.fee_amount != null) return Number(c.fee_amount)
+  return examFee != null ? Number(examFee) : null
 }

@@ -7,6 +7,7 @@
 // The whole day's attendance is loaded (every batch), so a student already marked in another batch shows
 // "Already came today · Kids 5 PM · by Sensei Ravi" and marking them here asks first. Two classes a day stay allowed.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -176,6 +177,7 @@ export default function RollCallPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-10">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status" className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ${toast.kind === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.text}</div>
