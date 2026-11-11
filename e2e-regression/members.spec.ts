@@ -74,55 +74,60 @@ test.describe.serial('Members', () => {
     await archiveMember('gymOwner', id) // done with it
   })
 
-  test('R13 the client limit blocks the next add', async ({ as }) => {
-    // Fills the gym up to its limit with E2E members (archived after), then tries one more in the UI.
-    // Only when that takes a few members: a big gap would mean creating dozens of rows on every run.
-    const maxFill = Number(process.env.E2E_MAX_FILL || 5)
-    const candidates: Role[] = ['gymOwner', 'soloOwner']
-    let pick: { role: Role; gap: number; limit: number } | null = null
-    for (const role of candidates) {
+  test.describe('client limit', () => {
+    // The test's own over-limit attempt: /api/create-user answers 400, which the browser logs as a failed request
+    test.use({ allowedConsoleErrors: /\/api\/create-user\b/ })
+
+    test('R13 the client limit blocks the next add', async ({ as }) => {
+      // Fills the gym up to its limit with E2E members (archived after), then tries one more in the UI.
+      // Only when that takes a few members: a big gap would mean creating dozens of rows on every run.
+      const maxFill = Number(process.env.E2E_MAX_FILL || 5)
+      const candidates: Role[] = ['gymOwner', 'soloOwner']
+      let pick: { role: Role; gap: number; limit: number } | null = null
+      for (const role of candidates) {
+        const page = await as(role)
+        await page.goto('/company')
+        const slots = page.getByTestId('slots')
+        // The counter shows 0 until the member list has loaded: wait for a seeded member first
+        await expect(page.locator(`[data-testid="member-row"][data-name="${role === 'gymOwner' ? 'QA Active' : 'QA Solo Client'}"]`)).toBeVisible()
+        await expect(slots).toBeVisible()
+        const used = Number(await slots.getAttribute('data-used'))
+        const limit = Number(await slots.getAttribute('data-limit'))
+        const gap = limit - used
+        console.log(`R13: ${role} ${used} active member(s), limit ${limit}, ${gap} free`)
+        if (!pick || gap < pick.gap) pick = { role, gap, limit }
+        await page.context().close()
+      }
+      console.log(`R13: smallest gap ${pick?.gap} free slot(s) (${pick?.role})`)
+      test.skip(!pick || pick.gap > maxFill,
+        `QA Gym / QA Solo have ${pick?.gap} free slots (over E2E_MAX_FILL=${maxFill}). Lower QA Solo's client limit on dev to its member count + 1 to run this.`)
+
+      const { role, gap, limit } = pick!
       const page = await as(role)
       await page.goto('/company')
-      const slots = page.getByTestId('slots')
-      // The counter shows 0 until the member list has loaded: wait for a seeded member first
-      await expect(page.locator(`[data-testid="member-row"][data-name="${role === 'gymOwner' ? 'QA Active' : 'QA Solo Client'}"]`)).toBeVisible()
-      await expect(slots).toBeVisible()
-      const used = Number(await slots.getAttribute('data-used'))
-      const limit = Number(await slots.getAttribute('data-limit'))
-      const gap = limit - used
-      console.log(`R13: ${role} ${used} active member(s), limit ${limit}, ${gap} free`)
-      if (!pick || gap < pick.gap) pick = { role, gap, limit }
-      await page.context().close()
-    }
-    console.log(`R13: smallest gap ${pick?.gap} free slot(s) (${pick?.role})`)
-    test.skip(!pick || pick.gap > maxFill,
-      `QA Gym / QA Solo have ${pick?.gap} free slots (over E2E_MAX_FILL=${maxFill}). Lower QA Solo's client limit on dev to its member count + 1 to run this.`)
-
-    const { role, gap, limit } = pick!
-    const page = await as(role)
-    await page.goto('/company')
-    const companyId = await myCompanyId(role)
-    const made: string[] = []
-    try {
-      for (let i = 0; i < gap; i++) made.push(await createMember(page, companyId, e2eName('limit filler')))
-      await page.reload()
-      // Wait until the dashboard knows its gym (member list loaded); tapping Add earlier sends company_id null
-      await expect(page.getByTestId('slots')).toHaveAttribute('data-limit', String(limit))
-      await expect(page.getByTestId('slots')).toHaveAttribute('data-used', String(limit))
-      await page.getByTestId('add-member-open').click()
-      const form = page.getByTestId('add-member-form')
-      await form.getByPlaceholder('Full name').fill(e2eName('over limit'))
-      await form.getByTestId('add-member-save').click()
-      await expect(form.getByTestId('add-member-message')).toContainText('Client limit reached')
-      // And the server refuses too
-      const over = await page.evaluate(async (cid) => {
-        const res = await fetch('/api/create-user', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ no_login: true, full_name: 'E2E over limit (api)', company_id: cid, role: 'client', phone: null }) })
-        return res.status
-      }, companyId)
-      expect(over).toBeGreaterThanOrEqual(400)
-    } finally {
-      for (const m of made) await archiveMember(role, m)
-    }
+      const companyId = await myCompanyId(role)
+      const made: string[] = []
+      try {
+        for (let i = 0; i < gap; i++) made.push(await createMember(page, companyId, e2eName('limit filler')))
+        await page.reload()
+        // Wait until the dashboard knows its gym (member list loaded); tapping Add earlier sends company_id null
+        await expect(page.getByTestId('slots')).toHaveAttribute('data-limit', String(limit))
+        await expect(page.getByTestId('slots')).toHaveAttribute('data-used', String(limit))
+        await page.getByTestId('add-member-open').click()
+        const form = page.getByTestId('add-member-form')
+        await form.getByPlaceholder('Full name').fill(e2eName('over limit'))
+        await form.getByTestId('add-member-save').click()
+        await expect(form.getByTestId('add-member-message')).toContainText('Client limit reached')
+        // And the server refuses too
+        const over = await page.evaluate(async (cid) => {
+          const res = await fetch('/api/create-user', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ no_login: true, full_name: 'E2E over limit (api)', company_id: cid, role: 'client', phone: null }) })
+          return res.status
+        }, companyId)
+        expect(over).toBeGreaterThanOrEqual(400)
+      } finally {
+        for (const m of made) await archiveMember(role, m)
+      }
+    })
   })
 })
