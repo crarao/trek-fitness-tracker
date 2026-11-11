@@ -91,6 +91,7 @@ test.describe.serial('Members', () => {
       if (!pick || gap < pick.gap) pick = { role, gap }
       await page.context().close()
     }
+    console.log(`R13: smallest gap ${pick?.gap} free slot(s) (${pick?.role})`)
     test.skip(!pick || pick.gap > maxFill,
       `QA Gym / QA Solo have ${pick?.gap} free slots (over E2E_MAX_FILL=${maxFill}). Lower QA Solo's client limit on dev to its member count + 1 to run this.`)
 

@@ -25,8 +25,9 @@ async function cannotReachMember(as: (r: Role) => Promise<import('@playwright/te
 }
 
 test.describe('Cross-company isolation', () => {
-  // Opening another gym's client page: the app's own "not found" path may log a failed request
-  test.use({ allowedConsoleErrors: /status of 40[46]|PGRST116|Cannot coerce/ })
+  // Expected refusals show up as failed requests in the console: /api/update-client (403, the test's own attempt)
+  // and /api/ai-plan-usage (403, the other gym's client page asking for its AI count)
+  test.use({ allowedConsoleErrors: /\/api\/(update-client|ai-plan-usage)\b|status of 40[46]|PGRST116|Cannot coerce/ })
 
   test('R1 QA Gym owner cannot see or change QA Solo Client', async ({ as }) => {
     const solo = await seeded('soloOwner', 'profiles', 'QA Solo Client')

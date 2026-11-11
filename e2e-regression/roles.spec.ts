@@ -3,6 +3,8 @@ import { test, expect, rest, seeded, callApi, myCompanyId, e2eName, archiveMembe
 import { addMemberViaUI, openMember, memberAction, memberRow } from './helpers'
 
 test.describe('Role limits', () => {
+  // R7's own attempt: /api/update-client answers 403 to a coach, which the browser logs as a failed request
+  test.use({ allowedConsoleErrors: /\/api\/update-client\b/ })
   test('R5 coach sees no amounts (memberships table, QA PT page)', async ({ as }) => {
     const r = rest('gymCoach')
     const pt = await seeded('gymOwner', 'profiles', 'QA PT')
