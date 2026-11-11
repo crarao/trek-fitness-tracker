@@ -6,6 +6,7 @@
 // again asks first; two classes a day stay allowed (exams, extra practice). Same rows as the roll call page.
 // ?date=YYYY-MM-DD opens another day (past days can be corrected; no future days).
 
+import PageNav from '@/app/page-nav'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -153,6 +154,7 @@ function TodayAttendance() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-10">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status" className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ${toast.kind === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.text}</div>

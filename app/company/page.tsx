@@ -1716,6 +1716,16 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Belt grading (grading on + the gym has belts): exams, picking students, results */}
+      {beltsOn && (
+        <div className="px-4 sm:px-8 pt-3">
+          <button type="button" data-nav onClick={() => router.push('/company/grading')} data-testid="grading-link"
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Schedule exams, pick {mw.many.toLowerCase()} <span className="text-white font-medium">→ Belt grading</span>
+          </button>
+        </div>
+      )}
+
       {/* Exercise list: the gym's own exercises for the plan builder (rename / archive). Not shown to dojos */}
       {trainModule && !dojo && (
         <div className="px-4 sm:px-8 pt-3">

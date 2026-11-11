@@ -4,7 +4,7 @@
 // the parent's WhatsApp update count classes attended.
 // Pure helpers, no Supabase calls, so scripts/check-attendance.ts can run them. Dates are plain 'YYYY-MM-DD' strings.
 
-import { type Country, formatDate, parseDate } from './locale'
+import { type Country, formatDate, parseDate, greet as greetLine } from './locale'
 import { type Batch, WEEKDAYS, sortBatches, sortDays } from './batches'
 import { pickRecipient } from './guardian'
 import { waDigits } from './phone'
@@ -159,7 +159,7 @@ export function buildAttendanceMessage(opts: {
   const monthName = formatDate(stats.from, country, 'monthLong')
   const dates = attendedDates('__self', opts.rows.map(r => ({ ...r, profile_id: '__self' })), stats.from, stats.to < opts.today ? stats.to : opts.today)
   const out: string[] = []
-  out.push(to.toParent ? `Hi ${greet}, here's ${kid}'s attendance at ${opts.companyName}` : `Hi ${greet}, here's your attendance at ${opts.companyName}`)
+  out.push(greetLine(greet, to.toParent ? `here's ${kid}'s attendance at ${opts.companyName}` : `here's your attendance at ${opts.companyName}`, country))
   out.push(`${monthName}${opts.homeBatch?.name ? ` · ${opts.homeBatch.name}` : ''}`)
   out.push('', `✅ ${statsText(stats)} attended`)
   if (dates.length) out.push(`Last class: ${formatDate(dates[0], country, 'weekday')}`)

@@ -3,7 +3,7 @@
 // (scripts/check-progress-share.ts). The page opens wa.me/<toPhone>?text=… like the
 // membership reminders on the owner dashboard.
 
-import { type Country, dialCode, formatDate, parseDate } from './locale'
+import { type Country, dialCode, formatDate, parseDate, greet } from './locale'
 import { localToday } from './plan-summary'
 import { planAdherence } from './adherence'
 import { missedAndDue, type TodaySession } from './todays-sessions'
@@ -193,9 +193,9 @@ export function buildProgressMessage(opts: {
   const isCurrent = today >= weekStart && today <= addDays(weekStart, 6)
   const out: string[] = []
 
-  out.push(to.guardian
-    ? `Hi ${to.greetName || 'there'}, here's ${firstName(client.full_name)}'s week at ${companyName}`
-    : `Hi ${to.greetName || 'there'}, here's your week at ${companyName}`)
+  out.push(greet(to.greetName, to.guardian
+    ? `here's ${firstName(client.full_name)}'s week at ${companyName}`
+    : `here's your week at ${companyName}`, country))
   out.push(`Week of ${formatDate(weekStart, country, 'dayMonth')}`)
 
   if (!sessions.length) {
@@ -242,9 +242,9 @@ export function buildSessionMessage(opts: {
   const to = recipient(client, country)
   const when = session.session_date === (opts.today ?? localToday()) ? 'today' : `on ${formatDate(session.session_date, country, 'weekday')}`
   const emoji = opts.businessType === 'martial_arts' ? '🥋' : '💪'
-  const greeting = to.guardian
-    ? `Hi ${to.greetName || 'there'}, ${firstName(client.full_name)} had a great session ${when}`
-    : `Hi ${to.greetName || 'there'}, great session ${when}`
+  const greeting = greet(to.greetName, to.guardian
+    ? `${firstName(client.full_name)} had a great session ${when}`
+    : `great session ${when}`, country)
   const line = sessionLine(session)
   const coach = firstName(opts.coachName)
   const text = `${greeting}${line ? `: ${line}` : '!'} ${emoji}${coach ? ` — ${coach}` : ` — ${opts.companyName}`}`

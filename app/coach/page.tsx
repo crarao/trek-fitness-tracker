@@ -313,6 +313,14 @@ export default function CoachHomePage() {
           </section>
         )}
 
+        {/* Belt grading on: exams and results, read-only for senseis */}
+        {Object.keys(beltById).length > 0 && (
+          <button type="button" data-nav onClick={() => router.push('/company/grading')} data-testid="grading-link"
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-4 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Exams and results <span className="text-white font-medium">→ Belt grading</span>
+          </button>
+        )}
+
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-xs text-gray-500 uppercase tracking-wider">Today <span className="normal-case text-gray-600">({pw})</span></h2>
           <p className="text-xs text-gray-500">

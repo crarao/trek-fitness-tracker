@@ -10,9 +10,11 @@ export type BeltRank = {
   kyu: number | null
   color_hex: string
   is_active: boolean
+  // Months needed on the previous belt before grading for this one (null / 0 = no wait)
+  min_months_from_previous?: number | null
 }
 
-export const BELT_RANK_COLUMNS = 'id, rank_order, belt_name, kyu, color_hex, is_active'
+export const BELT_RANK_COLUMNS = 'id, rank_order, belt_name, kyu, color_hex, is_active, min_months_from_previous'
 
 // companies.grading_enabled: undefined before the SQL ran, so it counts as off
 export function gradingOn(company: { grading_enabled?: boolean | null } | null | undefined): boolean {
@@ -86,9 +88,15 @@ export type StudentGrade = {
   exam_id: string | null
   created_by: string | null
   created_at: string
+  voided_at?: string | null  // Undo results (Phase 2 SQL): hidden from the history
 }
 
 export const STUDENT_GRADE_COLUMNS = 'id, rank_id, achieved_on, source, exam_id, created_by, created_at'
+
+// The rows to show: undone exam rows (voided_at set) are hidden; newest first
+export function visibleGradeHistory<T extends Pick<StudentGrade, 'achieved_on' | 'created_at' | 'voided_at'>>(rows: T[]): T[] {
+  return sortGradeHistory(rows.filter(r => !r.voided_at))
+}
 
 // History line source label
 export function gradeSourceLabel(source: string | null | undefined): string {
@@ -106,4 +114,163 @@ export function sortGradeHistory<T extends Pick<StudentGrade, 'achieved_on' | 'c
   return [...rows].sort((a, b) =>
     (b.achieved_on || b.created_at.slice(0, 10)).localeCompare(a.achieved_on || a.created_at.slice(0, 10))
     || b.created_at.localeCompare(a.created_at))
+}
+
+// ── Phase 2, PR B: grading exams + who can sit them ─────────────────────────────────────────────────
+
+export type GradingExam = {
+  id: string
+  company_id: string
+  exam_date: string
+  exam_time: string | null
+  venue: string | null
+  fee_amount: number | null
+  notes: string | null
+  status: 'scheduled' | 'completed' | 'cancelled' | string
+  created_at: string
+  // Fee per belt graded TO (rank id → amount), set when the exam is scheduled; missing belt = fee_amount.
+  // Column from 20261112120000_belt_grading_fee_brown1.sql: undefined before it ran
+  belt_fees?: Record<string, number> | null
+}
+// '*' so belt_fees is read once its SQL ran, and nothing breaks before
+export const GRADING_EXAM_COLUMNS = '*'
+
+export type ExamCandidate = {
+  id: string
+  exam_id: string
+  student_id: string
+  from_rank_id: string | null
+  to_rank_id: string
+  fee_paid: boolean | null
+  result: 'pass' | 'fail' | null | string
+  notice_sent_at: string | null
+  result_sent_at: string | null
+  removed_at?: string | null
+  cancel_sent_at?: string | null
+  created_at?: string
+}
+// removed_at / cancel_sent_at: supabase/migrations/20261111120000_belt_grading_phase2.sql
+export const EXAM_CANDIDATE_COLUMNS = 'id, exam_id, student_id, from_rank_id, to_rank_id, fee_paid, result, notice_sent_at, result_sent_at, removed_at, cancel_sent_at'
+
+// A month on a belt = 30 days (decision 11 Nov: "3 months" = 90 days)
+export const DAYS_PER_MONTH = 30
+
+// The next belt up the ladder: the next ACTIVE belt by rank_order (never skips one; decision D5). null = top belt
+export function nextBelt(ranks: BeltRank[], currentId: string | null | undefined): BeltRank | null {
+  const current = ranks.find(r => r.id === currentId)
+  if (!current) return null
+  return ranks.filter(r => r.is_active && r.rank_order > current.rank_order)
+    .sort((a, b) => a.rank_order - b.rank_order)[0] ?? null
+}
+
+// Whole days from one 'YYYY-MM-DD' to another (later minus earlier; negative when "to" is earlier)
+export function daysBetween(fromIso: string, toIso: string): number {
+  const [a, b] = [fromIso, toIso].map(d => { const [y, m, dd] = d.slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, dd) })
+  return Math.round((b - a) / 86_400_000)
+}
+
+export type Eligibility =
+  | { kind: 'no-belt' }                                                    // set the belt on their profile first
+  | { kind: 'top'; from: BeltRank }                                        // highest belt
+  | { kind: 'not-yet'; from: BeltRank; to: BeltRank; daysToGo: number }   // the gap isn't over by the exam date
+  | { kind: 'eligible'; from: BeltRank; to: BeltRank; dateMissing: boolean }
+
+// Can this student sit the exam? The wait is counted to the EXAM date (decision 11 Nov) and can't be overridden.
+// Belt date unknown: eligible, with a "belt date missing" warning (decision D3).
+export function eligibility(opts: {
+  ranks: BeltRank[]
+  currentRankId: string | null | undefined
+  achievedOn: string | null | undefined
+  examDate: string
+}): Eligibility {
+  const from = opts.ranks.find(r => r.id === opts.currentRankId)
+  if (!from) return { kind: 'no-belt' }
+  const to = nextBelt(opts.ranks, from.id)
+  if (!to) return { kind: 'top', from }
+  if (!opts.achievedOn) return { kind: 'eligible', from, to, dateMissing: true }
+  const need = Math.max(0, to.min_months_from_previous || 0) * DAYS_PER_MONTH
+  const have = daysBetween(opts.achievedOn, opts.examDate)
+  return have >= need ? { kind: 'eligible', from, to, dateMissing: false } : { kind: 'not-yet', from, to, daysToGo: need - have }
+}
+
+// "2 mo to go" (30-day months, rounded up), "12 days to go", "1 day to go"
+export function toGoText(days: number): string {
+  if (days >= DAYS_PER_MONTH) return `${Math.ceil(days / DAYS_PER_MONTH)} mo to go`
+  return `${days} day${days === 1 ? '' : 's'} to go`
+}
+
+// Why a student can't be ticked (null = they can)
+export function notEligibleText(e: Eligibility): string | null {
+  if (e.kind === 'no-belt') return 'Set the belt on their profile first'
+  if (e.kind === 'top') return 'Highest belt'
+  if (e.kind === 'not-yet') return toGoText(e.daysToGo)
+  return null
+}
+
+// Upcoming (scheduled, today or later) first by date; then past / completed / cancelled, newest first
+export function splitExams<T extends Pick<GradingExam, 'exam_date' | 'status'>>(exams: T[], today: string): { upcoming: T[]; past: T[] } {
+  const upcoming = exams.filter(e => e.status === 'scheduled' && e.exam_date >= today).sort((a, b) => a.exam_date.localeCompare(b.exam_date))
+  const past = exams.filter(e => !(e.status === 'scheduled' && e.exam_date >= today)).sort((a, b) => b.exam_date.localeCompare(a.exam_date))
+  return { upcoming, past }
+}
+
+// Status label for an exam card ("Results due" = scheduled and the date has passed)
+export function examStatusLabel(e: Pick<GradingExam, 'exam_date' | 'status'>, today: string): string {
+  if (e.status === 'completed') return 'Completed'
+  if (e.status === 'cancelled') return 'Cancelled'
+  return e.exam_date < today ? 'Results due' : 'Scheduled'
+}
+
+// Changing the date, time or venue clears "Sent ✓" on the notices (decision 10): the parents need the new details
+export function examDetailsChanged(a: Pick<GradingExam, 'exam_date' | 'exam_time' | 'venue'>, b: Pick<GradingExam, 'exam_date' | 'exam_time' | 'venue'>): boolean {
+  const t = (x: string | null) => (x || '').slice(0, 5)
+  return a.exam_date !== b.exam_date || t(a.exam_time) !== t(b.exam_time) || (a.venue || '').trim() !== (b.venue || '').trim()
+}
+
+// Attendance shown next to a candidate (information only; no rule yet, decision 11 Nov):
+// classes attended (any batch, one per day) vs their home batch's classes, from the latest of the belt date,
+// the day they joined and the gym's first attendance day, up to the exam date or today, whichever is earlier.
+export function attendanceShare(opts: {
+  attended: string[]                 // the student's present days ('YYYY-MM-DD'), any order, duplicates ok
+  homeDays: readonly string[] | null // home batch weekdays ('Mon'…'Sun'); null = no home batch
+  from: (string | null | undefined)[] // candidates for the start; the latest one wins
+  until: string                      // min(exam date, today)
+}): { attended: number; scheduled: number | null; pct: number | null } {
+  const start = opts.from.filter((d): d is string => !!d).map(d => d.slice(0, 10)).sort().pop() || opts.until
+  const days = new Set(opts.attended.filter(d => d >= start && d <= opts.until))
+  if (!opts.homeDays || !opts.homeDays.length) return { attended: days.size, scheduled: null, pct: null }
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const want = new Set(opts.homeDays)
+  let scheduled = 0
+  for (let n = 0; n <= daysBetween(start, opts.until); n++) {
+    const [y, m, d] = start.split('-').map(Number)
+    if (want.has(names[new Date(Date.UTC(y, m - 1, d + n)).getUTCDay()])) scheduled++
+  }
+  if (!scheduled) return { attended: days.size, scheduled: 0, pct: null }
+  return { attended: days.size, scheduled, pct: Math.min(100, Math.round((days.size / scheduled) * 100)) }
+}
+
+// ── Fees per belt (12 Nov: fixed when the exam is scheduled; same fee up to a belt, more above) ─────
+
+// What grading TO this belt costs on this exam: its own fee, else the exam fee (null = no fee)
+export function beltFee(exam: Pick<GradingExam, 'fee_amount' | 'belt_fees'>, toRankId: string): number | null {
+  const own = exam.belt_fees?.[toRankId]
+  if (own != null && Number.isFinite(Number(own))) return Number(own)
+  return exam.fee_amount != null ? Number(exam.fee_amount) : null
+}
+
+// "₹500 · Brown – 3rd kyu, Brown – 2nd kyu ₹800": the exam fee, then belts that differ grouped by amount
+export function feeSummary(
+  exam: Pick<GradingExam, 'fee_amount' | 'belt_fees'>,
+  ranks: BeltRank[],
+  money: (n: number) => string,
+): string {
+  const base = exam.fee_amount != null ? money(Number(exam.fee_amount)) : 'No fee'
+  const groups = new Map<number, string[]>()
+  for (const r of [...ranks].sort((a, b) => a.rank_order - b.rank_order)) {
+    const v = exam.belt_fees?.[r.id]
+    if (v == null || Number(v) === Number(exam.fee_amount)) continue
+    groups.set(Number(v), [...(groups.get(Number(v)) || []), beltLabel(r)])
+  }
+  return [base, ...[...groups].map(([v, names]) => `${names.join(', ')} ${money(v)}`)].join(' · ')
 }

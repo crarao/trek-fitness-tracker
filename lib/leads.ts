@@ -1,7 +1,7 @@
 // Leads / enquiry tracking (ROADMAP #52). Pure helpers: no Supabase, no React.
 // Table: public.leads (db/2026-10-29-leads.md). A lead is never deleted: it ends as Joined or Lost.
 
-import { type Country, parseDate } from './locale'
+import { type Country, parseDate, greet } from './locale'
 
 export type LeadStatus = 'new' | 'trial' | 'joined' | 'lost'
 
@@ -83,19 +83,20 @@ function firstName(name: string): string {
 export function leadMessage(
   lead: Pick<Lead, 'name' | 'status'>,
   companyName: string,
-  businessType: string | null | undefined
+  businessType: string | null | undefined,
+  country: Country | null | undefined = 'IN'
 ): string {
   const emoji = businessType === 'martial_arts' ? '🥋' : '💪'
-  const hi = `Hi ${firstName(lead.name)}`
+  const hi = (rest: string) => greet(firstName(lead.name), rest, country)
   switch (lead.status) {
     case 'trial':
-      return `${hi}, how did your trial at ${companyName} go? Happy to help you pick a plan that suits you. ${emoji}`
+      return hi(`how did your trial at ${companyName} go? Happy to help you pick a plan that suits you. ${emoji}`)
     case 'lost':
-      return `${hi}, hope you're doing well! We'd love to have you at ${companyName} whenever you're ready. ${emoji}`
+      return hi(`hope you're doing well! We'd love to have you at ${companyName} whenever you're ready. ${emoji}`)
     case 'joined':
-      return `${hi}, welcome to ${companyName}! ${emoji}`
+      return hi(`welcome to ${companyName}! ${emoji}`)
     default:
-      return `${hi}, thanks for your interest in ${companyName}! Would you like to come in for a trial session this week? ${emoji}`
+      return hi(`thanks for your interest in ${companyName}! Would you like to come in for a trial session this week? ${emoji}`)
   }
 }
 
