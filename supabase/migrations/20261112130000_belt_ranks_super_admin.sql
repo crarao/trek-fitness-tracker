@@ -5,7 +5,8 @@
 -- 2. After testing on the dev link, run in: Mumbai (prod) — coachboard-mumbai  nptxjfvkqjuekgkspemu
 --                                           https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
 -- Check the project ref in the address bar before pressing Run.
--- Status: NOT RUN YET (dev or prod).
+-- Status: ✅ RUN ON DEV 12 Nov 2026 (by Anand); Step 2 check as expected (select unchanged; insert / update / delete
+--         super_admin only). Mumbai (prod): NOT RUN YET — with the other Phase 2 files, when Phase 2 ships to main.
 --
 -- Anand runs this; Claude does not. Nothing is dropped or deleted: the three existing write rules on belt_ranks
 -- (from 20261110120000_belt_grading.sql) are narrowed in place with ALTER POLICY, from "owner / partner of the gym
