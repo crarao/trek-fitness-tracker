@@ -88,6 +88,7 @@ test.describe.serial('Members', () => {
       const used = Number(await slots.getAttribute('data-used'))
       const limit = Number(await slots.getAttribute('data-limit'))
       const gap = limit - used
+      console.log(`R13: ${role} ${used} active member(s), limit ${limit}, ${gap} free`)
       if (!pick || gap < pick.gap) pick = { role, gap }
       await page.context().close()
     }
