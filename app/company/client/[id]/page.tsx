@@ -24,7 +24,7 @@ import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
-  type StudentGrade, STUDENT_GRADE_COLUMNS, gradeSourceLabel, sortGradeHistory } from '@/lib/belts'
+  type StudentGrade, gradeSourceLabel, visibleGradeHistory } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
@@ -539,12 +539,13 @@ export default function ClientDetailPage() {
           const [{ data: ranks, error: ranksError }, history] = await Promise.all([
             supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', clientData.company_id).order('rank_order'),
             // Belt history: reloaded with the client, so a belt changed with Edit shows its new row
-            supabase.from('student_grades').select(STUDENT_GRADE_COLUMNS).eq('student_id', clientId),
+            // select('*'): voided_at (Undo results) is read once the Phase 2 SQL ran, and works before it
+            supabase.from('student_grades').select('*').eq('student_id', clientId),
           ])
           if (ranksError) console.error('Belt ranks error:', ranksError)
           else setBeltRanks((ranks || []) as BeltRank[])
           if (history.error) console.error('Belt history error:', history.error)
-          setBeltHistory(history.error ? null : sortGradeHistory((history.data || []) as StudentGrade[]))
+          setBeltHistory(history.error ? null : visibleGradeHistory((history.data || []) as StudentGrade[]))
         }
         // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
         const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
