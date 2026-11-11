@@ -11,9 +11,11 @@ type Props = {
   // Show a faint "No belt" when the student has none (only where there is room); default: nothing
   showNone?: boolean
   size?: 'sm' | 'md'
+  // Only the coloured dot (belt history rows, where the belt name is written next to it)
+  dotOnly?: boolean
 }
 
-export default function BeltChip({ rank, showNone = false, size = 'sm' }: Props) {
+export default function BeltChip({ rank, showNone = false, size = 'sm', dotOnly = false }: Props) {
   const text = size === 'md' ? 'text-xs' : 'text-[11px]'
   if (!rank) {
     return showNone
@@ -27,7 +29,7 @@ export default function BeltChip({ rank, showNone = false, size = 'sm' }: Props)
       <span aria-hidden="true"
         className={`${dot} rounded-full flex-shrink-0 ${isLightBelt(rank.color_hex) ? 'ring-1 ring-gray-400' : 'ring-1 ring-white/20'}`}
         style={{ backgroundColor: rank.color_hex || '#FFFFFF' }} />
-      {beltChipText(rank)}
+      {!dotOnly && beltChipText(rank)}
     </span>
   )
 }

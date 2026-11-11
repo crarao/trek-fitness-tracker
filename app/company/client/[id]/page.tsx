@@ -3573,7 +3573,7 @@ const handleResetPassword = async () => {
                         const by = g.created_by ? staff.find(x => x.id === g.created_by)?.full_name.trim() : ''
                         return (
                           <li key={g.id} data-testid="belt-history-row" className="flex items-start gap-2 text-sm">
-                            <span className="mt-0.5 w-14 shrink-0"><BeltChip rank={r} /></span>
+                            <span className="mt-1 shrink-0"><BeltChip rank={r} dotOnly /></span>
                             <span className="min-w-0">
                               <span className="text-gray-200">{r ? beltLabel(r) : 'Belt'}</span>
                               <span className="block text-xs text-gray-500">
