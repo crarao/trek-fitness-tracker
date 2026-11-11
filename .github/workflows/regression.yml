@@ -34,6 +34,15 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Check the dev QA logins secret
+        env:
+          QA_LOGINS: ${{ secrets.QA_LOGINS_DEV }}
+        run: |
+          if [ -z "$QA_LOGINS" ]; then
+            echo "::error::Add the QA_LOGINS_DEV secret (dev passwords; same JSON shape as QA_LOGINS): Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
       - run: npm ci
 
       - run: npx playwright install --with-deps chromium
@@ -43,8 +52,9 @@ jobs:
         env:
           E2E_BASE_URL: ${{ github.event.inputs.base_url || github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
           E2E_SUPABASE_URL: https://nnxrmaiinbmxfwzefbwx.supabase.co
-          # Dev QA logins (same phones as prod QA). Falls back to the smoke tests' secret if QA_LOGINS_DEV isn't set.
-          QA_LOGINS: ${{ secrets.QA_LOGINS_DEV || secrets.QA_LOGINS }}
+          # Dev QA logins (same phones as prod QA, dev passwords). No fallback to the prod secret: wrong passwords
+          # only cost failed logins against Supabase's rate limit.
+          QA_LOGINS: ${{ secrets.QA_LOGINS_DEV }}
           # Only if Vercel deployment protection is on for previews (Vercel → Settings → Deployment Protection → bypass)
           E2E_VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
