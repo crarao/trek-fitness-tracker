@@ -1,7 +1,8 @@
 // Prints the belt rules (lib/belts.ts) for sample inputs, to read the results. Fails (exit 1) if a rule gives the wrong answer.
 //   npx tsc scripts/check-belts.ts --outDir /tmp/cb --module commonjs --target es2020 --skipLibCheck && node /tmp/cb/scripts/check-belts.js
 
-import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate } from '../lib/belts'
+import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate,
+  beltsById, beltChipText, isLightBelt, gradeSourceLabel, sortGradeHistory } from '../lib/belts'
 
 let failed = 0
 const check = (label: string, value: unknown, ok: boolean) => {
@@ -29,6 +30,24 @@ check('grading on only when true', [gradingOn({ grading_enabled: true }), gradin
   gradingOn({ grading_enabled: true }) && !gradingOn({}) && !gradingOn(null) && !gradingOn({ grading_enabled: false }))
 check('dates: 2026-03-01 ok, 2026-02-30 / 1-3-2026 / "" refused', '',
   validIsoDate('2026-03-01') && !validIsoDate('2026-02-30') && !validIsoDate('1-3-2026') && !validIsoDate(''))
+
+// Phase 2, PR A: chips + history
+check('chip: White', beltChipText(ladder[1]), beltChipText(ladder[1]) === 'White')
+check('chip: 8 kyu', beltChipText(ladder[2]), beltChipText(ladder[2]) === '8 kyu')
+check('belts by id', Object.keys(beltsById(ladder)).sort(), beltsById(ladder).yellow?.belt_name === 'Yellow' && Object.keys(beltsById(ladder)).length === 4)
+check('light: white #FFF / yellow #FACC15', [isLightBelt('#FFF'), isLightBelt('#FACC15')], isLightBelt('#FFF') && isLightBelt('#ffffff') && isLightBelt('#FACC15'))
+check('dark: brown / blue / black', [isLightBelt('#78350F'), isLightBelt('#1D4ED8'), isLightBelt('#000000')],
+  !isLightBelt('#78350F') && !isLightBelt('#1D4ED8') && !isLightBelt('#000000'))
+check('bad colour → treated as light (ring)', isLightBelt('nope'), isLightBelt('nope') && isLightBelt(null))
+const labels = ['joined', 'backfill', 'manual', 'exam', 'other'].map(gradeSourceLabel)
+check('source labels', labels, labels.join('|') === 'Joined|Entered later|Changed|Exam|')
+const hist = sortGradeHistory([
+  { id: 'a', achieved_on: '2026-01-05', created_at: '2026-11-10T10:00:00Z' },
+  { id: 'b', achieved_on: '2026-04-05', created_at: '2026-11-10T10:05:00Z' },
+  { id: 'c', achieved_on: null, created_at: '2026-11-11T09:00:00Z' },
+  { id: 'd', achieved_on: '2026-04-05', created_at: '2026-11-10T11:00:00Z' },
+])
+check('history newest first (unknown date = saved day)', hist.map(h => h.id), hist.map(h => h.id).join() === 'c,d,b,a')
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)

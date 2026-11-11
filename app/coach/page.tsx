@@ -14,6 +14,8 @@ import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, 
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attendance'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 
 type Staff = StaffMember & { role: string; archived_at: string | null }
 type MembershipStatus = { profile_id: string; plan_type: string | null; start_date: string | null; end_date: string | null }
@@ -35,6 +37,9 @@ export default function CoachHomePage() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [plans, setPlans] = useState<CoachPlan[]>([])
   const [sessions, setSessions] = useState<CoachSession[]>([])
+  // Belt grading on (companies.grading_enabled): the gym's belts by id and each student's current belt; empty = no chips
+  const [beltById, setBeltById] = useState<Record<string, BeltRank>>({})
+  const [clientRank, setClientRank] = useState<Record<string, string>>({})
   const [membershipEnd, setMembershipEnd] = useState<Record<string, string | null>>({})
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
@@ -58,10 +63,10 @@ export default function CoachHomePage() {
     // PT clients, their plans and sessions, and the gym's staff)
     const [profileRes, clientsRes, staffRes, plansRes, sessionsRes, membershipRes] = await Promise.all([
       supabase.from('profiles')
-        .select('id, full_name, company_id, companies:company_id(name, logo_url, country, business_type)')
+        .select('id, full_name, company_id, companies:company_id(name, logo_url, country, business_type, grading_enabled)')
         .eq('id', user.id).single(),
       supabase.from('profiles')
-        .select('id, full_name, phone, primary_coach_id, archived_at, client_type')
+        .select('id, full_name, phone, primary_coach_id, archived_at, client_type, current_rank_id')
         .eq('role', 'client').eq('client_type', 'pt').is('archived_at', null)
         .order('full_name'),
       // Staff names through gym_staff() (coaches can't read owner / partner rows directly)
@@ -79,7 +84,7 @@ export default function CoachHomePage() {
     if (failed?.error) { console.error('Coach home load error:', failed.error); setError("Couldn't load today's list. Refresh the page to try again.") }
     if (membershipRes.error) console.error('Membership status error:', membershipRes.error)
 
-    const profile = profileRes.data as { id: string; full_name: string | null; companies: { name?: string | null; logo_url?: string | null; country?: string | null; business_type?: string | null } | null } | null
+    const profile = profileRes.data as { id: string; full_name: string | null; company_id: string | null; companies: { name?: string | null; logo_url?: string | null; country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null } | null
     setMe({ id: user.id, full_name: profile?.full_name || '' })
     setCompany({
       name: profile?.companies?.name || '',
@@ -109,6 +114,16 @@ export default function CoachHomePage() {
         setDojoBatches((ba.data || []) as Batch[])
         const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('class_date', today).eq('present', true)
         setAttToday(att.error ? null : (att.data || []) as AttendanceRow[])
+      }
+    }
+    // Belt grading: one read of the gym's belts for the chips (an error = none, no chips)
+    if (gradingOn(profile?.companies) && profile?.company_id) {
+      const ranks = await supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', profile.company_id)
+      if (ranks.error) console.error('Belt ranks error:', ranks.error)
+      else {
+        setBeltById(beltsById((ranks.data || []) as BeltRank[]))
+        setClientRank(Object.fromEntries(((clientsRes.data || []) as { id: string; current_rank_id?: string | null }[])
+          .filter(c => c.current_rank_id).map(c => [c.id, c.current_rank_id as string])))
       }
     }
     setClients((clientsRes.data || []) as CoachClient[])
@@ -341,7 +356,10 @@ export default function CoachHomePage() {
                       className={`w-full text-left bg-gray-900 border rounded-2xl px-4 py-3 transition hover:border-gray-600 ${openingId === r.client.id ? 'border-orange-500' : r.doneToday ? 'border-green-900/60' : 'border-gray-800'}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-white truncate">{r.client.full_name}</p>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{r.client.full_name}</p>
+                            <BeltChip rank={beltById[clientRank[r.client.id] || '']} />
+                          </div>
                           <p className={`text-[11px] ${r.isMine ? 'text-orange-400' : 'text-gray-500'}`}>{coachLine(r)}</p>
                         </div>
                         <div className="text-right shrink-0">

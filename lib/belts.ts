@@ -54,3 +54,56 @@ export function validIsoDate(value: unknown): value is string {
   const dt = new Date(Date.UTC(y, m - 1, d))
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
 }
+
+// ── Phase 2, PR A: belt chips + belt history ────────────────────────────────────────────────────────
+
+// Gym belts by id, for lists (load belt_ranks once per page, never per student)
+export function beltsById(ranks: BeltRank[]): Record<string, BeltRank> {
+  return Object.fromEntries(ranks.map(r => [r.id, r]))
+}
+
+// Chip text: "White", "8 kyu" (a belt without a kyu shows its name)
+export function beltChipText(rank: Pick<BeltRank, 'belt_name' | 'kyu'>): string {
+  return rank.kyu ? `${rank.kyu} kyu` : rank.belt_name
+}
+
+// Light belts (White, Yellow) get a grey ring so they show on the dark screens; '#RGB' / '#RRGGBB'
+export function isLightBelt(hex: string | null | undefined): boolean {
+  const h = (hex || '').trim().replace(/^#/, '')
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h
+  if (!/^[0-9a-f]{6}$/i.test(full)) return true
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16))
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 186
+}
+
+export type GradeSource = 'joined' | 'backfill' | 'manual' | 'exam'
+
+export type StudentGrade = {
+  id: string
+  rank_id: string
+  achieved_on: string | null
+  source: GradeSource | string
+  exam_id: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export const STUDENT_GRADE_COLUMNS = 'id, rank_id, achieved_on, source, exam_id, created_by, created_at'
+
+// History line source label
+export function gradeSourceLabel(source: string | null | undefined): string {
+  switch (source) {
+    case 'joined': return 'Joined'
+    case 'backfill': return 'Entered later'
+    case 'manual': return 'Changed'
+    case 'exam': return 'Exam'
+    default: return ''
+  }
+}
+
+// Newest first: by belt date (unknown dates by when the row was saved), then when it was saved
+export function sortGradeHistory<T extends Pick<StudentGrade, 'achieved_on' | 'created_at'>>(rows: T[]): T[] {
+  return [...rows].sort((a, b) =>
+    (b.achieved_on || b.created_at.slice(0, 10)).localeCompare(a.achieved_on || a.created_at.slice(0, 10))
+    || b.created_at.localeCompare(a.created_at))
+}

@@ -12,6 +12,8 @@ import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
 import { memberWord, staffWord } from '@/lib/labels'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, type RosterStudent, type DayEntry, ATTENDANCE_COLUMNS, dayBoard, tapRow, addDays, elsewhereText } from '@/lib/attendance'
 
@@ -38,6 +40,8 @@ function TodayAttendance() {
   const [me, setMe] = useState<{ id: string; role: string; companyId: string } | null>(null)
   const [country, setCountry] = useState<Country>('IN')
   const [businessType, setBusinessType] = useState<string | null>(null)
+  // Belt grading on: the gym's belts by id (one read); empty = no chips
+  const [beltById, setBeltById] = useState<Record<string, BeltRank>>({})
   const [branches, setBranches] = useState<Branch[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [students, setStudents] = useState<Student[]>([])
@@ -66,16 +70,18 @@ function TodayAttendance() {
       const { data: profile } = await supabase.from('profiles')
         .select('id, role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
-      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null } | null }).companies
+      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
       const cId = profile.company_id as string
-      const [br, ba, people, att, staffList] = await Promise.all([
+      const [br, ba, people, att, staffList, ranks] = await Promise.all([
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
-        supabase.from('profiles').select('id, full_name, branch_id, batch_id, archived_at').eq('company_id', cId)
+        supabase.from('profiles').select('id, full_name, branch_id, batch_id, archived_at, current_rank_id').eq('company_id', cId)
           .eq('role', 'client').is('archived_at', null).order('full_name'),
         supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId).eq('class_date', date),
         loadGymStaff(cId),
+        // Belt grading on: the gym's belts once, for the chips
+        gradingOn(co) ? supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId) : null,
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: cId })
@@ -87,6 +93,8 @@ function TodayAttendance() {
       setStudents((people.data || []) as Student[])
       setRows((att.data || []) as AttendanceRow[])
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
+      if (ranks?.error) console.error('Belt ranks error:', ranks.error)
+      setBeltById(beltsById((ranks && !ranks.error ? ranks.data || [] : []) as BeltRank[]))
       setLoading(false)
     })()
     return () => { live = false }
@@ -253,7 +261,10 @@ function TodayAttendance() {
                               </button>
                             </td>
                             <td className="py-2.5 pr-2 min-w-0">
-                              <span className={`block truncate font-medium ${e.present ? 'text-white' : 'text-gray-300'}`}>{e.student.full_name}</span>
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className={`truncate font-medium ${e.present ? 'text-white' : 'text-gray-300'}`}>{e.student.full_name}</span>
+                                <BeltChip rank={beltById[e.student.current_rank_id || '']} />
+                              </span>
                               {also && <span className="block text-[11px] text-amber-300 truncate">⚠ {e.present ? 'Also came today' : 'Already came today'} · {also}</span>}
                             </td>
                             <td className="py-2.5 pr-4 text-right text-[11px] whitespace-nowrap align-top">

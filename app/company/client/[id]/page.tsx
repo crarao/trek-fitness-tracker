@@ -23,7 +23,9 @@ import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
-import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions } from '@/lib/belts'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
+  type StudentGrade, STUDENT_GRADE_COLUMNS, gradeSourceLabel, sortGradeHistory } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
@@ -243,6 +245,8 @@ export default function ClientDetailPage() {
   // Belt grading (companies.grading_enabled; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
   const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
   const beltsOn = beltRanks.length > 0
+  // Belt history (student_grades, newest first): staff and senseis read it; null = not loaded / couldn't be read
+  const [beltHistory, setBeltHistory] = useState<StudentGrade[] | null>(null)
   // Dojo branches & batches (db/2026-11-03-branches-batches.md): loaded with the client; empty / off before the SQL
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
@@ -532,10 +536,15 @@ export default function ClientDetailPage() {
         if (clientData?.company_id) setCompanyId(clientData.company_id)
         // Belt grading on: the gym's belts (Profile tab); an error = none yet, fields stay hidden
         if (clientData?.company_id && gradingOn((clientData as { companies?: { grading_enabled?: boolean | null } }).companies)) {
-          const { data: ranks, error: ranksError } = await supabase.from('belt_ranks').select(BELT_RANK_COLUMNS)
-            .eq('company_id', clientData.company_id).order('rank_order')
+          const [{ data: ranks, error: ranksError }, history] = await Promise.all([
+            supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', clientData.company_id).order('rank_order'),
+            // Belt history: reloaded with the client, so a belt changed with Edit shows its new row
+            supabase.from('student_grades').select(STUDENT_GRADE_COLUMNS).eq('student_id', clientId),
+          ])
           if (ranksError) console.error('Belt ranks error:', ranksError)
           else setBeltRanks((ranks || []) as BeltRank[])
+          if (history.error) console.error('Belt history error:', history.error)
+          setBeltHistory(history.error ? null : sortGradeHistory((history.data || []) as StudentGrade[]))
         }
         // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
         const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
@@ -1900,6 +1909,7 @@ const handleResetPassword = async () => {
                 <div className="flex-1 min-w-0 pt-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h1 className="text-2xl font-bold text-white leading-tight break-words">{client?.full_name}</h1>
+                    {beltsOn && client && <BeltChip size="md" showNone rank={beltRanks.find(r => r.id === client.current_rank_id)} />}
                     {client?.client_type === 'pt' && !dojo && (
                       <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
                     )}
@@ -3553,6 +3563,31 @@ const handleResetPassword = async () => {
                   {rank ? beltLabel(rank) : <span className="text-gray-400">Belt not set</span>}
                   {rank && <span className="text-gray-400"> · since {client.rank_achieved_on ? formatDate(client.rank_achieved_on, country, 'medium') : '—'}</span>}
                 </p>
+                {/* Belt history (student_grades), newest first: belt, since when, how it was set, by whom */}
+                {beltHistory && beltHistory.length > 0 && (
+                  <div className="mt-3" data-testid="belt-history">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Belt history</p>
+                    <ul className="space-y-1.5">
+                      {beltHistory.map(g => {
+                        const r = beltRanks.find(x => x.id === g.rank_id)
+                        const by = g.created_by ? staff.find(x => x.id === g.created_by)?.full_name.trim() : ''
+                        return (
+                          <li key={g.id} data-testid="belt-history-row" className="flex items-start gap-2 text-sm">
+                            <span className="mt-0.5 w-14 shrink-0"><BeltChip rank={r} /></span>
+                            <span className="min-w-0">
+                              <span className="text-gray-200">{r ? beltLabel(r) : 'Belt'}</span>
+                              <span className="block text-xs text-gray-500">
+                                {g.achieved_on ? `since ${formatDate(g.achieved_on, country, 'medium')}` : 'date unknown'}
+                                {gradeSourceLabel(g.source) && ` · ${gradeSourceLabel(g.source)}`}
+                                {by && ` · by ${by}`}
+                              </span>
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
               </div>
             )
           })()}
