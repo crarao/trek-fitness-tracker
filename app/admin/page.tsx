@@ -11,6 +11,7 @@ import { AI_FEATURES, AI_COST_ALERT_INR, USD_TO_INR, inr } from '@/lib/ai-pricin
 import { type CompanyType, COMPANY_TYPES, companyType, isCoachCompany, companyTypeLabel } from '@/lib/company-type'
 import { type BusinessType, BUSINESS_TYPES, businessType, businessTypeLabel, isDojo } from '@/lib/labels'
 import BranchesEditor from '@/app/branches-editor'
+import BeltsEditor from '@/app/belts-editor'
 import { cleanUpiId, upiProblem } from '@/lib/guardian'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
@@ -50,6 +51,7 @@ type Company = {
   banner_has_branding?: boolean | null // banner already has the gym's name / logo (absent before db/2026-10-31-banner-branding.md)
   business_type?: string | null
   upi_id?: string | null   // dojo fee reminders (absent before db/2026-11-07-upi-id.md)
+  grading_enabled?: boolean | null // belt grading (absent before supabase/migrations/20261110120000_belt_grading.sql)
 }
 
 type ContactRequest = {
@@ -1403,6 +1405,20 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           <div>
                             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Branches <span className="normal-case text-gray-600">— save straight away</span></label>
                             <BranchesEditor companyId={editingCompany.id} onSaved={(text, kind) => { showToast(text, kind); fetchBranchCounts() }} />
+                          </div>
+                        )}
+
+                        {/* Belt grading (dojos): Grading switch + the belt ladder. Super admin only; saves straight away */}
+                        {isDojo(editingCompany.business_type) && (
+                          <div>
+                            <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Belt grading <span className="normal-case text-gray-600">— save straight away</span></label>
+                            <BeltsEditor companyId={editingCompany.id}
+                              gradingEnabled={'grading_enabled' in editingCompany ? editingCompany.grading_enabled : undefined}
+                              onGradingChange={on => {
+                                setEditingCompany(c => (c && c.id === editingCompany.id ? { ...c, grading_enabled: on } : c))
+                                setCompanies(cs => cs.map(c => (c.id === editingCompany.id ? { ...c, grading_enabled: on } : c)))
+                              }}
+                              onSaved={(text, kind) => showToast(text, kind)} />
                           </div>
                         )}
 

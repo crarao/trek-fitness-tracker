@@ -18,9 +18,12 @@ export type BeltRank = {
   is_active: boolean
   // Months needed on the previous belt before grading for this one (null / 0 = no wait)
   min_months_from_previous?: number | null
+  // Black belts: 1st dan, 2nd dan… (Phase 2 SQL; never set together with kyu). Undefined before that SQL ran
+  dan?: number | null
 }
 
-export const BELT_RANK_COLUMNS = 'id, rank_order, belt_name, kyu, color_hex, is_active, min_months_from_previous'
+// '*' so dan (Phase 2 SQL) is read once it exists and nothing breaks before
+export const BELT_RANK_COLUMNS = '*'
 
 // companies.grading_enabled: undefined before the SQL ran, so it counts as off
 export function gradingOn(company: { grading_enabled?: boolean | null } | null | undefined): boolean {
@@ -35,9 +38,11 @@ export function ordinal(n: number): string {
 }
 
 // "White", "Yellow – 8th kyu", "Brown – 2nd kyu"
-export function beltLabel(rank: Pick<BeltRank, 'belt_name' | 'kyu'> | null | undefined): string {
+export function beltLabel(rank: Pick<BeltRank, 'belt_name' | 'kyu' | 'dan'> | null | undefined): string {
   if (!rank) return 'Belt not set'
-  return rank.kyu ? `${rank.belt_name} – ${ordinal(rank.kyu)} kyu` : rank.belt_name
+  if (rank.kyu) return `${rank.belt_name} – ${ordinal(rank.kyu)} kyu`
+  if (rank.dan) return `${rank.belt_name} – ${ordinal(rank.dan)} dan`
+  return rank.belt_name
 }
 
 // Ladder order (rank_order); inactive belts only when it's the student's saved one
@@ -71,8 +76,10 @@ export function beltsById(ranks: BeltRank[]): Record<string, BeltRank> {
 }
 
 // Chip text: "White", "8 kyu" (a belt without a kyu shows its name)
-export function beltChipText(rank: Pick<BeltRank, 'belt_name' | 'kyu'>): string {
-  return rank.kyu ? `${rank.kyu} kyu` : rank.belt_name
+export function beltChipText(rank: Pick<BeltRank, 'belt_name' | 'kyu' | 'dan'>): string {
+  if (rank.kyu) return `${rank.kyu} kyu`
+  if (rank.dan) return `${rank.dan} dan`
+  return rank.belt_name
 }
 
 // Light belts (White, Yellow) get a grey ring so they show on the dark screens; '#RGB' / '#RRGGBB'
@@ -378,5 +385,41 @@ export function gradingRpcMessage(res: { ok?: boolean; error?: string; names?: s
     case 'not_completed': return 'Results are not saved yet.'
     case 'no_candidates': return 'Nobody is on this exam.'
     default: return `Couldn't save (${res.error || 'unknown'}).`
+  }
+}
+
+// ── PR D: belts set up by super admin (Super Admin → Companies → Edit) ─────────────────────────────
+
+// The standard ladder ("Add standard belts"): DSSKA's, with Brown 1st kyu (12 Nov). rank_order 0…8
+export const STANDARD_BELTS: { belt_name: string; kyu: number | null; color_hex: string; min_months_from_previous: number | null }[] = [
+  { belt_name: 'White', kyu: null, color_hex: '#FFFFFF', min_months_from_previous: null },
+  { belt_name: 'Yellow', kyu: 8, color_hex: '#FACC15', min_months_from_previous: 3 },
+  { belt_name: 'Orange', kyu: 7, color_hex: '#F97316', min_months_from_previous: 3 },
+  { belt_name: 'Green', kyu: 6, color_hex: '#16A34A', min_months_from_previous: 3 },
+  { belt_name: 'Blue', kyu: 5, color_hex: '#2563EB', min_months_from_previous: 3 },
+  { belt_name: 'Purple', kyu: 4, color_hex: '#7C3AED', min_months_from_previous: 3 },
+  { belt_name: 'Brown', kyu: 3, color_hex: '#78350F', min_months_from_previous: 3 },
+  { belt_name: 'Brown', kyu: 2, color_hex: '#78350F', min_months_from_previous: 6 },
+  { belt_name: 'Brown', kyu: 1, color_hex: '#78350F', min_months_from_previous: 6 },
+]
+
+export type BeltDraft = { id: string | null; belt_name: string; grade: 'none' | 'kyu' | 'dan'; number: string; color_hex: string; months: string }
+
+// A belt form → row fields, or a problem to show. withDan: only once belt_ranks.dan exists
+export function beltFields(d: BeltDraft, withDan: boolean): { belt_name: string; kyu: number | null; dan?: number | null; color_hex: string; min_months_from_previous: number | null } | string {
+  const name = d.belt_name.replace(/\s+/g, ' ').trim()
+  if (!name) return 'Add the belt name (e.g. Black)'
+  if (name.length > 40) return 'Keep the name under 40 characters'
+  if (!/^#[0-9A-Fa-f]{6}$/.test(d.color_hex)) return 'Pick the belt colour'
+  const n = d.number.trim() === '' ? null : Number(d.number)
+  if (d.grade !== 'none' && (n === null || !Number.isInteger(n))) return `Add the ${d.grade} number`
+  if (d.grade === 'kyu' && (n! < 1 || n! > 20)) return 'Kyu is 1 to 20'
+  if (d.grade === 'dan' && (n! < 1 || n! > 10)) return 'Dan is 1 to 10'
+  if (d.grade === 'dan' && !withDan) return 'Dan belts need the Phase 2 SQL first'
+  const m = d.months.trim() === '' ? null : Number(d.months)
+  if (m !== null && (!Number.isInteger(m) || m < 0 || m > 120)) return 'Months: a whole number (or empty)'
+  return {
+    belt_name: name, kyu: d.grade === 'kyu' ? n : null, ...(withDan ? { dan: d.grade === 'dan' ? n : null } : {}),
+    color_hex: d.color_hex.toUpperCase(), min_months_from_previous: m,
   }
 }
