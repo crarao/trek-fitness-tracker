@@ -4,7 +4,7 @@
 import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate,
   beltsById, beltChipText, isLightBelt, gradeSourceLabel, sortGradeHistory,
   nextBelt, daysBetween, eligibility, toGoText, notEligibleText, splitExams, examStatusLabel, examDetailsChanged, attendanceShare,
-  suggestedFee, candidateFee } from '../lib/belts'
+  beltFee, feeSummary } from '../lib/belts'
 
 let failed = 0
 const check = (label: string, value: unknown, ok: boolean) => {
@@ -101,17 +101,15 @@ check('attendance 4 of 6 = 67%', share, share.attended === 4 && share.scheduled 
 const noHome = attendanceShare({ attended: ['2026-11-02'], homeDays: null, from: ['2026-11-01'], until: '2026-11-15' })
 check('no home batch → count only, no %', noHome, noHome.attended === 1 && noHome.pct === null)
 
-// Fee per student: last fee for the same belt on this exam, else the exam's
-const cs = [
-  { to_rank_id: 'y', fee_amount: 500, removed_at: null, created_at: '2026-11-12T10:00:00Z' },
-  { to_rank_id: 'y', fee_amount: 600, removed_at: null, created_at: '2026-11-12T10:05:00Z' },
-  { to_rank_id: 'g', fee_amount: 800, removed_at: '2026-11-12T11:00:00Z', created_at: '2026-11-12T10:10:00Z' },
-]
-check('fee: same belt → last typed (600)', suggestedFee(cs, 'y', 400), suggestedFee(cs, 'y', 400) === 600)
-check('fee: removed rows ignored → exam fee', suggestedFee(cs, 'g', 400), suggestedFee(cs, 'g', 400) === 400)
-check('fee: nothing → null', suggestedFee([], 'g', null), suggestedFee([], 'g', null) === null)
-check('candidate fee: own, else exam', [candidateFee({ fee_amount: 700 }, 400), candidateFee({ fee_amount: null }, 400)],
-  candidateFee({ fee_amount: 700 }, 400) === 700 && candidateFee({ fee_amount: null }, 400) === 400)
+// Fees per belt: Brown belts cost more, the rest = the exam fee
+const feeExam = { fee_amount: 500, belt_fees: { b2: 800 } }
+check('belt fee: own (Brown 2nd kyu 800)', beltFee(feeExam, 'b2'), beltFee(feeExam, 'b2') === 800)
+check('belt fee: else exam fee (500)', beltFee(feeExam, 'y'), beltFee(feeExam, 'y') === 500)
+check('belt fee: none at all → null', beltFee({ fee_amount: null, belt_fees: null }, 'y'), beltFee({ fee_amount: null, belt_fees: null }, 'y') === null)
+check('belt fee: before the SQL (no belt_fees) → exam fee', beltFee({ fee_amount: 300 }, 'y'), beltFee({ fee_amount: 300 }, 'y') === 300)
+const money = (n: number) => `₹${n}`
+check('fee summary', feeSummary(feeExam, full, money), feeSummary(feeExam, full, money) === '₹500 · Brown – 2nd kyu ₹800')
+check('fee summary: no fee', feeSummary({ fee_amount: null }, full, money), feeSummary({ fee_amount: null }, full, money) === 'No fee')
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)

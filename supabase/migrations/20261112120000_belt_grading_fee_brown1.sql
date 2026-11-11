@@ -1,5 +1,5 @@
 -- =====================================================================================
--- Belt grading: a fee per student on an exam + Brown 1st kyu on the ladder
+-- Belt grading: a fee per belt on an exam + Brown 1st kyu on the ladder
 --
 -- 1. Run in: Dev  — coachboard-dev     nnxrmaiinbmxfwzefbwx  https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
 -- 2. After testing on the dev link, run in: Mumbai (prod) — coachboard-mumbai  nptxjfvkqjuekgkspemu
@@ -8,11 +8,12 @@
 -- Check the project ref in the address bar before pressing Run.
 -- Status: NOT RUN YET (dev or prod).
 --
--- Anand runs this; Claude does not. ADDITIVE ONLY: 1 nullable column, 1 new belt row per gym.
+-- Anand runs this; Claude does not. ADDITIVE ONLY: 1 nullable column, 1 check rule, 1 new belt row per gym.
 -- No DROP / DELETE / TRUNCATE, no renames, no type changes.
 --
---   1. grading_exam_candidates.fee_amount: the fee for THIS student, taken when they are ticked
---      (each belt grade can cost differently, decision 12 Nov). Empty = the exam's fee.
+--   1. grading_exams.belt_fees: the fee per belt graded TO, fixed when the exam is scheduled
+--      ({"<belt id>": 800, …}; a belt not listed = the exam's fee_amount). Decision 12 Nov: DSSKA
+--      charges the same fee up to Purple and more for the Brown belts.
 --   2. Brown – 1st kyu after Brown – 2nd kyu (rank_order 8), 6 months after 2nd kyu, for every gym
 --      whose ladder ends with Brown 2nd kyu at rank_order 7 (DSSKA on prod, QA Dojo on dev).
 --      Nobody is moved onto it; it only becomes the next belt for Brown 2nd kyu students.
@@ -25,12 +26,12 @@
 
 begin;
 
-alter table public.grading_exam_candidates add column if not exists fee_amount numeric;
+alter table public.grading_exams add column if not exists belt_fees jsonb;
 do $$
 begin
-  if not exists (select 1 from pg_constraint where conname = 'grading_exam_candidates_fee_check') then
-    alter table public.grading_exam_candidates add constraint grading_exam_candidates_fee_check
-      check (fee_amount is null or fee_amount >= 0);
+  if not exists (select 1 from pg_constraint where conname = 'grading_exams_belt_fees_check') then
+    alter table public.grading_exams add constraint grading_exams_belt_fees_check
+      check (belt_fees is null or jsonb_typeof(belt_fees) = 'object');
   end if;
 end $$;
 
@@ -45,9 +46,9 @@ commit;
 -- =====================================================================================
 -- STEP 2 (after commit) — checks
 -- =====================================================================================
--- a) the new column                                                                    -- 1 row: numeric
+-- a) the new column                                                                    -- 1 row: jsonb
 -- select column_name, data_type from information_schema.columns
--- where table_schema = 'public' and table_name = 'grading_exam_candidates' and column_name = 'fee_amount';
+-- where table_schema = 'public' and table_name = 'grading_exams' and column_name = 'belt_fees';
 --
 -- b) the ladder now ends with Brown 2nd kyu, Brown 1st kyu                             -- 9 rows per gym from Step 0
 -- select c.name, r.rank_order, r.belt_name, r.kyu, r.min_months_from_previous

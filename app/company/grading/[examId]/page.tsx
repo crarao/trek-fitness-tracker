@@ -19,18 +19,18 @@ import { memberWord } from '@/lib/labels'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, timeLabel, sortBatches } from '@/lib/batches'
 import { addDays } from '@/lib/attendance'
 import {
-  type BeltRank, type GradingExam, type ExamCandidate, BELT_RANK_COLUMNS, GRADING_EXAM_COLUMNS, suggestedFee, candidateFee,
+  type BeltRank, type GradingExam, type ExamCandidate, BELT_RANK_COLUMNS, GRADING_EXAM_COLUMNS, beltFee, feeSummary,
   gradingOn, beltsById, eligibility, notEligibleText, examStatusLabel, examDetailsChanged, attendanceShare,
 } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
-import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE } from '../exam-form'
+import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE, feeBelts, beltFeesDraft } from '../exam-form'
 
 type Student = {
   id: string; full_name: string; current_rank_id: string | null; rank_achieved_on: string | null
   branch_id: string | null; batch_id: string | null; created_at: string; archived_at: string | null
 }
 const STUDENT_COLUMNS = 'id, full_name, current_rank_id, rank_achieved_on, branch_id, batch_id, created_at, archived_at'
-// Candidates are read with * so fee_amount (per-student fee SQL) is picked up once it exists, and nothing breaks before
+// Candidates are read with * so columns added later (Phase 2 SQL) are picked up without breaking older databases
 const CAND = '*'
 
 export default function GradingExamPage() {
@@ -59,9 +59,7 @@ export default function GradingExamPage() {
   const [batchFilter, setBatchFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState<Set<string>>(new Set())
-  // Fee per student (grading_exam_candidates.fee_amount): false until that SQL has run
-  const [feeOn, setFeeOn] = useState(false)
-  const [feeEdit, setFeeEdit] = useState<{ id: string; value: string } | null>(null)
+
   const [draft, setDraft] = useState<ExamDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -97,7 +95,7 @@ export default function GradingExamPage() {
       if (!live) return
       if (exError || !ex) { setProblem('This exam was not found.'); setLoading(false); return }
       const e = ex as GradingExam
-      const [rk, st, cand, others, br, ba, att, firstAtt, feeProbe] = await Promise.all([
+      const [rk, st, cand, others, br, ba, att, firstAtt] = await Promise.all([
         supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
         supabase.from('profiles').select(STUDENT_COLUMNS).eq('company_id', cId).eq('role', 'client')
@@ -113,7 +111,6 @@ export default function GradingExamPage() {
           .gte('class_date', addDays(e.exam_date, -400)).lte('class_date', e.exam_date).limit(20000),
         supabase.from('attendance').select('class_date').eq('company_id', cId).eq('present', true)
           .order('class_date').limit(1),
-        supabase.from('grading_exam_candidates').select('fee_amount').limit(1),
       ])
       if (!live) return
       if (rk.error || cand.error || st.error) {
@@ -132,7 +129,6 @@ export default function GradingExamPage() {
       setRanks((rk.data || []) as BeltRank[])
       setStudents(people)
       setCandidates((cand.data || []) as ExamCandidate[])
-      setFeeOn(!feeProbe.error)
       if (others.error) console.error('Other exams error:', others.error)
       setElsewhere(Object.fromEntries(((others.data || []) as unknown as { student_id: string; grading_exams: { exam_date: string } | null }[])
         .map(o => [o.student_id, o.grading_exams?.exam_date || ''])))
@@ -153,6 +149,8 @@ export default function GradingExamPage() {
   const batchById = useMemo(() => Object.fromEntries(batches.map(b => [b.id, b])), [batches])
   const candidateFor = useMemo(() => Object.fromEntries(candidates.map(c => [c.student_id, c])), [candidates])
   const open = exam?.status === 'scheduled'
+  // Fees per belt (grading_exams.belt_fees): the column comes with select('*') once its SQL ran
+  const feeOn = !!exam && 'belt_fees' in exam
   const editable = canEdit && open
 
   type Row = {
@@ -211,11 +209,7 @@ export default function GradingExamPage() {
       res = await supabase.from('grading_exam_candidates').update({ removed_at: new Date().toISOString() })
         .eq('id', r.picked.id).select(CAND)
     } else if (r.elig.kind === 'eligible' && !r.why) {
-      const fields: Record<string, unknown> = { removed_at: null, from_rank_id: r.elig.from.id, to_rank_id: r.elig.to.id }
-      // The fee for this student, taken now: the last fee for the same belt on this exam, else the exam's
-      if (feeOn && (existing?.fee_amount == null || existing.to_rank_id !== r.elig.to.id)) {
-        fields.fee_amount = suggestedFee(candidates, r.elig.to.id, exam.fee_amount)
-      }
+      const fields = { removed_at: null, from_rank_id: r.elig.from.id, to_rank_id: r.elig.to.id }
       res = existing
         ? await supabase.from('grading_exam_candidates').update(fields).eq('id', existing.id).select(CAND)
         : await supabase.from('grading_exam_candidates').insert({ ...fields, company_id: companyId, exam_id: exam.id, student_id: r.s.id })
@@ -231,7 +225,7 @@ export default function GradingExamPage() {
     setCandidates(l => (l.some(c => c.id === row.id) ? l.map(c => (c.id === row.id ? row : c)) : [...l, row]))
   }
 
-  const startEdit = () => {
+  const startEdit = (openFees = false) => {
     if (!exam) return
     const venues = venueOptions(branches)
     const inList = !!exam.venue && venues.includes(exam.venue)
@@ -240,12 +234,13 @@ export default function GradingExamPage() {
       exam_date: exam.exam_date, exam_time: (exam.exam_time || '').slice(0, 5),
       venue: inList ? exam.venue as string : OTHER_VENUE, venueOther: inList ? '' : exam.venue || '',
       fee: exam.fee_amount != null ? String(exam.fee_amount) : '', notes: exam.notes || '',
+      beltFees: beltFeesDraft(exam.belt_fees), beltFeesOpen: openFees || (!!exam.belt_fees && Object.keys(exam.belt_fees).length > 0),
     })
   }
 
   const saveEdit = async () => {
     if (!exam || !draft) return
-    const fields = examFields(draft)
+    const fields = examFields(draft, feeOn)
     if (typeof fields === 'string') { setFormError(fields); return }
     setSaving(true)
     setFormError('')
@@ -281,19 +276,6 @@ export default function GradingExamPage() {
     showToast('Exam cancelled')
   }
 
-  // Change one student's fee (any time before results; the exam's own fee is only the starting value)
-  const saveFee = async () => {
-    if (!feeEdit || !exam) return
-    const v = feeEdit.value.trim()
-    const fee = v === '' ? null : Number(v)
-    if (fee !== null && (!Number.isFinite(fee) || fee < 0)) { showToast('Fee must be a number', 'error'); return }
-    const { data, error } = await supabase.from('grading_exam_candidates').update({ fee_amount: fee }).eq('id', feeEdit.id).select(CAND)
-    if (error || !data?.length) { showToast(error ? "Couldn't save: " + error.message : "Couldn't save: not allowed for this login", 'error'); return }
-    const row = data[0] as ExamCandidate
-    setCandidates(l => l.map(c => (c.id === row.id ? row : c)))
-    setFeeEdit(null)
-  }
-
   const studentRow = (r: Row) => {
     const tickable = editable && (!!r.picked || !r.why)
     const from = r.picked ? beltById[r.picked.from_rank_id || ''] : r.elig.kind !== 'no-belt' ? r.elig.from : null
@@ -314,25 +296,11 @@ export default function GradingExamPage() {
               {from ? <><BeltChip rank={from} />{to && <> <span aria-hidden="true">→</span> <BeltChip rank={to} /></>}</> : null}
               {r.why && !r.picked && <span className="text-gray-500">{from ? ' · ' : ''}{r.why}</span>}
             </p>
-            {/* Fee for this student (per-student fee SQL): tap to change */}
-            {r.picked && feeOn && exam && (feeEdit?.id === r.picked.id ? (
-              <span className="flex items-center gap-1.5 mt-1">
-                <input type="number" inputMode="decimal" min={0} autoFocus value={feeEdit.value} aria-label={`Fee for ${r.s.full_name}`}
-                  onChange={e => setFeeEdit({ ...feeEdit, value: e.target.value })}
-                  onKeyDown={e => { if (e.key === 'Enter') saveFee() }}
-                  className="w-24 bg-gray-800 text-white rounded-md px-2 py-1 text-xs border border-gray-700 outline-none focus:ring-2 focus:ring-orange-500" />
-                <button type="button" onClick={saveFee} className="text-xs text-orange-400 px-2 py-1">Save</button>
-                <button type="button" onClick={() => setFeeEdit(null)} className="text-xs text-gray-500 px-1 py-1">✕</button>
-              </span>
-            ) : (() => {
-              const fee = candidateFee(r.picked, exam.fee_amount)
-              return editable ? (
-                <button type="button" data-testid="candidate-fee" onClick={() => setFeeEdit({ id: r.picked!.id, value: fee != null ? String(fee) : '' })}
-                  className="text-[11px] text-gray-300 underline decoration-dotted underline-offset-2">
-                  {fee != null ? `Fee ${formatMoney(fee, currency)}` : 'No fee'} ✎
-                </button>
-              ) : <span className="text-[11px] text-gray-400">{fee != null ? `Fee ${formatMoney(fee, currency)}` : 'No fee'}</span>
-            })())}
+            {/* Fee for this student = the fee for the belt they go for (set on the exam) */}
+            {r.picked && exam && (() => {
+              const fee = beltFee(exam, r.picked.to_rank_id)
+              return <span data-testid="candidate-fee" className="text-[11px] text-gray-400">{fee != null ? `Fee ${formatMoney(fee, currency)}` : 'No fee'}</span>
+            })()}
             {(r.attendance || r.warn.length > 0) && (
               <p className="text-[11px] text-gray-500">
                 {r.attendance}
@@ -383,6 +351,7 @@ export default function GradingExamPage() {
           <div data-testid="page-grading-exam" className="space-y-4">
             {draft ? (
               <ExamForm draft={draft} setDraft={setDraft} venues={venueOptions(branches)} currency={currency} saving={saving}
+                belts={feeOn ? feeBelts(ranks) : null}
                 error={formError} onSave={saveEdit} onCancel={() => setDraft(null)} saveText="Save changes" />
             ) : (
               <section className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-1.5">
@@ -390,13 +359,13 @@ export default function GradingExamPage() {
                   {formatDate(exam.exam_date, country, 'medium')}{exam.exam_time ? ` · ${timeLabel(exam.exam_time, country)}` : ''}
                 </p>
                 {exam.venue && <p className="text-sm text-gray-300">{exam.venue}</p>}
-                <p className="text-sm text-gray-400">{exam.fee_amount != null ? `Exam fee ${formatMoney(Number(exam.fee_amount), currency)}` : 'No exam fee'}</p>
+                <p className="text-sm text-gray-400">Fee: {feeSummary(exam, ranks, n => formatMoney(n, currency))}</p>
                 {exam.notes && <p className="text-sm text-gray-400 whitespace-pre-line">{exam.notes}</p>}
                 {exam.status === 'cancelled' && <p className="text-sm text-gray-500">This exam was cancelled. Its list is kept as it was.</p>}
                 {exam.status === 'completed' && <p className="text-sm text-green-400">Results saved. The list is locked.</p>}
                 {editable && (
                   <div className="flex gap-2 pt-2">
-                    <button type="button" onClick={startEdit} data-testid="exam-edit"
+                    <button type="button" onClick={() => startEdit()} data-testid="exam-edit"
                       className="text-xs text-gray-300 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">Edit</button>
                     <button type="button" onClick={cancelExam} data-testid="exam-cancel"
                       className="text-xs text-gray-400 border border-gray-700 hover:border-red-700 hover:text-red-300 px-3 py-1.5 rounded-lg">Cancel exam</button>
@@ -408,12 +377,15 @@ export default function GradingExamPage() {
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-white">
                 {mw.many} sitting: <span data-testid="picked-count">{pickedTotal}</span>
-                {feeOn && pickedTotal > 0 && (() => {
-                  const total = rows.filter(r => r.picked).reduce((t, r) => t + (candidateFee(r.picked!, exam.fee_amount) || 0), 0)
-                  return total > 0 ? <span className="text-gray-400 font-normal"> · fees {formatMoney(total, currency)}</span> : null
+                {pickedTotal > 0 && (() => {
+                  const total = rows.filter(r => r.picked).reduce((t, r) => t + (beltFee(exam, r.picked!.to_rank_id) || 0), 0)
+                  return total > 0 ? <span data-testid="fees-total" className="text-gray-400 font-normal"> · fees {formatMoney(total, currency)}</span> : null
                 })()}
               </h2>
               {!canEdit && <span className="text-[11px] text-gray-500">View only</span>}
+              {editable && feeOn && !draft && (
+                <button type="button" onClick={() => startEdit(true)} data-testid="fees-edit" className="text-xs text-orange-400 hover:text-orange-300 shrink-0">Edit fees</button>
+              )}
             </div>
 
             {/* Branch / batch chips (gyms with branches), like the dashboard */}

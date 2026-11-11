@@ -13,9 +13,9 @@ import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/
 import { formatMoney } from '@/lib/currency'
 import { memberWord, staffWord } from '@/lib/labels'
 import { type Branch, BRANCH_COLUMNS, timeLabel } from '@/lib/batches'
-import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE } from './exam-form'
+import { type ExamDraft, ExamForm, venueOptions, examFields, OTHER_VENUE, feeBelts } from './exam-form'
 import {
-  type GradingExam, GRADING_EXAM_COLUMNS, gradingOn, splitExams, examStatusLabel,
+  type GradingExam, type BeltRank, GRADING_EXAM_COLUMNS, BELT_RANK_COLUMNS, gradingOn, splitExams, examStatusLabel, feeSummary,
 } from '@/lib/belts'
 
 export default function GradingExamsPage() {
@@ -33,6 +33,8 @@ export default function GradingExamsPage() {
   const [exams, setExams] = useState<GradingExam[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [venues, setVenues] = useState<string[]>([])
+  const [ranks, setRanks] = useState<BeltRank[]>([])
+  const [feeOn, setFeeOn] = useState(false)
   const [draft, setDraft] = useState<ExamDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -66,13 +68,17 @@ export default function GradingExamsPage() {
       setIsCoach(profile.role === 'coach')
       if (!gradingOn(co)) { setOff(true); setLoading(false); return }
       const [ranks, ex, cand, br] = await Promise.all([
-        supabase.from('belt_ranks').select('id').eq('company_id', cId).limit(1),
+        supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId),
         supabase.from('grading_exams').select(GRADING_EXAM_COLUMNS).eq('company_id', cId),
         supabase.from('grading_exam_candidates').select('exam_id, removed_at').eq('company_id', cId),
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId),
       ])
       if (!live) return
       if (ranks.error || !ranks.data?.length || ex.error) { setOff(true); setLoading(false); return }
+      setRanks((ranks.data || []) as BeltRank[])
+      // Fees per belt: the column is there once its SQL ran (a probe; exams are read with *)
+      const probe = await supabase.from('grading_exams').select('belt_fees').limit(1)
+      setFeeOn(!probe.error)
       setExams((ex.data || []) as GradingExam[])
       const c: Record<string, number> = {}
       for (const r of (cand.data || []) as { exam_id: string; removed_at?: string | null }[]) if (!r.removed_at) c[r.exam_id] = (c[r.exam_id] || 0) + 1
@@ -85,12 +91,12 @@ export default function GradingExamsPage() {
 
   const openForm = () => {
     setError('')
-    setDraft({ exam_date: '', exam_time: '', venue: venues[0] ?? OTHER_VENUE, venueOther: '', fee: '', notes: '' })
+    setDraft({ exam_date: '', exam_time: '', venue: venues[0] ?? OTHER_VENUE, venueOther: '', fee: '', notes: '', beltFees: {}, beltFeesOpen: false })
   }
 
   const save = async () => {
     if (!draft) return
-    const fields = examFields(draft)
+    const fields = examFields(draft, feeOn)
     if (typeof fields === 'string') { setError(fields); return }
     setSaving(true)
     setError('')
@@ -121,7 +127,7 @@ export default function GradingExamsPage() {
               </p>
               <p className="text-xs text-gray-400 truncate">
                 {[e.venue, `${n} ${n === 1 ? mw.one.toLowerCase() : mw.many.toLowerCase()}`,
-                  e.fee_amount != null ? `Fee ${formatMoney(Number(e.fee_amount), currency)}` : ''].filter(Boolean).join(' · ')}
+                  e.fee_amount != null || (e.belt_fees && Object.keys(e.belt_fees).length) ? `Fee ${feeSummary(e, ranks, n => formatMoney(n, currency))}` : ''].filter(Boolean).join(' · ')}
               </p>
             </div>
             <span className={`shrink-0 text-[11px] border px-2 py-0.5 rounded-full ${tone}`}>{label}</span>
@@ -167,6 +173,7 @@ export default function GradingExamsPage() {
           <div data-testid="page-grading" className="space-y-4">
             {canEdit && (draft ? (
               <ExamForm draft={draft} setDraft={setDraft} venues={venues} currency={currency} saving={saving} error={error}
+                belts={feeOn ? feeBelts(ranks) : null}
                 onSave={save} onCancel={() => setDraft(null)} saveText="Schedule exam" />
             ) : (
               <button type="button" onClick={openForm} data-testid="exam-new"
