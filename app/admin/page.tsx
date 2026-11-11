@@ -118,6 +118,8 @@ export default function AdminPage() {
   // Dashboard + Clients tab data: all memberships (super admin can read them) and plans assigned per company
   const [memberships, setMemberships] = useState<AdminMembership[]>([])
   const [planRows, setPlanRows] = useState<UsagePlan[] | null>(null)
+  // Sessions / attendance / leads per gym and each gym's last sign-in (server route)
+  const [activity, setActivity] = useState<{ work: UsagePlan[]; lastLogin: Record<string, string> } | null>(null)
   const [planLoadError, setPlanLoadError] = useState('')
   // AI cost rows (this + last month) and estimated data stored, per gym — from /api/admin/costs
   const [costs, setCosts] = useState<{
@@ -270,6 +272,13 @@ export default function AdminPage() {
         setPlanLoadError('')
       })
       .catch(e => { setPlanRows([]); setPlanLoadError('Plans assigned could not be loaded (' + e.message + ')') })
+    fetch('/api/admin/activity')
+      .then(async r => {
+        const body = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`)
+        setActivity({ work: body.work || [], lastLogin: body.lastLogin || {} })
+      })
+      .catch(() => setActivity({ work: [], lastLogin: {} }))
     fetch('/api/admin/costs')
       .then(async r => {
         const body = await r.json().catch(() => ({}))
@@ -807,8 +816,9 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
             <p className="text-4xl font-bold text-orange-500">{companies.length}</p>
           </div>
           <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Clients</p>
-            <p className="text-4xl font-bold text-orange-500">{clients.length}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Active Clients</p>
+            {/* Not archived, real (non-test) companies only; the Clients tab still lists everyone */}
+            <p className="text-4xl font-bold text-orange-500">{clients.filter(c => !c.archived_at && !companies.find(co => co.id === c.company_id)?.is_test).length}</p>
           </div>
         </div>
 
@@ -834,7 +844,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         {activeTab === 'dashboard' && (() => {
           if (loading) return <p className="text-gray-500 text-sm">Loading...</p>
           const real = companies.filter(c => dashIncludeTest || !c.is_test)
-          const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || []))
+          const usage: CompanyUsage[] = real.map(c => companyUsage(c, clients, memberships, planRows || [], Date.now(), activity?.work, activity?.lastLogin[c.id] ?? null))
           // AI cost this calendar month and last, per gym (USD; shown in ₹ at a fixed rate)
           const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
           const aiThis: Record<string, { usd: number; calls: number }> = {}
@@ -1026,6 +1036,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               <span className="text-gray-600"> · 30d: </span>
                               {u.membersAdded30} added · {u.renewals30} renewed · {planRows ? `${u.plans30} plans` : '… plans'}
                               <span className={h.text}> · {u.lastWorkDays == null ? 'no activity yet' : u.lastWorkDays === 0 ? 'active today' : `last ${u.lastWorkDays}d ago`}</span>
+                              {activity && <span className="text-gray-500"> · {u.lastLoginDays == null ? 'never signed in' : u.lastLoginDays === 0 ? 'signed in today' : `signed in ${u.lastLoginDays}d ago`}</span>}
                             </span>
                             {costs && (
                               <span className="block text-[11px] text-gray-500 mt-0.5">
