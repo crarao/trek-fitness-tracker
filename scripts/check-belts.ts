@@ -4,7 +4,8 @@
 import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate,
   beltsById, beltChipText, isLightBelt, gradeSourceLabel, sortGradeHistory,
   nextBelt, daysBetween, eligibility, toGoText, notEligibleText, splitExams, examStatusLabel, examDetailsChanged, attendanceShare,
-  beltFee, feeSummary } from '../lib/belts'
+  beltFee, feeSummary,
+  gradingNoticeText, gradingResultText, gradingCancelText, gradingRecipient, resultsReady, gradingRpcMessage, waLink } from '../lib/belts'
 
 let failed = 0
 const check = (label: string, value: unknown, ok: boolean) => {
@@ -110,6 +111,39 @@ check('belt fee: before the SQL (no belt_fees) → exam fee', beltFee({ fee_amou
 const money = (n: number) => `₹${n}`
 check('fee summary', feeSummary(feeExam, full, money), feeSummary(feeExam, full, money) === '₹500 · Brown – 2nd kyu ₹800')
 check('fee summary: no fee', feeSummary({ fee_amount: null }, full, money), feeSummary({ fee_amount: null }, full, money) === 'No fee')
+
+// PR C: parent messages (India: Namaste; no he / she / they), recipient, Save results readiness, rpc replies
+const kid = { full_name: 'Aarav Reddy', phone: '+919876500001', guardian_name: 'Priya Reddy', guardian_phone: '+919876500002' }
+const white = full[0], yellow = full[1]
+const exam = { exam_date: '2026-11-22', exam_time: '09:30:00', venue: 'Kokapet', notes: 'Full uniform, 15 minutes early', fee_amount: 500, belt_fees: null }
+const notice = gradingNoticeText({ student: kid, exam, from: white, to: yellow, gymName: 'DSSKA', currency: 'INR', country: 'IN', upiId: 'dsska@okicici' })
+console.log('\n' + notice + '\n')
+check('notice: Namaste to the parent', notice.split('\n')[0], notice.startsWith('Namaste Priya 🙏\nAarav\'s belt grading is on *Sun, 22 Nov, 9:30 am* at Kokapet.'))
+check('notice: belts, fee, UPI, notes, sign-off', '', notice.includes('Grading: White → *Yellow – 8th kyu*') && notice.includes('Exam fee: *₹500*')
+  && notice.includes('Pay via UPI: *dsska@okicici*') && notice.includes('Full uniform') && notice.endsWith('— DSSKA 🥋'))
+const free = gradingNoticeText({ student: kid, exam: { ...exam, fee_amount: null, notes: null }, from: white, to: yellow, gymName: 'DSSKA', currency: 'INR', country: 'IN', upiId: 'dsska@okicici' })
+check('notice: no fee → no fee / UPI lines', '', !free.includes('fee') && !free.includes('UPI'))
+const pass = gradingResultText({ student: kid, result: 'pass', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+const fail = gradingResultText({ student: kid, result: 'fail', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+console.log(pass + '\n\n' + fail + '\n')
+check('pass message', pass, pass === 'Namaste Priya 🙏\nAarav passed the grading on 22 Nov and is now *Yellow – 8th kyu*. Well done! 🎉\n— DSSKA 🥋')
+check('fail message (name repeated, no pronoun)', fail, fail === 'Namaste Priya 🙏\nAarav worked hard at the grading on 22 Nov. Aarav stays White for now and can try again at the next grading. Keep practising!\n— DSSKA 🥋'
+  && !/\b(he|she|they|his|her|their)\b/i.test(fail))
+const noParent = { full_name: 'Ravi Kumar', phone: '+919876500003' }
+const self = gradingResultText({ student: noParent, result: 'pass', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+check('no parent → to the student ("you")', self, self.startsWith('Namaste Ravi 🙏\nYou passed') && gradingRecipient(noParent, 'IN').waDigits === '919876500003')
+check('parent phone wins', gradingRecipient(kid, 'IN'), gradingRecipient(kid, 'IN').waDigits === '919876500002' && gradingRecipient(kid, 'IN').toParent)
+check('no phone at all → no WhatsApp', gradingRecipient({ full_name: 'X' }, 'IN').waDigits, gradingRecipient({ full_name: 'X' }, 'IN').waDigits === null)
+const cancel = gradingCancelText({ student: kid, examDate: '2026-11-22', gymName: 'DSSKA', country: 'IN' })
+check('cancel message', cancel, cancel === "Namaste Priya 🙏\nAarav's belt grading on 22 Nov is cancelled. We will share the new date soon.\n— DSSKA 🥋")
+check('US keeps Hi', '', gradingCancelText({ student: kid, examDate: '2026-11-22', gymName: 'Peak', country: 'US' }).startsWith("Hi Priya, Aarav's"))
+check('wa link encodes text', waLink('919', 'a b&c'), waLink('919', 'a b&c') === 'https://wa.me/919?text=a%20b%26c')
+check('results ready only when every student is marked (removed ignored)', '',
+  resultsReady([{ result: 'pass', removed_at: null }, { result: 'fail', removed_at: null }, { result: null, removed_at: 'x' }])
+  && !resultsReady([{ result: 'pass', removed_at: null }, { result: null, removed_at: null }]) && !resultsReady([]))
+check('rpc replies', '', gradingRpcMessage({ ok: true, promoted: 3, failed: 1 }) === 'Saved ✓ 3 promoted, 1 stay.'
+  && gradingRpcMessage({ ok: false, error: 'belt_changed', names: ['Ravi'] }).includes('Ravi')
+  && gradingRpcMessage({ ok: true, undone: 2 }) === 'Undone: 2 belts put back.')
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
