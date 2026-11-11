@@ -19,7 +19,7 @@ Multi-tenant fitness coaching SaaS (white-labeled as "CoachBoard"). Companies si
 
 **Stack:** Next.js 16 (App Router) · Supabase (Postgres + Auth) · Tailwind CSS 4 · Chart.js · Anthropic Claude Haiku (AI plans + insights) · Vercel (hosting)
 
-**Stage:** Active development. Core flows fully working. First customer trial underway as of April 2026. Code pushed to GitHub main and deployed on Vercel.
+**Stage:** Active development. Core flows fully working. First customer trial underway as of April 2026. Work goes to the `dev` branch first (dev Supabase + dev link), then `main` = production on Vercel; see Conventions → Dev / prod setup.
 
 ---
 
@@ -404,7 +404,19 @@ Playwright smoke tests (`e2e/smoke.spec.ts`, shared fixture `e2e/fixtures.ts`, c
 
 **Gym subdomains:** `<slug>.getcoachboard.com` runs the whole app for that company (Vercel wildcard domain `*.getcoachboard.com`). `proxy.ts` runs on every page (not `/api` or static files): only `PROTECTED` pages need a login; on a subdomain it also sends an unknown gym to the main site, `/` to `/dashboard`, and a login from another gym (not super admin) to `/login?off=gym`. The login page reads the gym from the address (`lib/tenant.ts`), else `?company=<slug>`, else the gym of the last login on that device (`localStorage` key `coachboard-gym`, saved after a successful non-super-admin login, kept after logout, so apps installed from getcoachboard.com stay branded), and refuses another gym's login on a gym's address. On phones the gym's banner, logo (or first letter), name and tagline sit across the top. Logins are per address (cookies aren't shared between the subdomain and getcoachboard.com). Keep redirects relative (same address); a redirect to another host needs an explicit `Location` header. Local dev: `syedfitness.localhost:3000`. Next.js 16 uses `proxy.ts` (the old `middleware.ts` name is deprecated).
 
-**SQL files (`db/*.md`) — which Supabase project:** the live app uses the **Mumbai** project `nptxjfvkqjuekgkspemu` (since 29 Oct). The old **Tokyo** project `rzndxzhmgxkxihnwqnoy` still exists and has a similar name; on 31 Oct SQL was run there by mistake and uploads kept failing. Every new SQL file starts with a "Run in: Mumbai — project `nptxjfvkqjuekgkspemu`" line and the direct SQL Editor link (`https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new`), and asks to check the address bar before running. When a rule "looks right" but the app disagrees, first check which project it was run in.
+**Dev / prod setup (10–11 Nov 2026):** two Supabase projects, both in Mumbai:
+
+| Project | Ref | Use | SQL Editor |
+|---|---|---|---|
+| coachboard-mumbai | `nptxjfvkqjuekgkspemu` | **Prod**, the live app (`main`, getcoachboard.com) | `https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new` |
+| coachboard-dev | `nnxrmaiinbmxfwzefbwx` | **Dev** (`dev` branch, Vercel Preview + Development, local `.env.local`) | `https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new` |
+
+The old Tokyo project `rzndxzhmgxkxihnwqnoy` was deleted on 10 Nov; never refer to it in new files. Vercel: Production env vars = Mumbai, Preview + Development = dev. Dev link (always the latest `dev` build): **https://getcoachboard-git-dev-craraos-projects.vercel.app** (gym logins `/login/qagym`, `/login/qasolo`, `/login/qadojo`). Dev has the same QA companies (QA Gym, QA Solo, QA Dojo, same phones as prod QA), created through the UI; no real gym data is ever copied to dev.
+- **Git workflow:** branch off `dev` → merge into `dev` → test on the dev link (phone) → merge `dev` into `main` = prod. **Claude works off `dev`**: new branches start from `origin/dev` and PRs target `dev`. **Never push to, merge into or open a PR against `main` unless Anand says so in the conversation.** Never suggest "Promote to Production" on a `dev` / branch build in Vercel.
+- **Database changes:** dev's schema is a copy of prod's public schema (rebuild steps in Anand's notes, backups kept outside the repo). Keep them in step: every SQL change is run on **dev first**, tested on the dev link, **then on Mumbai** when it ships to `main`. Storage buckets, the starter exercise list (`supabase/seed_exercises.sql`) and Auth settings live outside the public schema and are set up by hand in each project.
+- `psql` is blocked for Claude Code: Anand runs SQL by hand in the SQL Editor (or psql on his machine).
+
+**SQL files (`db/*.md`, migrations) — which Supabase project:** every new SQL file starts with two lines, in this order: "1. Run in: **Dev** — project `nnxrmaiinbmxfwzefbwx`" with the dev SQL Editor link, then "2. After testing on the dev link, run in: **Mumbai (prod)** — project `nptxjfvkqjuekgkspemu`" with the Mumbai link, and asks to check the project ref in the address bar before running. Say at the end of the file which project(s) it has been run in (and when). On 31 Oct SQL was run in the wrong project by mistake and uploads kept failing: when a rule "looks right" but the app disagrees, first check which project it was run in. Older files that only name Mumbai were run on Mumbai only; dev already has their result (it was copied from Mumbai on 10 Nov).
 
 **Styling:** Tailwind CSS 4 utility classes inline. No separate CSS files. No CSS modules.
 
