@@ -336,7 +336,7 @@ export default function CoachHomePage() {
             ) : (
               <ul className="space-y-2">
                 {shown.map(r => (
-                  <li key={r.client.id}>
+                  <li key={r.client.id} data-testid="coach-row" data-name={r.client.full_name}>
                     <button type="button" data-nav onClick={() => openClient(r.client.id)}
                       className={`w-full text-left bg-gray-900 border rounded-2xl px-4 py-3 transition hover:border-gray-600 ${openingId === r.client.id ? 'border-orange-500' : r.doneToday ? 'border-green-900/60' : 'border-gray-800'}`}>
                       <div className="flex items-start justify-between gap-3">

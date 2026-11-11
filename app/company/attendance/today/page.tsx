@@ -179,7 +179,7 @@ function TodayAttendance() {
             </div>
             {!loading && !problem && (
               <p className="text-sm shrink-0 text-right">
-                <span className="text-green-400 font-bold text-lg">{board.came}</span> <span className="text-gray-500">came</span>
+                <span data-testid="came-count" className="text-green-400 font-bold text-lg">{board.came}</span> <span className="text-gray-500">came</span>
                 {board.twice > 0 && <span className="block text-[11px] text-amber-300">{board.twice} in 2 batches</span>}
               </p>
             )}

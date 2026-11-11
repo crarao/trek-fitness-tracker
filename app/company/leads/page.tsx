@@ -509,7 +509,7 @@ export default function LeadsPage() {
                 const details = [sourceLabel(lead.source), interestLabel(lead.interest)].filter(Boolean).join(' · ')
                 const fu = followUpText(lead)
                 return (
-                  <li key={lead.id}>
+                  <li key={lead.id} data-testid="lead-row" data-name={lead.name}>
                     <button type="button" onClick={() => openLead(lead)}
                       className="w-full text-left px-4 sm:px-6 py-3.5 hover:bg-gray-800/50 active:bg-gray-800 transition flex items-start justify-between gap-3">
                       <span className="min-w-0 flex-1">
