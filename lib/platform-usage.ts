@@ -1,6 +1,9 @@
 // Super admin dashboard: is each gym using CoachBoard, and what should Anand do about it?
 // "Work" = staff doing real things in the app: adding members, recording memberships/renewals,
-// assigning plans. Health from the most recent work:
+// assigning plans, logging sessions, marking attendance, adding / updating leads (the last three
+// come from /api/admin/activity, which leaves out anything a super admin login did).
+// Days are calendar days in the viewer's time (IST), so "today" means since midnight.
+// Health from the most recent work:
 //   active  = within 7 days · quiet = 8–15 days · dormant = more than 15 days (or never)
 // Test companies (companies.is_test) are left out by the caller.
 
@@ -24,7 +27,8 @@ export type CompanyUsage = {
   membersAdded30: number
   renewals30: number         // membership records added in 30 days beyond each new member's first
   plans30: number
-  lastWorkDays: number | null // days since the last piece of work; null = never
+  lastWorkDays: number | null // calendar days since the last piece of work (0 = today); null = never
+  lastLoginDays: number | null // calendar days since any of the gym's logins last signed in; null = never / unknown
   health: Health
   daysLeft: number | null    // subscription / trial days left incl. today; ≤ 0 = ended
   status: 'trial' | 'paid'
@@ -53,6 +57,8 @@ export function companyUsage(
   memberships: UsageMembership[],
   plans: UsagePlan[],
   now = Date.now(),
+  activity: UsagePlan[] = [],        // sessions / attendance / leads (company_id + date)
+  lastLogin: string | null = null,   // latest sign-in of any of the gym's logins
 ): CompanyUsage {
   const mine = clients.filter(c => c.company_id === company.id)
   const active = mine.filter(c => !c.archived_at)
@@ -66,9 +72,10 @@ export function companyUsage(
     ...mine.map(c => c.created_at),
     ...mems.map(m => m.created_at).filter((d): d is string => !!d),
     ...myPlans.map(p => p.created_at),
+    ...activity.filter(a => a.company_id === company.id).map(a => a.created_at),
   ]
   const latest = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null
-  const lastWorkDays = latest ? Math.max(0, daysSince(latest, now)) : null
+  const lastWorkDays = latest ? Math.max(0, calendarDaysSince(latest, now)) : null
   const until = daysUntil(company.trial_end)
 
   return {
@@ -79,6 +86,7 @@ export function companyUsage(
     renewals30: Math.max(0, memberships30 - membersAdded30),
     plans30: myPlans.filter(p => within30(p.created_at)).length,
     lastWorkDays,
+    lastLoginDays: lastLogin ? Math.max(0, calendarDaysSince(lastLogin, now)) : null,
     health: healthFor(lastWorkDays),
     daysLeft: until == null ? null : until + 1,
     status: company.is_trial ? 'trial' : 'paid',
