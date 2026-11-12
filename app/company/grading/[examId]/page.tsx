@@ -15,6 +15,7 @@
 // Cancelled: Tell parent: cancelled for those who had the notice (cancel_sent_at).
 
 import PageNav from '@/app/page-nav'
+import { rememberBranch, rememberedBranch } from '@/lib/branch-memory'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -152,6 +153,7 @@ export default function GradingExamPage() {
       setElsewhere(Object.fromEntries(((others.data || []) as unknown as { student_id: string; grading_exams: { exam_date: string } | null }[])
         .map(o => [o.student_id, o.grading_exams?.exam_date || ''])))
       setBranches(br.error ? [] : (br.data || []) as Branch[])
+      if (!br.error) setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
       setBatches(ba.error ? [] : (ba.data || []) as Batch[])
       if (!att.error) {
         const map: Record<string, string[]> = {}
@@ -577,7 +579,7 @@ export default function GradingExamPage() {
               <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Branch">
                 {[{ id: 'all', name: 'All' }, ...activeBranches].map(b => (
                   <button key={b.id} type="button" aria-pressed={branchFilter === b.id}
-                    onClick={() => { setBranchFilter(b.id); setBatchFilter('all') }}
+                    onClick={() => { setBranchFilter(b.id); setBatchFilter('all'); rememberBranch(b.id) }}
                     className={`shrink-0 px-3 py-1.5 rounded-full text-xs ${branchFilter === b.id ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
                     {b.name}
                   </button>

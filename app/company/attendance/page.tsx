@@ -5,6 +5,7 @@
 // Owner, partners and senseis (no money on this page). Read-only here: marking happens on the roll call page.
 
 import PageNav from '@/app/page-nav'
+import { rememberBranch, rememberedBranch } from '@/lib/branch-memory'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -60,6 +61,7 @@ export default function AttendanceMonthPage() {
       setBusinessType(co?.business_type ?? null)
       if (att.error || br.error || ba.error) { setMissing(true); setLoading(false); return }
       setBranches((br.data || []) as Branch[])
+      setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
       setBatches((ba.data || []) as Batch[])
       setStudents((people.data || []) as Student[])
       setRows((att.data || []) as AttendanceRow[])
@@ -152,7 +154,7 @@ export default function AttendanceMonthPage() {
             {branches.filter(b => !b.is_archived).length > 1 && (
               <div className="flex gap-1.5 flex-wrap">
                 {[{ id: 'all', name: 'All branches' }, ...branches.filter(b => !b.is_archived)].map(b => (
-                  <button key={b.id} type="button" onClick={() => setBranchFilter(b.id)} aria-pressed={branchFilter === b.id}
+                  <button key={b.id} type="button" onClick={() => { setBranchFilter(b.id); rememberBranch(b.id) }} aria-pressed={branchFilter === b.id}
                     className={`text-xs px-3 py-1.5 rounded-full border ${branchFilter === b.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                     {b.name}
                   </button>

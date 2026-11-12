@@ -51,7 +51,14 @@ const hist = sortGradeHistory([
   { id: 'c', achieved_on: null, created_at: '2026-11-11T09:00:00Z' },
   { id: 'd', achieved_on: '2026-04-05', created_at: '2026-11-10T11:00:00Z' },
 ])
-check('history newest first (unknown date = saved day)', hist.map(h => h.id), hist.map(h => h.id).join() === 'c,d,b,a')
+check('history newest change first', hist.map(h => h.id), hist.map(h => h.id).join() === 'c,d,b,a')
+// 12 Nov (test B6): White (1 Aug, joined) → Yellow (10 Nov) → back to White (1 Aug): the latest change is on top
+const b6 = sortGradeHistory([
+  { id: 'joined', achieved_on: '2026-08-01', created_at: '2026-11-12T09:00:00Z' },
+  { id: 'yellow', achieved_on: '2026-11-10', created_at: '2026-11-12T09:05:00Z' },
+  { id: 'white-again', achieved_on: '2026-08-01', created_at: '2026-11-12T09:10:00Z' },
+])
+check('B6: back to White is the top row', b6.map(h => h.id), b6.map(h => h.id).join() === 'white-again,yellow,joined')
 
 // Phase 2, PR B: next belt, eligibility (30-day months, to the exam date), exams list, attendance share
 const full: BeltRank[] = [

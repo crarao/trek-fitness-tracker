@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { rememberBranch, rememberedBranch } from '@/lib/branch-memory'
 import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import { type TodaySession, missedAndDue, loggerOf, sessionsByLogger } from '@/lib/todays-sessions'
 import { type ExercisesDone } from '@/lib/plan-structure'
@@ -319,6 +320,7 @@ export default function CompanyAdminPage() {
     ])
     if (br.error || ba.error) { setBatchesOn(false); return }
     setBranchList((br.data || []) as Branch[])
+    setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
     setBatchList((ba.data || []) as Batch[])
     setBatchesOn(true)
     const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId).eq('class_date', localDateIso()).eq('present', true)
@@ -788,7 +790,8 @@ export default function CompanyAdminPage() {
       membershipSaved = false
     }
 
-    setMessage(`${mw.one} created successfully!`)
+    // Success shows as the green pop-up below; the form's message line is cleared so it isn't still there next time
+    setMessage('')
     if (fromLead) {
       // Mark the enquiry Joined; the member is kept even if this fails
       const { data: updated, error: leadError } = await supabase
@@ -1093,7 +1096,7 @@ export default function CompanyAdminPage() {
               Logout
             </button>
             <button data-testid="add-member-open"
-              onClick={() => { setShowForm(!showForm); setFromLead(null) }}
+              onClick={() => { setShowForm(!showForm); setFromLead(null); setMessage('') }}
               className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
               + Add {mw.one}
             </button>
@@ -2003,7 +2006,7 @@ export default function CompanyAdminPage() {
                 {[{ id: 'all', label: 'All branches', n: clients.length },
                   ...branchChips.map(b => ({ id: b.id, label: b.name + (b.is_archived ? ' (archived)' : ''), n: clients.filter(c => c.branch_id === b.id).length })),
                   ...(noBranchCount > 0 ? [{ id: 'none', label: 'No branch', n: noBranchCount }] : [])].map(chip => (
-                  <button key={chip.id} type="button" onClick={() => setBranchFilter(chip.id)} aria-pressed={branchFilter === chip.id}
+                  <button key={chip.id} type="button" onClick={() => { setBranchFilter(chip.id); rememberBranch(chip.id) }} aria-pressed={branchFilter === chip.id}
                     className={`text-xs px-3 py-1.5 rounded-full border transition ${branchFilter === chip.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                     {chip.label} <span className={branchFilter === chip.id ? 'text-orange-100' : 'text-gray-500'}>{chip.n}</span>
                   </button>

@@ -7,6 +7,7 @@
 // ?date=YYYY-MM-DD opens another day (past days can be corrected; no future days).
 
 import PageNav from '@/app/page-nav'
+import { rememberBranch, rememberedBranch } from '@/lib/branch-memory'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -90,6 +91,7 @@ function TodayAttendance() {
       setBusinessType(co?.business_type ?? null)
       if (att.error || br.error || ba.error) { setProblem("Attendance isn't set up yet."); setLoading(false); return }
       setBranches((br.data || []) as Branch[])
+      setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
       setBatches((ba.data || []) as Batch[])
       setStudents((people.data || []) as Student[])
       setRows((att.data || []) as AttendanceRow[])
@@ -214,7 +216,7 @@ function TodayAttendance() {
             {activeBranches.length > 1 && (
               <div className="flex gap-1.5 flex-wrap">
                 {[{ id: 'all', name: 'All branches' }, ...activeBranches].map(b => (
-                  <button key={b.id} type="button" onClick={() => setBranchFilter(b.id)} aria-pressed={branchFilter === b.id}
+                  <button key={b.id} type="button" onClick={() => { setBranchFilter(b.id); rememberBranch(b.id) }} aria-pressed={branchFilter === b.id}
                     className={`text-xs px-3 py-1.5 rounded-full border ${branchFilter === b.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                     {b.name}
                   </button>
