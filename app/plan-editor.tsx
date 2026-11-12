@@ -25,10 +25,10 @@ const isBlank = (e: PlanExercise) => !e.name.trim() && !e.sets && !e.reps && !e.
 
 // Plan builder: day chips across the top (in the order the plan's week runs), the chosen day below.
 // Each day: Workout / Rest, a title, exercises (sets stepper × reps, weight, rest, note, move, remove),
-// "+ Add exercise" (library picker), duplicate to another day. "Copy from another client" fills the
-// whole plan. Days stay Mon…Sun because client Done ✓ / ticks are saved per weekday.
+// "+ Add exercise" (library picker), duplicate to another day. "Copy from a client" fills the
+// whole plan (hidden with allowCopy={false}, e.g. on an AI plan: copying would replace it). Days stay Mon…Sun because client Done ✓ / ticks are saved per weekday.
 export default function PlanEditor({
-  value, onChange, weekStart, companyId = null, clientId, country = 'IN',
+  value, onChange, weekStart, companyId = null, clientId, country = 'IN', allowCopy = true,
 }: {
   value: PlanJson
   onChange: (plan: PlanJson) => void
@@ -36,6 +36,7 @@ export default function PlanEditor({
   companyId?: string | null // the client's gym: custom exercises are saved to its list
   clientId?: string         // marks "this client" in Copy a plan
   country?: Country
+  allowCopy?: boolean       // false = no "Copy from a client" button (AI plan panel)
 }) {
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
   const [open, setOpen] = useState<Weekday>(() => ordered.find(d => !d.rest)?.day ?? ordered[0].day)
@@ -141,10 +142,12 @@ export default function PlanEditor({
         <p className="text-xs text-gray-400">
           {workoutCount} workout day{workoutCount === 1 ? '' : 's'} · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}
         </p>
+        {allowCopy && (
         <button type="button" onClick={() => setCopyOpen(true)}
           className="text-xs text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 px-2.5 py-1.5 rounded-lg">
           Copy from a client
         </button>
+        )}
       </div>
 
       {/* Day chips */}
