@@ -122,11 +122,10 @@ export function gradeSourceLabel(source: string | null | undefined): string {
   }
 }
 
-// Newest first: by belt date (unknown dates by when the row was saved), then when it was saved
+// Newest change first: by when the row was saved (12 Nov: sorting by the "since" date put an older belt on top
+// after a correction back to an earlier date; the top row must always be the current belt)
 export function sortGradeHistory<T extends Pick<StudentGrade, 'achieved_on' | 'created_at'>>(rows: T[]): T[] {
-  return [...rows].sort((a, b) =>
-    (b.achieved_on || b.created_at.slice(0, 10)).localeCompare(a.achieved_on || a.created_at.slice(0, 10))
-    || b.created_at.localeCompare(a.created_at))
+  return [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
 // ── Phase 2, PR B: grading exams + who can sit them ─────────────────────────────────────────────────
