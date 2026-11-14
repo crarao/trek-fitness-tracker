@@ -128,12 +128,8 @@ export function summarizeWeek(opts: {
   // counted over this week's sessions only, so the card can't be more than the list
   const adherence = plan ? planAdherence(plan, sessions) : null
   const planned = adherence?.planned ?? 0
-  // 14 Nov: sessions logged that week without a plan link (weekly_plan_id empty, e.g. "Log today's
-  // session" or older data) also count toward the planned days, one per date, so a week with
-  // sessions in the chart can't read "0 of 3" / "Last 4 weeks 0%". Never more than planned.
-  const linkedDates = new Set(sessions.filter(s => plan && s.weekly_plan_id === plan.id).map(s => s.session_date.slice(0, 10)))
-  const unlinkedDates = new Set(sessions.filter(s => !s.weekly_plan_id).map(s => s.session_date.slice(0, 10)).filter(d => !linkedDates.has(d)))
-  const done = Math.min(planned, (adherence?.done ?? 0) + unlinkedDates.size)
+  // Sessions with no plan link inside the plan's week count too (planAdherence, 14 Nov)
+  const done = adherence?.done ?? 0
   const extra = planned ? sessions.length - done : 0
   const missed = plan ? missedAndDue(plan, opts.sessions as TodaySession[], today).missed.map(d => d.day) : []
   const minutes = sessions.reduce((n, s) => n + (s.duration_minutes || 0), 0)
