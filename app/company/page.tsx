@@ -23,7 +23,7 @@ import BeltChip from '@/app/belt-chip'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
-import { latestMembership, daysLeft, membershipStatus } from '@/lib/dojo-home'
+import { latestMembership, daysLeft, membershipStatus, type PaidDraft } from '@/lib/dojo-home'
 import DojoHome from './dojo-home'
 
 type Membership = {
@@ -839,6 +839,26 @@ export default function CompanyAdminPage() {
 
   // The WhatsApp link a row's Remind / Send reminder opens (null = the button opens the member instead).
   // One rule for the table and the dojo home's Fees card, so both open the same message and number.
+  // Dojo home → Fees card → Paid (15 Nov): one new memberships row per student, the same insert as Renew on the
+  // student page (history kept; currency carried from the latest payment once the currency column exists)
+  const markFeesPaid = async (items: { student: Client; draft: PaidDraft }[]): Promise<boolean> => {
+    if (!companyId || !items.length) return false
+    const rows = items.map(({ student, draft }) => ({
+      profile_id: student.id,
+      company_id: companyId,
+      plan_type: draft.plan_type,
+      amount_paid: parseFloat(draft.amount) || 0,
+      start_date: draft.start_date,
+      end_date: draft.end_date,
+      ...(currencyColumns ? { currency: draft.currency || currency || undefined } : {})
+    }))
+    const { error } = await supabase.from('memberships').insert(rows)
+    if (error) { showToast('Could not save the payment: ' + error.message, 'error'); return false }
+    showToast(items.length > 1 ? `${items.length} payments saved ✓` : `Payment saved ✓ ${items[0].student.full_name.split(' ')[0]} paid till ${formatDate(items[0].draft.end_date, country, 'medium')}`)
+    await fetchClients(companyId)
+    return true
+  }
+
   const reminderUrl = (client: Client): string | null => {
     const m = latestMembership(client.memberships)
     const status = membershipStatus(m)
@@ -1775,6 +1795,7 @@ export default function CompanyAdminPage() {
           todaysBatches={todaysBatches} attToday={attToday || []} beltsOn={beltsOn}
           leadSummary={leadStats?.summary ?? null} monthByCurrency={thisMonthByCurrency}
           reminderUrl={reminderUrl}
+          onMarkPaid={markFeesPaid}
           onAddStudent={() => { setShowForm(!showForm); setFromLead(null); setMessage('') }}
           onOpenClient={id => openClient(id)}
           onShowTab={tab => setActiveFilter(tab)}

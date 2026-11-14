@@ -8,6 +8,7 @@ process.env.TZ = 'Asia/Kolkata'
 import {
   batchState, todaySummary, todaySummaryText, markedByName, feesToCollect, notSeen, parentLine,
   lastPresentDates, firstNamesLine, telHref, daysLeft, membershipStatus, type FeeStudent,
+  planEndDate, renewalDraft,
 } from '../lib/dojo-home'
 import { type AttendanceRow } from '../lib/attendance'
 
@@ -136,6 +137,19 @@ check('attendance started 6 days ago → nobody yet', notSeen({ students: pool, 
 check('no attendance at all → nobody', notSeen({ students: pool, lastPresentByStudent: {}, attendanceSince: null, today: TODAY }).length, 0)
 check('first names line', firstNamesLine(['Aarav Sharma', 'Diya K', 'Kabir', 'Meera', 'Zoya']), 'Aarav, Diya, Kabir and 2 more')
 check('first names line, 2 names', firstNamesLine(['Aarav Sharma', 'Diya K']), 'Aarav, Diya')
+
+// ---- Mark paid (15 Nov): same dates as Renew ----
+const dayAt = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d, 10) }
+check('plan end: 1 month', planEndDate('2026-11-20', '1 Month'), '2026-12-20')
+check('plan end: 3 months over the year', planEndDate('2026-11-20', '3 Months'), '2027-02-20')
+check('plan end: 1 year', planEndDate('2026-11-20', '1 Year'), '2027-11-20')
+check('plan end: 31 Jan + 1 month rolls like Renew', planEndDate('2027-01-31', '1 Month'), '2027-03-03')
+check('due soon: starts when the current one ends', renewalDraft(mem('2026-11-20', 1500), dayAt("2026-11-15")),
+  { plan_type: '1 Month', amount: '1500', currency: 'INR', start_date: '2026-11-20', end_date: '2026-12-20' })
+check('lapsed: starts today', renewalDraft(mem('2026-11-01', 1500), dayAt("2026-11-15")).start_date, '2026-11-15')
+check('no membership: today, 1 month, no amount', renewalDraft(null, dayAt("2026-11-15")),
+  { plan_type: '1 Month', amount: '', currency: null, start_date: '2026-11-15', end_date: '2026-12-15' })
+check('3-month plan carried', renewalDraft({ ...mem('2026-11-20', 4000), plan_type: '3 Months' }, dayAt("2026-11-15")).end_date, '2027-02-20')
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 process.exit(failed ? 1 : 0)
