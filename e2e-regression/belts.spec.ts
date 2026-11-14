@@ -111,7 +111,7 @@ test.describe.serial('Grading exam: schedule + pick', () => {
     await expect(sensei.getByRole('checkbox')).toHaveCount(0)
 
     // Cancel the exam (kept, status cancelled)
-    page.once('dialog', d => d.accept())
+    // The confirm() is accepted by the shared fixture (fixtures.ts: page.on('dialog', accept)); a second accept here throws
     await page.getByTestId('exam-cancel').click()
     await expect.poll(async () => (await rest('dojoOwner').get<{ status: string }>(`grading_exams?select=status&id=eq.${examId}`)).rows[0]?.status)
       .toBe('cancelled')
@@ -180,7 +180,7 @@ test.describe.serial('Grading exam: notices, results, undo', () => {
     await expect(save).toBeDisabled()
     await page.locator(`[data-testid="day-row"][data-name="${failer}"]`).getByTestId('result-fail').click()
     await expect(save).toBeEnabled()
-    page.once('dialog', d => d.accept())
+    // The confirm() is accepted by the shared fixture (fixtures.ts: page.on('dialog', accept)); a second accept here throws
     await save.click()
     await expect(page.getByTestId('results')).toBeVisible()
 
@@ -197,7 +197,7 @@ test.describe.serial('Grading exam: notices, results, undo', () => {
     expect(await examRows(ids[0])).toHaveLength(1)
 
     // Undo: the belt goes back, the exam row is kept but marked undone, the exam is open again
-    page.once('dialog', d => d.accept())
+    // The confirm() is accepted by the shared fixture (fixtures.ts: page.on('dialog', accept)); a second accept here throws
     await page.getByTestId('results-undo').click()
     await expect.poll(async () => (await profileOf(ids[0]))?.current_rank_id).toBe(ranks[0].id)
     expect((await examRows(ids[0]))[0]?.voided_at).not.toBeNull()

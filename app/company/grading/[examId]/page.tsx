@@ -299,8 +299,11 @@ export default function GradingExamPage() {
 
   // ── PR C actions ─────────────────────────────────────────────────────────────────────────────────
   const updateCandidate = async (c: ExamCandidate, fields: Record<string, unknown>) => {
+    // Show the tap straight away (a tick / Pass / Fail doesn't wait for the network), put it back if the save fails
+    setCandidates(l => l.map(x => (x.id === c.id ? { ...x, ...fields } as ExamCandidate : x)))
     const { data, error } = await supabase.from('grading_exam_candidates').update(fields).eq('id', c.id).select(CAND)
     if (error || !data?.length) {
+      setCandidates(l => l.map(x => (x.id === c.id ? c : x)))
       showToast(error ? "Couldn't save: " + error.message : "Couldn't save: not allowed for this login", 'error')
       return false
     }
