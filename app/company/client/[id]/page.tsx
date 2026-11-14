@@ -15,6 +15,7 @@ import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
+import PlanCopySheet from '@/app/plan-copy-sheet'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
@@ -185,6 +186,7 @@ export default function ClientDetailPage() {
   const [planMenuId, setPlanMenuId] = useState<string | null>(null)
   const [selDay, setSelDay] = useState<Record<string, string>>({})
   const [newPlanSheetOpen, setNewPlanSheetOpen] = useState(false)
+  const [copyClientOpen, setCopyClientOpen] = useState(false) // New plan → Copy from a client
   const [sheetWeek, setSheetWeek] = useState('')   // "Week starts" in the + New plan sheet
   const sheetDragY = useRef<number | null>(null)
   const manualFormRef = useRef<HTMLDivElement | null>(null)
@@ -1859,6 +1861,12 @@ const handleResetPassword = async () => {
                     <span className="block text-sm font-semibold text-white">✍️ Build manually</span>
                     <span className="block text-xs text-gray-400 mt-1">Pick exercises from the list, set sets and reps per day.</span>
                   </button>
+                  <button type="button" disabled={!sheetWeek || generatingPlan}
+                    onClick={() => { close(); setCopyClientOpen(true) }}
+                    className={`${option} bg-gray-800/60 border-gray-700 hover:border-orange-500`}>
+                    <span className="block text-sm font-semibold text-white">📋 Copy from a client</span>
+                    <span className="block text-xs text-gray-400 mt-1">Start from a plan you gave another client. You review before assigning.</span>
+                  </button>
                 </div>
 
                 {source && (
@@ -1874,6 +1882,15 @@ const handleResetPassword = async () => {
           </div>
         )
       })()}
+      {/* New plan → Copy from a client: the picked plan opens in the manual builder for the chosen week */}
+      <PlanCopySheet open={copyClientOpen} onClose={() => setCopyClientOpen(false)}
+        onPick={(plan, from) => {
+          openManualBuilder(sheetWeek)
+          setNewPlanJson({ ...plan, days: plan.days.map(d => ({ ...d, exercises: d.exercises.map(e => ({ ...e })) })) })
+          setCopyClientOpen(false)
+          showToast(`Copied from ${from} ✓ Check it, then save`)
+        }}
+        currentClientId={clientId} country={country ?? 'IN'} />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
@@ -2442,7 +2459,7 @@ const handleResetPassword = async () => {
       </div>
     )}
     {generatedJson ? (
-      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} />
+      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} allowCopy={false} />
     ) : (
     <textarea
   value={generatedPlan}
@@ -2537,7 +2554,8 @@ const handleResetPassword = async () => {
                 .sort((x, y) => x.week_start.localeCompare(y.week_start))
               const past = plans.filter(p => p !== cur && weekStatus(p.week_start) !== 'upcoming')
                 .sort((x, y) => y.week_start.localeCompare(x.week_start))
-              const shownPast = showAllPlans ? past : past.slice(0, 6)
+              const PAST_SHOWN = 5 // newest past plans shown before "Show older plans"
+              const shownPast = showAllPlans ? past : past.slice(0, PAST_SHOWN)
               const s = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
               // ⋯ on a plan: Edit plan, Copy to next week, Delete plan (owner / partner only)
@@ -2911,10 +2929,10 @@ const handleResetPassword = async () => {
                     <div className="space-y-2">
                       <p className="text-xs text-gray-500 uppercase tracking-wider px-1">Past plans</p>
                       {shownPast.map(p => renderPlan(p, 'row'))}
-                      {past.length > 6 && (
+                      {past.length > PAST_SHOWN && (
                         <button onClick={() => setShowAllPlans(!showAllPlans)}
                           className="w-full min-h-[44px] text-xs text-gray-400 hover:text-white border border-gray-800 hover:border-gray-600 rounded-xl transition">
-                          {showAllPlans ? 'Show fewer' : `Show older plans (${past.length - 6})`}
+                          {showAllPlans ? 'Show fewer' : `Show older plans (${past.length - PAST_SHOWN})`}
                         </button>
                       )}
                     </div>
