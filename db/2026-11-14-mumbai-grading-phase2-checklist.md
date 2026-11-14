@@ -179,4 +179,7 @@ Each file is one transaction: if it errors, **nothing** from that file was saved
 there (don't run the next file). Don't try to undo anything by hand: there are no undo scripts on purpose (Rule #1).
 
 ---
-Status: written 14 Nov 2026. Mumbai: **not run yet**.
+Status: ✅ **RUN ON MUMBAI 14 Nov 2026** (by Anand). Step 0 as expected (Phase 1 intact, no Phase 2 columns, 0 exams,
+DSSKA gets Brown 1st kyu; a rerun of the Phase 1 file by mistake stopped at the existing trigger and saved nothing).
+Files 1, 2, 3 and all their checks as expected. Step F fingerprints identical on Mumbai and dev:
+columns 234 · constraints 109 · functions 15 · policies 71 · triggers 7. **Dev and prod schemas are equal.**

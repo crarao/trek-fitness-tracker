@@ -6,7 +6,7 @@
 --                                           https://supabase.com/dashboard/project/nptxjfvkqjuekgkspemu/sql/new
 -- Check the project ref in the address bar before pressing Run.
 -- Status: ✅ RUN ON DEV 11 Nov 2026 (by Anand); Step 2 checks a–d all as expected.
---         Mumbai (prod): NOT RUN YET — only when Phase 2 ships to main.
+--         Mumbai (prod): ✅ RUN 14 Nov 2026 (by Anand); Step 0 and Step 2 checks a–d as expected. Do not run again.
 --
 -- Anand runs this; Claude does not. ADDITIVE ONLY: 5 nullable columns, 1 check rule, 1 trigger,
 -- 2 database functions. No DROP / DELETE / TRUNCATE, no renames, no type changes.

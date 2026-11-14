@@ -7,7 +7,7 @@
 --    (Mumbai only AFTER 20261111120000_belt_grading_phase2.sql has run there.)
 -- Check the project ref in the address bar before pressing Run.
 -- Status: ✅ RUN ON DEV 12 Nov 2026 (by Anand); checks a (belt_fees jsonb) and b (QA Dojo 9 belts) as expected.
---         Mumbai (prod): NOT RUN YET — after the Phase 2 file, when Phase 2 ships to main.
+--         Mumbai (prod): ✅ RUN 14 Nov 2026 (by Anand); belt_fees jsonb, DSSKA ladder 9 belts (Brown 1st kyu added). Do not run again.
 --
 -- Anand runs this; Claude does not. ADDITIVE ONLY: 1 nullable column, 1 check rule, 1 new belt row per gym.
 -- No DROP / DELETE / TRUNCATE, no renames, no type changes.
