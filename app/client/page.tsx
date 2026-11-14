@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, daysUntil, localDateIso } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
-import { withoutEarlyLinks } from '@/lib/adherence'
+import { withoutEarlyLinks, linkForDate } from '@/lib/adherence'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
@@ -317,9 +317,11 @@ const handleChangePassword = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setSaving(false); router.push('/login'); return }
     const activity = activityValue(chosen.key, newSession.activity_name)
+    // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
+    const link = linkForDate(plans, newSession.weekly_plan_id || null, newSession.session_date, null)
     const row: Record<string, unknown> = {
       client_id: user.id,
-      weekly_plan_id: newSession.weekly_plan_id || null,
+      weekly_plan_id: link.weekly_plan_id,
       session_date: newSession.session_date,
       duration_minutes: minutes,
       notes: newSession.notes,
@@ -361,13 +363,15 @@ const handleChangePassword = async () => {
     const planDay = plan ? planJsonOf(plan)?.days.find(d => d.day === dayKey(label)) : undefined
     const tickKey = `${planId}:${dayKey(label)}`
     const ticked = ticks[tickKey] || []
+    // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
+    const link = linkForDate(plans, planId, dayForm.session_date, label)
     const row: Record<string, unknown> = {
       client_id: user.id,
-      weekly_plan_id: planId,
+      weekly_plan_id: link.weekly_plan_id,
       session_date: dayForm.session_date,
       duration_minutes: minutes,
       notes: dayForm.notes,
-      plan_day: label,
+      plan_day: link.plan_day,
       ...(planDay && ticked.length ? { exercises_done: exercisesDoneFor(planDay, ticked) } : {}),
     }
     let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()

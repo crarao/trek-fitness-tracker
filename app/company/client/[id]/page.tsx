@@ -17,7 +17,7 @@ import PlanEditor from '@/app/plan-editor'
 import PlanCopySheet from '@/app/plan-copy-sheet'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
-import { planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks } from '@/lib/adherence'
+import { planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks, linkForDate } from '@/lib/adherence'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
@@ -789,13 +789,15 @@ export default function ClientDetailPage() {
     if (!user) { setSavingMark(false); router.push('/login'); return }
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
+    // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
+    const link = linkForDate(plans, plan?.id ?? null, markForm.session_date, label)
     const row: Record<string, unknown> = {
       client_id: clientId,
-      weekly_plan_id: plan?.id ?? null,
+      weekly_plan_id: link.weekly_plan_id,
       session_date: markForm.session_date,
       duration_minutes: minutes,
       notes: markForm.notes,
-      plan_day: label,
+      plan_day: link.plan_day,
       logged_by: user.id,
       ...(day && ticked.length ? { exercises_done: exercisesDoneFor(day, ticked) } : {}),
     }
@@ -832,6 +834,7 @@ export default function ClientDetailPage() {
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
     if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
     if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
+    else if (link.moved) showToast(`✓ Saved on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
     else showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
     loadData(['sessions'])
   }
