@@ -1,15 +1,24 @@
 // Plan adherence: how many of a plan's workout days the client has done.
 // A day counts as done when a session is logged against the plan with that day (plan_day),
 // or, for sessions linked to the plan without a day (normal Log form), one per distinct date.
+// 14 Nov: sessions with no plan link (weekly_plan_id empty: "Log today's session", older data)
+// dated inside the plan's 7 days also count, one per date not already counted.
 // Never counts more than the plan's workout days.
 
 import { weekStatus, dayKey } from './plan-summary'
 import { summarizeAny } from './plan-structure'
 
 export type AdherencePlan = { id: string; client_id?: string; week_start: string; plan_details: string; plan_json?: unknown }
-export type AdherenceSession = { weekly_plan_id?: string | null; plan_day?: string | null; session_date: string }
+export type AdherenceSession = { weekly_plan_id?: string | null; plan_day?: string | null; session_date: string; client_id?: string }
 
 export type Adherence = { planned: number; done: number }
+
+// 'YYYY-MM-DD' + n days (date only, no timezone shift)
+function plusDays(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1, d + n))
+  return t.toISOString().slice(0, 10)
+}
 
 export function planAdherence(plan: AdherencePlan, sessions: AdherenceSession[]): Adherence | null {
   const planned = summarizeAny(plan).workoutDays
@@ -17,7 +26,14 @@ export function planAdherence(plan: AdherencePlan, sessions: AdherenceSession[])
   const linked = sessions.filter(s => s.weekly_plan_id === plan.id)
   const days = new Set(linked.filter(s => s.plan_day).map(s => dayKey(s.plan_day)))
   const otherDates = new Set(linked.filter(s => !s.plan_day).map(s => s.session_date))
-  return { planned, done: Math.min(planned, days.size + otherDates.size) }
+  // Unlinked sessions inside the plan's week (same client when both say), on dates not already counted
+  const start = plan.week_start.slice(0, 10), end = plusDays(start, 6)
+  const linkedDates = new Set(linked.map(s => s.session_date.slice(0, 10)))
+  const unlinkedDates = new Set(sessions
+    .filter(s => !s.weekly_plan_id && (!s.client_id || !plan.client_id || s.client_id === plan.client_id))
+    .map(s => s.session_date.slice(0, 10))
+    .filter(d => d >= start && d <= end && !linkedDates.has(d)))
+  return { planned, done: Math.min(planned, days.size + otherDates.size + unlinkedDates.size) }
 }
 
 // The plan covering today (newest start wins if two overlap)
