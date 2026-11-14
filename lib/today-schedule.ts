@@ -138,5 +138,14 @@ export function timeLabel(minutes: number, country: Country): string {
   return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${country === 'US' || country === 'CA' ? ap.toUpperCase() : ap}`
 }
 
+// A plan's workout time for display: "18:30" / "11:00:00" -> "6:30 pm" / "11 am" (US / CA: "PM");
+// text that isn't a readable time is shown as typed; empty -> ''
+export function workoutTimeLabel(text: string | null | undefined, country: Country | null | undefined): string {
+  const t = (text || '').trim()
+  if (!t) return ''
+  const m = timeMinutes(t)
+  return m == null ? t : timeLabel(m, country ?? 'IN')
+}
+
 // Hour heading for a slot: "6 pm"
 export const hourLabel = (minutes: number, country: Country) => timeLabel(Math.floor(minutes / 60) * 60, country)
