@@ -12,6 +12,7 @@ import { thisWeekMonday } from '@/lib/calories'
 import { staffWord, ptWord, isDojo } from '@/lib/labels'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attendance'
+import { withoutEarlyLinks } from '@/lib/adherence'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
 
@@ -177,7 +178,8 @@ export default function CoachHomePage() {
     : []
   const who = dojo ? 'students' : 'clients'
   const coaches = staff.filter(s => s.role === 'coach')
-  const rows = sortRows(todayRows(clients, plans, sessions, staff, me?.id || '', today, sw.one,
+  // A session dated before its plan started counts in its own week, not as that plan's day (14 Nov)
+  const rows = sortRows(todayRows(clients, plans, withoutEarlyLinks(sessions, plans), staff, me?.id || '', today, sw.one,
     new Set(staff.filter(x => x.role === 'coach').map(x => x.id))))
   const q = search.trim().toLowerCase()
   const shown = rows

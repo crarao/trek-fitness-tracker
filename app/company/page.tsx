@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
+import { type AdherencePlan, type AdherenceSession, type Adherence, planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks } from '@/lib/adherence'
 import { type TodaySession, missedAndDue, loggerOf, sessionsByLogger } from '@/lib/todays-sessions'
 import { type ExercisesDone } from '@/lib/plan-structure'
 import { thisWeekMonday } from '@/lib/calories'
@@ -918,15 +918,17 @@ export default function CompanyAdminPage() {
   // Adherence for PT clients: this week's plan per client (null = no plan this week)
   const ptClients = clients.filter(c => c.client_type === 'pt')
   const weekAdherence: Record<string, Adherence | null | 'no-plan'> = {}
+  // A session dated before its plan started counts in its own week instead (lib/adherence.ts, 14 Nov)
+  const trainingSessions = training ? withoutEarlyLinks(training.sessions, training.plans) : []
   if (training) {
     for (const c of ptClients) {
       const plan = currentPlan(training.plans.filter(p => p.client_id === c.id))
-      weekAdherence[c.id] = plan ? planAdherence(plan, training.sessions) : 'no-plan'
+      weekAdherence[c.id] = plan ? planAdherence(plan, trainingSessions) : 'no-plan'
     }
   }
   const weekTotals = Object.values(weekAdherence).reduce<Adherence>((t, a) =>
     a && a !== 'no-plan' ? { planned: t.planned + a.planned, done: t.done + a.done } : t, { planned: 0, done: 0 })
-  const fourWeeks = training ? recentAdherence(training.plans, training.sessions, 4) : null
+  const fourWeeks = training ? recentAdherence(training.plans, trainingSessions, 4) : null
   const noPlanClients = ptClients.filter(c => weekAdherence[c.id] === 'no-plan')
   const withPlanCount = ptClients.filter(c => { const a = weekAdherence[c.id]; return a && a !== 'no-plan' }).length
   // Today's sessions (#41): trained today, today's workout not done yet, workout days missed this week
@@ -940,7 +942,7 @@ export default function CompanyAdminPage() {
     for (const c of ptClients) {
       const plan = currentPlan(training.plans.filter(p => p.client_id === c.id))
       if (!plan) continue
-      const r = missedAndDue(plan, training.sessions as TodaySession[], todayIso)
+      const r = missedAndDue(plan, trainingSessions as TodaySession[], todayIso)
       if (r.dueToday && !trainedToday.some(s => s.client_id === c.id)) dueToday.push({ c, label: r.dueToday.label })
       if (r.missed.length) missedWeek.push({ c, days: r.missed.map(d => d.day) })
     }

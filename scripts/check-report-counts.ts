@@ -5,6 +5,8 @@
 
 import { summarizeWeek, buildProgressMessage, recentWeeksAdherence } from '../lib/progress-share'
 import { weeklyTotals } from '../lib/weekly-totals'
+import { withoutEarlyLinks, planAdherence, recentAdherence } from '../lib/adherence'
+import { doneDayKeys } from '../lib/plan-summary'
 import { planToText, type PlanJson } from '../lib/plan-structure'
 
 const today = '2026-11-01' // Sunday: the whole week of 26 Oct has passed
@@ -79,6 +81,28 @@ const report = (title: string, sessions: ReturnType<typeof s>[]) => {
   check('Last 4 weeks counts them too', four?.done === 3 && four?.planned === 4)
   const twoSameDay = summarizeWeek({ plan, sessions: [s('2026-10-26', 'Mon', 60), s('2026-10-26', null, 20, null)], weekStart, today })
   check('linked + unlinked on the same date = 1 day', twoSameDay.done === 1 && twoSameDay.extra === 1)
+}
+
+{
+  // 14 Nov (Amit G on dev / Vedansh Rao on prod): history logged later while the newest plan was
+  // picked, so October sessions point at the 2 Nov plan. They count in the week they happened.
+  const p26 = { ...plan, id: 'p26' }                          // 26 Oct plan (Mon / Tue / Thu / Fri)
+  const p2 = { ...plan, id: 'p2', week_start: '2026-11-02' }  // 2 Nov plan, same days
+  const early = [s('2026-10-26', 'Mon', 60, 'p2'), s('2026-10-27', 'Tue', 45, 'p2'), s('2026-10-29', 'Thu', 50, 'p2')]
+  const late = s('2026-11-03', 'Fri', 40, 'p26')               // 26 Oct plan's Friday, logged late: stays with it
+  const raw = [...early, late]
+  const fixed = withoutEarlyLinks(raw, [p26, p2])
+  console.log('\n7. Sessions dated before their plan started')
+  check('before: the 2 Nov plan wrongly gets 3 of 4 from October', planAdherence(p2, raw)?.done === 3)
+  check('after: the 2 Nov plan has 0 (nothing done in its week)', planAdherence(p2, fixed)?.done === 0)
+  check('after: the 26 Oct plan gets the 3 October days + its late Friday = 4 of 4', planAdherence(p26, fixed)?.done === 4)
+  check('done ticks on the 2 Nov plan card: none', doneDayKeys('p2', fixed).size === 0)
+  check('late log keeps its plan link', fixed[3].weekly_plan_id === 'p26' && fixed[3] === late)
+  check('saved rows are not changed (copies only)', raw[0].weekly_plan_id === 'p2')
+  check('nothing to change = the same list back', withoutEarlyLinks(fourPlanned, [plan]) === fourPlanned)
+  check('unknown plan: left as it is', withoutEarlyLinks(early, [p26])[0].weekly_plan_id === 'p2')
+  const four = recentAdherence([p26, p2], fixed, 4)
+  check('Last 4 weeks over both plans: 4 of 8, each day in its own week', four?.done === 4 && four?.planned === 8)
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed')

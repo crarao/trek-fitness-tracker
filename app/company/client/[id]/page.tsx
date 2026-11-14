@@ -17,7 +17,7 @@ import PlanEditor from '@/app/plan-editor'
 import PlanCopySheet from '@/app/plan-copy-sheet'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
-import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
+import { planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks } from '@/lib/adherence'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
 import { weeklyTotals } from '@/lib/weekly-totals'
@@ -667,11 +667,14 @@ export default function ClientDetailPage() {
       </p>
     )
   }
+  // Sessions for counting plan days (done ticks, adherence, reports): a session dated before its
+  // plan started counts in its own week instead (lib/adherence.ts withoutEarlyLinks, 14 Nov)
+  const countSessions = withoutEarlyLinks(sessions, plans)
   // Done-day notes on plan cards ("45 min · ~265 kcal") plus who logged the day's latest session
   const doneNotesWithWho = (planId: string) => {
-    const notes = doneDayNotes(planId, sessions, sessionKcal)
+    const notes = doneDayNotes(planId, countSessions, sessionKcal)
     for (const day of Object.keys(notes)) {
-      const latest = sessions.filter(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day).pop()
+      const latest = countSessions.filter(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day).pop()
       if (latest && !coachCompany) notes[day] = [notes[day], loggedByText(latest)].filter(Boolean).join(' · ')
     }
     return notes
@@ -1501,7 +1504,7 @@ const handleResetPassword = async () => {
     setNewPlanSheetOpen(false)
     if (todayLog.day) setCoachOpenDay(todayLog.day)
     // A day already done asks before logging a second session (same as under the day)
-    if (todayLog.day && doneDayKeys(todayLog.plan.id, sessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
+    if (todayLog.day && doneDayKeys(todayLog.plan.id, countSessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
     else openMarkForm(key)
     setScrollToPlanId(todayLog.plan.id)
   }
@@ -1544,7 +1547,7 @@ const handleResetPassword = async () => {
       businessType: company?.business_type,
       coachName,
       plan,
-      sessions,
+      sessions: countSessions,
       weekStart,
       note: shareNote,
       country: country ?? 'IN',
@@ -1556,9 +1559,9 @@ const handleResetPassword = async () => {
     setMakingPdf(true)
     try {
       const { plan, weekStart } = shareWeekPlan()
-      const week = summarizeWeek({ plan, sessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
+      const week = summarizeWeek({ plan, sessions: countSessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
       // Last 4 Monday weeks up to this week, counted like the week card (lib/progress-share.ts)
-      const four = recentWeeksAdherence({ plans, sessions, weekStart })
+      const four = recentWeeksAdherence({ plans, sessions: countSessions, weekStart })
       const { downloadProgressPdf } = await import('@/lib/progress-pdf')
       const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
@@ -2640,7 +2643,7 @@ const handleResetPassword = async () => {
                 const summary = summarizeAny(plan, plan.week_start)
                 const planJson = planJsonOf(plan)
                 const status = weekStatus(plan.week_start)
-                const done = doneDayKeys(plan.id, sessions)
+                const done = doneDayKeys(plan.id, countSessions)
                 const workoutLabels = summary.days.filter(d => !isRestDay(d))
                 const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
                 const isCurrent = status === 'current'
@@ -2758,7 +2761,7 @@ const handleResetPassword = async () => {
                   // What was ticked on the day (latest session for it); this week's days not yet done show the coach's ticks
                   // "Log another session" on a done day (its form is open): tick afresh, with weight rows (#80)
                   const loggingAgain = isCurrent && dayDone && markKey === `${plan.id}:${d.day}`
-                  const saved = sessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                  const saved = countSessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
                   const ticks = loggingAgain ? coachTicks[`${plan.id}:${d.day}`] || []
                     : saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
                     : isCurrent && !dayDone ? coachTicks[`${plan.id}:${d.day}`] || [] : []
@@ -3067,8 +3070,8 @@ const handleResetPassword = async () => {
             {!dojo && (() => {
               // Plan adherence: this week's plan and the last 4 weeks (not for dojos: no plans)
               const cur = currentPlan(plans)
-              const week = cur ? planAdherence(cur, sessions) : null
-              const four = recentAdherence(plans, sessions, 4)
+              const week = cur ? planAdherence(cur, countSessions) : null
+              const four = recentAdherence(plans, countSessions, 4)
               return (
                 <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800 grid grid-cols-2 gap-4">
                   <div>
