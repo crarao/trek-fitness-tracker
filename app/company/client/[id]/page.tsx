@@ -1565,7 +1565,7 @@ const handleResetPassword = async () => {
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
         text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab
         // The day-by-day plan only when the coach leaves "Include the week's plan" on
-        plan: (() => { const json = plan && pdfIncludePlan ? planJsonOf(plan) : null; return plan && json ? { weekStart: plan.week_start, json } : null })(),
+        plan: (() => { const json = plan && pdfIncludePlan ? planJsonOf(plan) : null; return plan && json ? { weekStart, json } : null })(), // the report's Monday week (14 Nov: a Sunday-start plan read "Week of 8 Nov" under a "Week of 9 Nov" report)
         // Strength by exercise (#80): logs up to the report week's Sunday (or today, if that's earlier)
         strength: exerciseLogsOn ? strengthReport(datedLogs, exLibrary, [isoAdd(weekStart, 6), localDateIso()].sort()[0]) : null,
         showCalories: false, // decided 5 Nov: no calories in the PDF report (WhatsApp messages keep them)
