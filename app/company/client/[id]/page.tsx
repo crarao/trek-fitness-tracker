@@ -21,6 +21,7 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor } from '@/lib/adherence'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
+import { monthOptions, defaultMonth, summarizeMonth, monthlyTotals, buildMonthlyMessage, monthRangeText, strengthGains } from '@/lib/monthly-report'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
@@ -345,6 +346,9 @@ export default function ClientDetailPage() {
   // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
   const [shareOpen, setShareOpen] = useState(false)
   const [shareWeek, setShareWeek] = useState<'this' | 'last'>(() => ([1, 2].includes(new Date().getDay()) ? 'last' : 'this'))
+  // Week or Month report (gyms; dojos with attendance keep their own This / Last month). '' = the default month.
+  const [shareKind, setShareKind] = useState<'week' | 'month'>('week')
+  const [shareMonth, setShareMonth] = useState('')
   const [shareNote, setShareNote] = useState('')
   const [shareText, setShareText] = useState('')
   const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
@@ -1538,6 +1542,18 @@ const handleResetPassword = async () => {
     const weekStart = shareWeek === 'this' ? weekStartIso : lastWeekStartIso
     return { plan: planForWeek(plans, weekStart), weekStart }
   }
+  // Month picker: this month back to the month they joined or first trained (at most 12)
+  const shareMonthOptions = () => monthOptions({
+    since: [client?.created_at, sessions[0]?.session_date].filter((d): d is string => !!d).sort()[0] ?? null,
+    country: country ?? 'IN',
+  })
+  const pickedMonth = () => {
+    const options = shareMonthOptions()
+    return options.some(o => o.month === shareMonth) ? shareMonth : defaultMonth(options)
+  }
+  const shareMonthSummary = () => summarizeMonth({
+    plans, sessions, month: pickedMonth(), weightKg: client?.weight_kg, businessType: company?.business_type,
+  })
   const shareMessage = () => {
     // Dojo with attendance: classes attended this / last month instead of the session week
     if (attendanceMode && client) {
@@ -1546,6 +1562,15 @@ const handleResetPassword = async () => {
         client, companyName: company?.name || '', staffName: coachName, rows: attRows,
         homeBatch: batchList.find(b => b.id === client.batch_id) ?? null, today,
         month: shareWeek === 'this' ? today : addDays(monthRange(today).from, -1), since: client.created_at ?? null, note: shareNote, country,
+      })
+    }
+    // Monthly report: the chosen calendar month (lib/monthly-report.ts)
+    if (shareKind === 'month' && client) {
+      const summary = shareMonthSummary()
+      return buildMonthlyMessage({
+        client: client as ShareClient, companyName: company?.name || '', businessType: company?.business_type, coachName,
+        summary, gains: exerciseLogsOn ? strengthGains(datedLogs, exLibrary, summary.month, summary.upTo) : [],
+        note: shareNote, country: country ?? 'IN',
       })
     }
     const { plan, weekStart } = shareWeekPlan()
@@ -1566,12 +1591,36 @@ const handleResetPassword = async () => {
     if (!client) return
     setMakingPdf(true)
     try {
+      const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
+      if (shareKind === 'month') {
+        // Monthly report: the month's tiles, sessions / minutes for the last 6 months, the strength
+        // table up to the month's last counted day; no day-by-day plan (a month has several)
+        const m = shareMonthSummary()
+        const { downloadProgressPdf } = await import('@/lib/progress-pdf')
+        await downloadProgressPdf({
+          companyName: company?.name || '', clientName: client.full_name, weekStart: m.from, country: country ?? 'IN', text,
+          month: {
+            rangeText: monthRangeText(m, country ?? 'IN'),
+            tiles: [
+              ...(m.planned ? [['Plan days', `${m.done} of ${m.planned}`] as [string, string]] : []),
+              ['Sessions', String(m.sessions)],
+              ['Minutes', m.minutes.toLocaleString('en-US')],
+              ['Active days', String(m.activeDays)],
+            ],
+            months: monthlyTotals(sessions, m.month, 6),
+          },
+          strength: exerciseLogsOn ? strengthReport(datedLogs, exLibrary, m.upTo) : null,
+          showCalories: false, // no calories in the PDF (5 Nov); WhatsApp keeps them
+        }, `${safeName}-progress-${m.month}.pdf`)
+        showToast('✓ PDF downloaded')
+        setMakingPdf(false)
+        return
+      }
       const { plan, weekStart } = shareWeekPlan()
       const week = summarizeWeek({ plan, sessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
       // Last 4 Monday weeks up to this week, counted like the week card (lib/progress-share.ts)
       const four = recentWeeksAdherence({ plans, sessions, weekStart })
       const { downloadProgressPdf } = await import('@/lib/progress-pdf')
-      const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
         text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab
@@ -1688,6 +1737,27 @@ const handleResetPassword = async () => {
           <button type="button" onClick={() => setShareOpen(false)} aria-label="Close"
             className="text-gray-500 hover:text-white text-lg leading-none px-1">✕</button>
         </div>
+        {!attendanceMode && (
+          <div className="flex gap-1 bg-gray-800 p-1 rounded-xl" role="group" aria-label="Report for">
+            {(['week', 'month'] as const).map(k => (
+              <button key={k} type="button" aria-pressed={shareKind === k} data-testid={`share-kind-${k}`}
+                onClick={() => { setShareKind(k); setShareEdited(false) }}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${shareKind === k ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                {k === 'week' ? 'Week' : 'Month'}
+              </button>
+            ))}
+          </div>
+        )}
+        {!attendanceMode && shareKind === 'month' ? (
+          <div>
+            <label htmlFor="share-month" className="sr-only">Month</label>
+            <select id="share-month" data-testid="share-month" value={pickedMonth()}
+              onChange={e => { setShareMonth(e.target.value); setShareEdited(false) }}
+              className="w-full min-h-[44px] bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm">
+              {shareMonthOptions().map(o => <option key={o.month} value={o.month}>{o.label}</option>)}
+            </select>
+          </div>
+        ) : (
         <div className="flex gap-1 bg-gray-800 p-1 rounded-xl">
           {(['this', 'last'] as const).map(w => (
             <button key={w} type="button" onClick={() => setShareWeek(w)}
@@ -1696,6 +1766,7 @@ const handleResetPassword = async () => {
             </button>
           ))}
         </div>
+        )}
         <textarea value={shareNote} onChange={e => setShareNote(e.target.value)} rows={2} maxLength={300}
           placeholder="Add a note (optional)"
           className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm resize-none" />
@@ -1731,6 +1802,7 @@ const handleResetPassword = async () => {
         </div>
         {!attendanceMode && (
           <div className="space-y-2">
+            {shareKind === 'week' && (
             <label className="flex items-start gap-2.5 text-xs text-gray-300 cursor-pointer">
               <input type="checkbox" checked={pdfIncludePlan} onChange={e => choosePdfIncludePlan(e.target.checked)}
                 className="mt-0.5 w-4 h-4 accent-green-600 shrink-0" />
@@ -1739,6 +1811,7 @@ const handleResetPassword = async () => {
                 <span className="block text-gray-500">Exercises with sets and weights, day by day. Off: daily summary and the strength table only.</span>
               </span>
             </label>
+            )}
             <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
               className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
               {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
