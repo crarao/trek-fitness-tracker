@@ -10,6 +10,9 @@ import { type PlanJson, daysInWeekOrder, exerciseDetail } from './plan-structure
 import { type StrengthReport, changeText, weightText } from './exercise-logs'
 import { withoutCalories } from './progress-share'
 
+// The line chart of one exercise under the Strength table (off since 14 Nov, see the strength section)
+const SHOW_EXERCISE_CHART = false
+
 export type ProgressPdfInput = {
   companyName: string
   clientName: string
@@ -256,7 +259,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   y += 50 + chartH + 40
 
   // Strength by exercise (#80): heaviest weight per month, last 3 months, change since the first
-  // month, a small trend line per row, and a chart of the most logged exercise. Kept together on one page.
+  // month and a small trend line per row (the chart of the most logged exercise is off, SHOW_EXERCISE_CHART). Kept together on one page.
   const st = input.strength
   if (st && st.rows.length) {
     const rowH = 50
@@ -307,7 +310,9 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
       ctx.fillRect(M, y - 8, W - 2 * M, 1)
     }
     y += 30
-    if (st.chart) {
+    // 14 Nov: the single-exercise chart is switched off (the table above already shows each
+    // exercise month by month). Kept, not deleted: set SHOW_EXERCISE_CHART to true to bring it back.
+    if (SHOW_EXERCISE_CHART && st.chart) {
       const h = 280
       ensure(50 + h + 30)
       ctx.fillStyle = GRAY

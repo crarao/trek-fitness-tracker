@@ -69,5 +69,17 @@ const report = (title: string, sessions: ReturnType<typeof s>[]) => {
   check('Last 4 weeks counts the week like the card', four?.done === 4 && four?.planned === 4)
 }
 
+{
+  // 14 Nov: sessions logged without a plan link still count toward the plan's days (card and Last 4 weeks)
+  const unlinked = [s('2026-10-26', null, 60, null), s('2026-10-27', null, 45, null), s('2026-10-29', null, 50, null)]
+  const week = summarizeWeek({ plan, sessions: unlinked, weekStart, today })
+  const four = recentWeeksAdherence({ plans: [plan], sessions: unlinked, weekStart, today })
+  console.log(`\n6. 3 sessions with no plan link: card ${week.done} of ${week.planned}, last 4 weeks ${four?.done} of ${four?.planned}`)
+  check('unlinked sessions count: 3 of 4', week.done === 3 && week.planned === 4 && week.extra === 0)
+  check('Last 4 weeks counts them too', four?.done === 3 && four?.planned === 4)
+  const twoSameDay = summarizeWeek({ plan, sessions: [s('2026-10-26', 'Mon', 60), s('2026-10-26', null, 20, null)], weekStart, today })
+  check('linked + unlinked on the same date = 1 day', twoSameDay.done === 1 && twoSameDay.extra === 1)
+}
+
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed')
 if (failed) process.exit(1)
