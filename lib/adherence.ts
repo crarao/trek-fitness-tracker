@@ -6,7 +6,7 @@
 // Never counts more than the plan's workout days.
 
 import { weekStatus, dayKey } from './plan-summary'
-import { summarizeAny } from './plan-structure'
+import { summarizeAny, WEEKDAYS } from './plan-structure'
 
 export type AdherencePlan = { id: string; client_id?: string; week_start: string; plan_details: string; plan_json?: unknown }
 export type AdherenceSession = { weekly_plan_id?: string | null; plan_day?: string | null; session_date: string; client_id?: string }
@@ -53,6 +53,33 @@ export function withoutEarlyLinks<T extends { weekly_plan_id?: string | null; se
     return { ...s, weekly_plan_id: null }
   })
   return changed ? out : sessions
+}
+
+// Saving a session (14 Nov): the plan link to store for a session dated `date` when `chosenPlanId` is
+// picked. Dated before that plan started (a backdated Log / Done ✓) → the plan covering that date
+// (newest start wins), or no plan; the day label stays only if its weekday is the date's weekday, so it
+// can't tick the wrong day of the other plan. Otherwise (in the plan's week, or logged late after it
+// ended) the choice is kept. `moved` = the link was changed; `weekStart` = the plan it now points at.
+export function linkForDate(
+  plans: { id: string; week_start: string }[], chosenPlanId: string | null | undefined, date: string, planDay: string | null,
+): { weekly_plan_id: string | null; plan_day: string | null; moved: boolean; weekStart: string | null } {
+  const chosen = chosenPlanId ? plans.find(p => p.id === chosenPlanId) : undefined
+  const day = date.slice(0, 10)
+  if (!chosen || day >= chosen.week_start.slice(0, 10)) {
+    return { weekly_plan_id: chosenPlanId || null, plan_day: planDay, moved: false, weekStart: chosen?.week_start.slice(0, 10) ?? null }
+  }
+  const covering = plans
+    .filter(p => p.week_start.slice(0, 10) <= day && plusDays(p.week_start.slice(0, 10), 6) >= day)
+    .sort((a, b) => b.week_start.localeCompare(a.week_start))[0]
+  if (!covering) return { weekly_plan_id: null, plan_day: planDay, moved: true, weekStart: null }
+  const [y, m, d] = day.split('-').map(Number)
+  const weekday = WEEKDAYS[(new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7]
+  return {
+    weekly_plan_id: covering.id,
+    plan_day: planDay && dayKey(planDay) === weekday ? planDay : null,
+    moved: true,
+    weekStart: covering.week_start.slice(0, 10),
+  }
 }
 
 // The plan covering today (newest start wins if two overlap)

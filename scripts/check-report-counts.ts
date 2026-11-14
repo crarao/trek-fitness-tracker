@@ -5,7 +5,7 @@
 
 import { summarizeWeek, buildProgressMessage, recentWeeksAdherence } from '../lib/progress-share'
 import { weeklyTotals } from '../lib/weekly-totals'
-import { withoutEarlyLinks, planAdherence, recentAdherence } from '../lib/adherence'
+import { withoutEarlyLinks, planAdherence, recentAdherence, linkForDate } from '../lib/adherence'
 import { doneDayKeys } from '../lib/plan-summary'
 import { planToText, type PlanJson } from '../lib/plan-structure'
 
@@ -103,6 +103,26 @@ const report = (title: string, sessions: ReturnType<typeof s>[]) => {
   check('unknown plan: left as it is', withoutEarlyLinks(early, [p26])[0].weekly_plan_id === 'p2')
   const four = recentAdherence([p26, p2], fixed, 4)
   check('Last 4 weeks over both plans: 4 of 8, each day in its own week', four?.done === 4 && four?.planned === 8)
+}
+
+{
+  // 14 Nov: saving a backdated session links it to the plan covering its date
+  const p26 = { ...plan, id: 'p26' }                          // 26 Oct – 1 Nov
+  const p2 = { ...plan, id: 'p2', week_start: '2026-11-02' }  // 2 – 8 Nov
+  const plans2 = [p26, p2]
+  console.log('\n8. Saving a backdated session')
+  const a = linkForDate(plans2, 'p2', '2026-10-27', 'Tue · Push')
+  check('Tue 27 Oct picked under the 2 Nov plan → 26 Oct plan, same weekday keeps the label', a.weekly_plan_id === 'p26' && a.plan_day === 'Tue · Push' && a.moved && a.weekStart === '2026-10-26')
+  const b = linkForDate(plans2, 'p2', '2026-10-28', 'Mon · Legs')
+  check('Wed 28 Oct saved as Mon → 26 Oct plan, label dropped (would tick the wrong day)', b.weekly_plan_id === 'p26' && b.plan_day === null)
+  const c = linkForDate(plans2, 'p2', '2026-10-10', 'Mon · Legs')
+  check('No plan that week → no plan link, label kept', c.weekly_plan_id === null && c.plan_day === 'Mon · Legs' && c.moved && c.weekStart === null)
+  const d = linkForDate(plans2, 'p2', '2026-11-04', 'Wed · Rest')
+  check('Inside the plan\'s week: unchanged', d.weekly_plan_id === 'p2' && !d.moved)
+  const e = linkForDate(plans2, 'p26', '2026-11-03', 'Fri · Pull')
+  check('Logged late after the plan ended: keeps its plan', e.weekly_plan_id === 'p26' && e.plan_day === 'Fri · Pull' && !e.moved)
+  check('No plan picked: stays without one', linkForDate(plans2, null, '2026-10-27', null).weekly_plan_id === null)
+  check('Saved rows and the count agree (no early links left)', withoutEarlyLinks([{ session_date: '2026-10-27', weekly_plan_id: a.weekly_plan_id }], plans2)[0].weekly_plan_id === 'p26')
 }
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed')
