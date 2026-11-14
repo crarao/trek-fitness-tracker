@@ -23,6 +23,7 @@ import {
   type FeeStudent, type FeeRow, type BatchState, type StaffName,
   batchState, todaySummary, todaySummaryText, markedByName, feesToCollect, notSeen, lastPresentDates,
   firstNamesLine, telHref, ATTENDANCE_LOOKBACK_DAYS, NOT_SEEN_DAYS,
+  type PaidDraft, PLAN_TYPES, planEndDate, renewalDraft, latestMembership,
 } from '@/lib/dojo-home'
 
 export type DojoStudent = FeeStudent & {
@@ -54,6 +55,8 @@ type Props<S extends DojoStudent> = {
   monthByCurrency: { currency: string; amount: number }[]
   reminderUrl: (s: S) => string | null   // exactly the link the row's Remind / Send reminder opens (null = opens the student)
   onAddStudent: () => void
+  // Mark paid (Fees card): saves one new membership per student, like Renew on the student page; true = saved
+  onMarkPaid: (items: { student: S; draft: PaidDraft }[]) => Promise<boolean>
   onOpenClient: (id: string) => void
   onShowTab: (tab: 'expiring' | 'expired') => void
   onLogout: () => void
@@ -211,6 +214,29 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
 
   const money = (amount: number, cur: string | null) => formatMoney(amount, p.currency === null ? null : (cur || p.currency))
 
+  // ---- Mark paid sheet: one row per student in the family row (siblings ticked together) ----
+  const [paying, setPaying] = useState<FeeRow<S> | null>(null)
+  const [paidDrafts, setPaidDrafts] = useState<Record<string, PaidDraft & { on: boolean }>>({})
+  const [savingPaid, setSavingPaid] = useState(false)
+  const openPaid = (r: FeeRow<S>) => {
+    const today = new Date()
+    setPaidDrafts(Object.fromEntries(r.students.map(s => [s.id, { ...renewalDraft(latestMembership(s.memberships || []), today), on: true }])))
+    setPaying(r)
+  }
+  const setDraft = (id: string, patch: Partial<PaidDraft & { on: boolean }>) => setPaidDrafts(d => {
+    const next = { ...d[id], ...patch }
+    if (patch.plan_type) next.end_date = planEndDate(next.start_date, patch.plan_type)
+    return { ...d, [id]: next }
+  })
+  const paidPicked = paying ? paying.students.filter(s => paidDrafts[s.id]?.on) : []
+  const savePaid = async () => {
+    if (!paying || !paidPicked.length || savingPaid) return
+    setSavingPaid(true)
+    const ok = await p.onMarkPaid(paidPicked.map(s => ({ student: s, draft: paidDrafts[s.id] })))
+    setSavingPaid(false)
+    if (ok) setPaying(null)
+  }
+
   const feeRow = (r: FeeRow<S>, kind: 'due' | 'lapsed') => {
     const first = r.students[0]
     const sub = [r.line, money(r.amount, r.currency),
@@ -226,6 +252,10 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
             <span className="block text-sm text-white truncate">{r.name}</span>
             <span className="block text-xs text-gray-400 truncate">{sub}</span>
           </span>
+        </button>
+        <button type="button" data-testid="fee-mark-paid" onClick={() => openPaid(r)} aria-label={`Mark ${r.name}'s fee paid`}
+          className="h-11 px-3 flex-shrink-0 rounded-xl border border-gray-700 text-xs font-semibold text-gray-200 hover:bg-gray-800">
+          Paid
         </button>
         {kind === 'due' ? (
           <button type="button" aria-label={`WhatsApp ${r.name}`}
@@ -496,6 +526,56 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
             </button>
           </div>
           {p.manage.settingsOpen && p.manage.settings}
+        </div>
+      )}
+
+      {/* Mark paid sheet (Fees card → Paid): closes on Cancel or a tap outside */}
+      {paying && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-end justify-center" onClick={() => !savingPaid && setPaying(null)}>
+          <div role="dialog" aria-modal="true" aria-label="Fee received" data-testid="mark-paid-sheet"
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg bg-gray-900 border-t border-gray-700 rounded-t-2xl px-4 pt-4 pb-6 max-h-[85vh] overflow-y-auto">
+            <h2 className="text-base font-semibold text-white">Fee received</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{paying.line || paying.name} · saved as a new payment, history kept</p>
+            <ul className="mt-3 space-y-3">
+              {paying.students.map(s => {
+                const d = paidDrafts[s.id]
+                if (!d) return null
+                return (
+                  <li key={s.id} className={`rounded-xl border p-3 ${d.on ? 'border-gray-700' : 'border-gray-800 opacity-60'}`}>
+                    {paying.students.length > 1 ? (
+                      <label className="flex items-center gap-2 text-sm text-white">
+                        <input type="checkbox" checked={d.on} onChange={e => setDraft(s.id, { on: e.target.checked })} className="w-5 h-5 accent-orange-500" />
+                        {s.full_name}
+                      </label>
+                    ) : <p className="text-sm text-white">{s.full_name}</p>}
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <label className="text-xs text-gray-400">Plan
+                        <select value={d.plan_type} disabled={!d.on} onChange={e => setDraft(s.id, { plan_type: e.target.value })}
+                          className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white">
+                          {PLAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </label>
+                      <label className="text-xs text-gray-400">Amount
+                        <input type="number" inputMode="decimal" min="0" value={d.amount} disabled={!d.on}
+                          onChange={e => setDraft(s.id, { amount: e.target.value })}
+                          className="mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white" />
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">Paid for {formatDate(d.start_date, p.country, 'dayMonth')} → {formatDate(d.end_date, p.country, 'medium')}</p>
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => setPaying(null)} disabled={savingPaid}
+                className="flex-1 min-h-[44px] rounded-xl border border-gray-700 text-sm text-gray-300">Cancel</button>
+              <button type="button" data-testid="mark-paid-save" onClick={savePaid} disabled={savingPaid || !paidPicked.length}
+                className="flex-1 min-h-[44px] rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-sm font-semibold text-white">
+                {savingPaid ? 'Saving…' : paidPicked.length > 1 ? `Save ${paidPicked.length} payments` : 'Save payment'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
