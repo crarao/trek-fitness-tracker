@@ -24,6 +24,7 @@ import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, pl
 import { monthOptions, defaultMonth, summarizeMonth, monthlyTotals, buildMonthlyMessage, monthRangeText, strengthGains } from '@/lib/monthly-report'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
+import { workoutTimeLabel } from '@/lib/today-schedule'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
@@ -2947,7 +2948,7 @@ const handleResetPassword = async () => {
                         <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">This week</p>
                         <p className="text-sm font-semibold text-white mt-0.5">
                           {formatDate(start, country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}
-                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {plan.workout_time}</span>}
+                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {workoutTimeLabel(plan.workout_time, country)}</span>}
                         </p>
                       </div>
                       <div className="pt-2">{badge}</div>
@@ -2969,7 +2970,7 @@ const handleResetPassword = async () => {
                             {summary.days.length > 0
                               ? `${s(summary.workoutDays, 'workout')}${summary.exercises > 0 ? ` · ${s(summary.exercises, 'exercise')}` : ''}`
                               : 'Text plan'}
-                            {plan.workout_time ? ` · ⏰ ${plan.workout_time}` : ''}
+                            {plan.workout_time ? ` · ⏰ ${workoutTimeLabel(plan.workout_time, country)}` : ''}
                           </span>
                         </span>
                         {badge}

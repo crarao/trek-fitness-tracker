@@ -15,6 +15,7 @@ import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attenda
 import { withoutEarlyLinks } from '@/lib/adherence'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { workoutTimeLabel } from '@/lib/today-schedule'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
 
@@ -222,7 +223,7 @@ export default function CoachHomePage() {
     if (dojo) return null
     if (r.todayDay === 'no-plan') return <span className="text-gray-500">No plan this week</span>
     if (r.todayDay === 'rest') return <span className="text-gray-500">Rest day</span>
-    return <span className="text-gray-300">{r.todayDay.label}{r.workoutTime ? ` · ${r.workoutTime}` : ''}</span>
+    return <span className="text-gray-300">{r.todayDay.label}{r.workoutTime ? ` · ${workoutTimeLabel(r.workoutTime, country)}` : ''}</span>
   }
 
   const coachLine = (r: TodayRow) => (r.primaryCoach === 'You' ? 'You' : r.primaryCoach ? `Primary: ${r.primaryCoach}` : `No primary ${sw.one.toLowerCase()}`)

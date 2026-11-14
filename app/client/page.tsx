@@ -14,6 +14,7 @@ import { ACTIVITIES, activityValue, activityText } from '@/lib/activities'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
+import { workoutTimeLabel } from '@/lib/today-schedule'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -668,7 +669,7 @@ const handleChangePassword = async () => {
                       </p>
                     )}
                     {activePlan.workout_time && (
-                      <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {activePlan.workout_time}</p>
+                      <p className="text-xs text-orange-400 mb-3">⏰ Workout time: {workoutTimeLabel(activePlan.workout_time, country)}</p>
                     )}
                     {(() => {
                       const planJson = planJsonOf(activePlan)
