@@ -23,6 +23,10 @@ dev and not yet on Mumbai:
 
 **Order matters: 1 → 2 → 3.** File 2 needs file 1 first.
 
+> ⚠️ **Do NOT run `20261110120000_belt_grading.sql`** (the first file in the migrations folder, Phase 1). It already
+> ran on Mumbai on 10 Nov. Running it again stops with `trigger "grading_exams_set_updated_at" … already exists` and
+> changes nothing (one transaction, all undone), but it isn't one of the three. Happened once on 14 Nov: harmless.
+
 Data that differs **on purpose** (not part of this): on dev the QA Dojo has the belt ladder and Grading on (prod
 QA Dojo has neither), and QA Solo's client limit is 2. Leave those as they are.
 
