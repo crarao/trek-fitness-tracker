@@ -106,11 +106,9 @@ export function countRange(plans: SharePlan[], sessions: ShareSession[], from: s
     if (!dated.length) {
       // Undatable plan ("Day 1, Day 2…"): counted whole in the range its start falls in
       if (!summary.workoutDays || start < from || start > to) continue
-      const a = planAdherence(p, sessions)
-      const week = new Set(sessions.filter(s => !s.weekly_plan_id).map(s => s.session_date.slice(0, 10))
-        .filter(d => d >= start && d <= addDays(start, 6)))
+      // planAdherence already counts sessions with no plan link inside the plan's week (14 Nov)
       out.planned += summary.workoutDays
-      out.done += Math.min(summary.workoutDays, (a?.done ?? 0) + week.size)
+      out.done += planAdherence(p, sessions)?.done ?? 0
       continue
     }
 

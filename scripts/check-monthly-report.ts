@@ -71,6 +71,10 @@ check('Overlap: newer plan owns 12–15 (Mon 9, Tue 10 from p2 + Thu 12 from p3 
 const textPlan = { id: 't1', week_start: '2026-09-07', plan_details: 'Day 1 · Legs\n- Squat\n\nDay 2 · Push\n- Bench', plan_json: null }
 const sep = summarizeMonth({ plans: [textPlan], sessions: [s('2026-09-08', null, 't1'), s('2026-09-09', null, 't1')], month: '2026-09', today: '2026-11-14' })
 check('Undatable text plan counts in its month (2 of 2)', sep.planned === 2 && sep.done === 2, sep)
+const sepMix = summarizeMonth({ plans: [textPlan], sessions: [s('2026-09-08', null, 't1'), s('2026-09-10', null, null)], month: '2026-09', today: '2026-11-14' })
+check('Undatable plan: an unlinked session in its week counts once (2 of 2, not 3 capped)', sepMix.planned === 2 && sepMix.done === 2, sepMix)
+const sepOne = summarizeMonth({ plans: [textPlan], sessions: [s('2026-09-10', null, null)], month: '2026-09', today: '2026-11-14' })
+check('Undatable plan: one unlinked session = 1 of 2 (not counted twice)', sepOne.done === 1, sepOne)
 
 // No plan at all: sessions only
 const noPlan = summarizeMonth({ plans: [], sessions: [s('2026-08-03', null, null), s('2026-08-20', null, null)], month: '2026-08', today: '2026-11-14' })
