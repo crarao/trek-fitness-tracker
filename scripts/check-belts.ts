@@ -1,7 +1,12 @@
 // Prints the belt rules (lib/belts.ts) for sample inputs, to read the results. Fails (exit 1) if a rule gives the wrong answer.
 //   npx tsc scripts/check-belts.ts --outDir /tmp/cb --module commonjs --target es2020 --skipLibCheck && node /tmp/cb/scripts/check-belts.js
 
-import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate } from '../lib/belts'
+import { type BeltRank, beltLabel, beltOptions, defaultBeltId, gradeSource, gradingOn, ordinal, validIsoDate,
+  beltsById, beltChipText, isLightBelt, gradeSourceLabel, sortGradeHistory,
+  nextBelt, daysBetween, eligibility, toGoText, notEligibleText, splitExams, examStatusLabel, examDetailsChanged, attendanceShare,
+  beltFee, feeSummary,
+  gradingNoticeText, gradingResultText, gradingCancelText, gradingRecipient, resultsReady, gradingRpcMessage, waLink,
+  STANDARD_BELTS, beltFields } from '../lib/belts'
 
 let failed = 0
 const check = (label: string, value: unknown, ok: boolean) => {
@@ -29,6 +34,140 @@ check('grading on only when true', [gradingOn({ grading_enabled: true }), gradin
   gradingOn({ grading_enabled: true }) && !gradingOn({}) && !gradingOn(null) && !gradingOn({ grading_enabled: false }))
 check('dates: 2026-03-01 ok, 2026-02-30 / 1-3-2026 / "" refused', '',
   validIsoDate('2026-03-01') && !validIsoDate('2026-02-30') && !validIsoDate('1-3-2026') && !validIsoDate(''))
+
+// Phase 2, PR A: chips + history
+check('chip: White', beltChipText(ladder[1]), beltChipText(ladder[1]) === 'White')
+check('chip: 8 kyu', beltChipText(ladder[2]), beltChipText(ladder[2]) === '8 kyu')
+check('belts by id', Object.keys(beltsById(ladder)).sort(), beltsById(ladder).yellow?.belt_name === 'Yellow' && Object.keys(beltsById(ladder)).length === 4)
+check('light: white #FFF / yellow #FACC15', [isLightBelt('#FFF'), isLightBelt('#FACC15')], isLightBelt('#FFF') && isLightBelt('#ffffff') && isLightBelt('#FACC15'))
+check('dark: brown / blue / black', [isLightBelt('#78350F'), isLightBelt('#1D4ED8'), isLightBelt('#000000')],
+  !isLightBelt('#78350F') && !isLightBelt('#1D4ED8') && !isLightBelt('#000000'))
+check('bad colour → treated as light (ring)', isLightBelt('nope'), isLightBelt('nope') && isLightBelt(null))
+const labels = ['joined', 'backfill', 'manual', 'exam', 'other'].map(gradeSourceLabel)
+check('source labels', labels, labels.join('|') === 'Joined|Entered later|Changed|Exam|')
+const hist = sortGradeHistory([
+  { id: 'a', achieved_on: '2026-01-05', created_at: '2026-11-10T10:00:00Z' },
+  { id: 'b', achieved_on: '2026-04-05', created_at: '2026-11-10T10:05:00Z' },
+  { id: 'c', achieved_on: null, created_at: '2026-11-11T09:00:00Z' },
+  { id: 'd', achieved_on: '2026-04-05', created_at: '2026-11-10T11:00:00Z' },
+])
+check('history newest change first', hist.map(h => h.id), hist.map(h => h.id).join() === 'c,d,b,a')
+// 12 Nov (test B6): White (1 Aug, joined) → Yellow (10 Nov) → back to White (1 Aug): the latest change is on top
+const b6 = sortGradeHistory([
+  { id: 'joined', achieved_on: '2026-08-01', created_at: '2026-11-12T09:00:00Z' },
+  { id: 'yellow', achieved_on: '2026-11-10', created_at: '2026-11-12T09:05:00Z' },
+  { id: 'white-again', achieved_on: '2026-08-01', created_at: '2026-11-12T09:10:00Z' },
+])
+check('B6: back to White is the top row', b6.map(h => h.id), b6.map(h => h.id).join() === 'white-again,yellow,joined')
+
+// Phase 2, PR B: next belt, eligibility (30-day months, to the exam date), exams list, attendance share
+const full: BeltRank[] = [
+  { id: 'w', rank_order: 0, belt_name: 'White', kyu: null, color_hex: '#FFFFFF', is_active: true, min_months_from_previous: null },
+  { id: 'y', rank_order: 1, belt_name: 'Yellow', kyu: 8, color_hex: '#FACC15', is_active: true, min_months_from_previous: 3 },
+  { id: 'o', rank_order: 2, belt_name: 'Orange', kyu: 7, color_hex: '#F97316', is_active: false, min_months_from_previous: 3 },
+  { id: 'g', rank_order: 3, belt_name: 'Green', kyu: 6, color_hex: '#16A34A', is_active: true, min_months_from_previous: 3 },
+  { id: 'b2', rank_order: 7, belt_name: 'Brown', kyu: 2, color_hex: '#78350F', is_active: true, min_months_from_previous: 6 },
+]
+check('next after White = Yellow', nextBelt(full, 'w')?.id, nextBelt(full, 'w')?.id === 'y')
+check('next skips an inactive belt (Orange off)', nextBelt(full, 'y')?.id, nextBelt(full, 'y')?.id === 'g')
+check('top belt → none', nextBelt(full, 'b2'), nextBelt(full, 'b2') === null)
+check('no belt → none', nextBelt(full, null), nextBelt(full, null) === null)
+check('daysBetween 1 Jan → 1 Apr 2026 = 90', daysBetween('2026-01-01', '2026-04-01'), daysBetween('2026-01-01', '2026-04-01') === 90)
+check('daysBetween across a DST-free UTC math', daysBetween('2026-03-01', '2026-02-27'), daysBetween('2026-03-01', '2026-02-27') === -2)
+const el = (cur: string | null, since: string | null, exam: string) => eligibility({ ranks: full, currentRankId: cur, achievedOn: since, examDate: exam })
+check('90 days on White by the exam → eligible', el('w', '2026-01-01', '2026-04-01').kind, el('w', '2026-01-01', '2026-04-01').kind === 'eligible')
+const e89 = el('w', '2026-01-02', '2026-04-01')
+check('89 days → not yet, 1 day to go', e89, e89.kind === 'not-yet' && e89.daysToGo === 1 && notEligibleText(e89) === '1 day to go')
+const e40 = el('w', '2026-03-22', '2026-04-01')
+check('10 days in → "3 mo to go" (80 days, rounded up)', notEligibleText(e40), notEligibleText(e40) === '3 mo to go')
+const eMiss = el('w', null, '2026-04-01')
+check('belt date missing → eligible with a warning', eMiss, eMiss.kind === 'eligible' && eMiss.dateMissing)
+check('no belt → set it first', notEligibleText(el(null, null, '2026-04-01')), notEligibleText(el(null, null, '2026-04-01')) === 'Set the belt on their profile first')
+check('top belt → Highest belt', notEligibleText(el('b2', '2020-01-01', '2026-04-01')), notEligibleText(el('b2', '2020-01-01', '2026-04-01')) === 'Highest belt')
+const eG = el('y', '2026-01-01', '2026-04-01')
+check('Yellow → Green (Orange off), uses Green\'s wait', eG, eG.kind === 'eligible' && eG.to.id === 'g')
+check('to-go texts', [toGoText(1), toGoText(12), toGoText(30), toGoText(31)], [toGoText(1), toGoText(12), toGoText(30), toGoText(31)].join('|') === '1 day to go|12 days to go|1 mo to go|2 mo to go')
+
+const exams = [
+  { id: 'a', exam_date: '2026-11-20', status: 'scheduled' }, { id: 'b', exam_date: '2026-12-05', status: 'scheduled' },
+  { id: 'c', exam_date: '2026-11-01', status: 'completed' }, { id: 'd', exam_date: '2026-11-25', status: 'cancelled' },
+  { id: 'e', exam_date: '2026-11-08', status: 'scheduled' },
+]
+const sp = splitExams(exams, '2026-11-11')
+check('upcoming by date; past newest first', [sp.upcoming.map(x => x.id), sp.past.map(x => x.id)],
+  sp.upcoming.map(x => x.id).join() === 'a,b' && sp.past.map(x => x.id).join() === 'd,e,c')
+check('status labels', exams.map(x => examStatusLabel(x, '2026-11-11')),
+  exams.map(x => examStatusLabel(x, '2026-11-11')).join('|') === 'Scheduled|Scheduled|Completed|Cancelled|Results due')
+const ex = { exam_date: '2026-11-20', exam_time: '09:00:00', venue: 'Kokapet' }
+check('details changed: same time as 09:00 / venue spaces → no', examDetailsChanged(ex, { ...ex, exam_time: '09:00', venue: ' Kokapet ' }),
+  !examDetailsChanged(ex, { ...ex, exam_time: '09:00', venue: ' Kokapet ' }))
+check('details changed: date / time / venue → yes', '', examDetailsChanged(ex, { ...ex, exam_date: '2026-11-21' })
+  && examDetailsChanged(ex, { ...ex, exam_time: '10:00' }) && examDetailsChanged(ex, { ...ex, venue: 'Gachibowli' }))
+// Mon/Wed/Fri batch, 2–15 Nov 2026 (2 Nov is a Monday): 6 classes; came on 4 of them (+ a duplicate, + one before the start)
+const share = attendanceShare({ attended: ['2026-11-02', '2026-11-04', '2026-11-04', '2026-11-09', '2026-11-13', '2026-10-30'],
+  homeDays: ['Mon', 'Wed', 'Fri'], from: ['2026-11-02', null, '2026-10-01'], until: '2026-11-15' })
+check('attendance 4 of 6 = 67%', share, share.attended === 4 && share.scheduled === 6 && share.pct === 67)
+const noHome = attendanceShare({ attended: ['2026-11-02'], homeDays: null, from: ['2026-11-01'], until: '2026-11-15' })
+check('no home batch → count only, no %', noHome, noHome.attended === 1 && noHome.pct === null)
+
+// Fees per belt: Brown belts cost more, the rest = the exam fee
+const feeExam = { fee_amount: 500, belt_fees: { b2: 800 } }
+check('belt fee: own (Brown 2nd kyu 800)', beltFee(feeExam, 'b2'), beltFee(feeExam, 'b2') === 800)
+check('belt fee: else exam fee (500)', beltFee(feeExam, 'y'), beltFee(feeExam, 'y') === 500)
+check('belt fee: none at all → null', beltFee({ fee_amount: null, belt_fees: null }, 'y'), beltFee({ fee_amount: null, belt_fees: null }, 'y') === null)
+check('belt fee: before the SQL (no belt_fees) → exam fee', beltFee({ fee_amount: 300 }, 'y'), beltFee({ fee_amount: 300 }, 'y') === 300)
+const money = (n: number) => `₹${n}`
+check('fee summary', feeSummary(feeExam, full, money), feeSummary(feeExam, full, money) === '₹500 · Brown – 2nd kyu ₹800')
+check('fee summary: no fee', feeSummary({ fee_amount: null }, full, money), feeSummary({ fee_amount: null }, full, money) === 'No fee')
+
+// PR C: parent messages (India: Namaste; no he / she / they), recipient, Save results readiness, rpc replies
+const kid = { full_name: 'Aarav Reddy', phone: '+919876500001', guardian_name: 'Priya Reddy', guardian_phone: '+919876500002' }
+const white = full[0], yellow = full[1]
+const exam = { exam_date: '2026-11-22', exam_time: '09:30:00', venue: 'Kokapet', notes: 'Full uniform, 15 minutes early', fee_amount: 500, belt_fees: null }
+const notice = gradingNoticeText({ student: kid, exam, from: white, to: yellow, gymName: 'DSSKA', currency: 'INR', country: 'IN', upiId: 'dsska@okicici' })
+console.log('\n' + notice + '\n')
+check('notice: Namaste to the parent', notice.split('\n')[0], notice.startsWith('Namaste Priya 🙏\nAarav\'s belt grading is on *Sun, 22 Nov, 9:30 am* at Kokapet.'))
+check('notice: belts, fee, UPI, notes, sign-off', '', notice.includes('Grading: White → *Yellow – 8th kyu*') && notice.includes('Exam fee: *₹500*')
+  && notice.includes('Pay via UPI: *dsska@okicici*') && notice.includes('Full uniform') && notice.endsWith('— DSSKA 🥋'))
+const free = gradingNoticeText({ student: kid, exam: { ...exam, fee_amount: null, notes: null }, from: white, to: yellow, gymName: 'DSSKA', currency: 'INR', country: 'IN', upiId: 'dsska@okicici' })
+check('notice: no fee → no fee / UPI lines', '', !free.includes('fee') && !free.includes('UPI'))
+const pass = gradingResultText({ student: kid, result: 'pass', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+const fail = gradingResultText({ student: kid, result: 'fail', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+console.log(pass + '\n\n' + fail + '\n')
+check('pass message', pass, pass === 'Namaste Priya 🙏\nAarav passed the grading on 22 Nov and is now *Yellow – 8th kyu*. Well done! 🎉\n— DSSKA 🥋')
+check('fail message (name repeated, no pronoun)', fail, fail === 'Namaste Priya 🙏\nAarav worked hard at the grading on 22 Nov. Aarav stays White for now and can try again at the next grading. Keep practising!\n— DSSKA 🥋'
+  && !/\b(he|she|they|his|her|their)\b/i.test(fail))
+const noParent = { full_name: 'Ravi Kumar', phone: '+919876500003' }
+const self = gradingResultText({ student: noParent, result: 'pass', examDate: '2026-11-22', from: white, to: yellow, gymName: 'DSSKA', country: 'IN' })
+check('no parent → to the student ("you")', self, self.startsWith('Namaste Ravi 🙏\nYou passed') && gradingRecipient(noParent, 'IN').waDigits === '919876500003')
+check('parent phone wins', gradingRecipient(kid, 'IN'), gradingRecipient(kid, 'IN').waDigits === '919876500002' && gradingRecipient(kid, 'IN').toParent)
+check('no phone at all → no WhatsApp', gradingRecipient({ full_name: 'X' }, 'IN').waDigits, gradingRecipient({ full_name: 'X' }, 'IN').waDigits === null)
+const cancel = gradingCancelText({ student: kid, examDate: '2026-11-22', gymName: 'DSSKA', country: 'IN' })
+check('cancel message', cancel, cancel === "Namaste Priya 🙏\nAarav's belt grading on 22 Nov is cancelled. We will share the new date soon.\n— DSSKA 🥋")
+check('US keeps Hi', '', gradingCancelText({ student: kid, examDate: '2026-11-22', gymName: 'Peak', country: 'US' }).startsWith("Hi Priya, Aarav's"))
+check('wa link encodes text', waLink('919', 'a b&c'), waLink('919', 'a b&c') === 'https://wa.me/919?text=a%20b%26c')
+check('results ready only when every student is marked (removed ignored)', '',
+  resultsReady([{ result: 'pass', removed_at: null }, { result: 'fail', removed_at: null }, { result: null, removed_at: 'x' }])
+  && !resultsReady([{ result: 'pass', removed_at: null }, { result: null, removed_at: null }]) && !resultsReady([]))
+check('rpc replies', '', gradingRpcMessage({ ok: true, promoted: 3, failed: 1 }) === 'Saved ✓ 3 promoted, 1 stay.'
+  && gradingRpcMessage({ ok: false, error: 'belt_changed', names: ['Ravi'] }).includes('Ravi')
+  && gradingRpcMessage({ ok: true, undone: 2 }) === 'Undone: 2 belts put back.')
+
+// PR D: standard ladder, belt form, dan labels
+check('standard ladder: 9 belts, White first, Brown 1st kyu last (6 months)', STANDARD_BELTS.length,
+  STANDARD_BELTS.length === 9 && STANDARD_BELTS[0].belt_name === 'White' && STANDARD_BELTS[8].kyu === 1 && STANDARD_BELTS[8].min_months_from_previous === 6)
+const black = { belt_name: 'Black', kyu: null, dan: 1 }
+check('dan label + chip', [beltLabel(black), beltChipText(black)], beltLabel(black) === 'Black – 1st dan' && beltChipText(black) === '1 dan')
+const bd = { id: null, belt_name: ' Black ', grade: 'dan' as const, number: '1', color_hex: '#111111', months: '12' }
+const bf = beltFields(bd, true)
+check('belt form: Black 1st dan', bf, typeof bf !== 'string' && bf.belt_name === 'Black' && bf.dan === 1 && bf.kyu === null && bf.color_hex === '#111111')
+check('belt form: dan before the SQL → refused', beltFields(bd, false), typeof beltFields(bd, false) === 'string')
+check('belt form: kyu 25 / no name / bad months refused', '',
+  typeof beltFields({ ...bd, grade: 'kyu', number: '25' }, true) === 'string'
+  && typeof beltFields({ ...bd, belt_name: '' }, true) === 'string'
+  && typeof beltFields({ ...bd, months: '2.5' }, true) === 'string')
+const wf = beltFields({ ...bd, belt_name: 'White', grade: 'none', number: '', months: '' }, false)
+check('belt form: White (no number, no wait), no dan key before the SQL', wf, typeof wf !== 'string' && wf.kyu === null && !('dan' in wf) && wf.min_months_from_previous === null)
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)

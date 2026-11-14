@@ -159,9 +159,11 @@ export async function POST(request: Request) {
     })
     if (historyError) { console.error('Belt history insert error:', historyError); warning = "Belt saved, but its history row wasn't" }
   } else if (beltChange?.dateChanged) {
-    const { data: latest } = await supabaseAdmin.from('student_grades').select('id')
+    // The latest row for this belt that wasn't undone (voided_at: Phase 2 SQL; select('*') works before and after it)
+    const { data: rows } = await supabaseAdmin.from('student_grades').select('*')
       .eq('student_id', user_id).eq('rank_id', beltChange.rankId)
-      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .order('created_at', { ascending: false }).limit(20)
+    const latest = ((rows || []) as { id: string; voided_at?: string | null }[]).find(r => !r.voided_at)
     if (latest) {
       const { error: dateError } = await supabaseAdmin.from('student_grades').update({ achieved_on: beltChange.date }).eq('id', latest.id)
       if (dateError) { console.error('Belt history date error:', dateError); warning = "Belt date saved, but its history row wasn't updated" }

@@ -1,6 +1,6 @@
 // Progress report as a PDF the coach downloads and sends however they like (WhatsApp, email…).
 // Drawn on A4-sized canvases (header, the week's numbers, the coach's message, charts for the
-// last 8 weeks) and saved with lib/pdf.ts. Browser only: load it with `await import()` when the
+// last 8 weeks; or, for a monthly report (input.month), the month's numbers and charts per month) and saved with lib/pdf.ts. Browser only: load it with `await import()` when the
 // coach taps Download PDF, so Chart.js and this code aren't in the page's first download.
 
 import { type Country, formatDate } from './locale'
@@ -19,9 +19,16 @@ export type ProgressPdfInput = {
   weekStart: string                                  // 'YYYY-MM-DD'
   country: Country
   text: string                                       // the coach's (edited) message
-  week: WeekSummary
-  fourWeeks: { done: number; planned: number } | null // plan days done over the last 4 weeks
-  totals: { start: string; sessions: number; minutes: number }[] // per week, oldest first
+  week?: WeekSummary                                 // weekly report (left out for a monthly one)
+  fourWeeks?: { done: number; planned: number } | null // plan days done over the last 4 weeks
+  totals?: { start: string; sessions: number; minutes: number }[] // per week, oldest first
+  // Monthly report (Share progress → Month, lib/monthly-report.ts): replaces the week's subtitle,
+  // tiles and weekly charts with the month's range, tiles and per-month charts
+  month?: {
+    rangeText: string                                // "1–30 Nov 2026", "1–14 Nov 2026 (so far)"
+    tiles: [string, string][]                        // [label, value]
+    months: { month: string; sessions: number; minutes: number }[] // "2026-11", oldest first
+  } | null
   plan?: { weekStart: string; json: PlanJson } | null // the week's day-by-day plan, if it has one
   strength?: StrengthReport | null                    // weight per exercise per month (#80), from lib/exercise-logs.ts
   showCalories?: boolean                              // calorie tile and the message's calorie part; off unless true (5 Nov)
@@ -183,7 +190,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   ctx.fillStyle = GRAY
   ctx.font = font(24, 500)
   ctx.textAlign = 'right'
-  ctx.fillText('Progress report', W - M, y + 38)
+  ctx.fillText(input.month ? 'Monthly report' : 'Progress report', W - M, y + 38)
   ctx.textAlign = 'left'
   y += 100
   ctx.fillStyle = DARK
@@ -192,7 +199,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
   y += 46
   ctx.fillStyle = GRAY
   ctx.font = font(26)
-  ctx.fillText(`Week of ${formatDate(input.weekStart, input.country, 'medium')}`, M, y)
+  ctx.fillText(input.month ? input.month.rangeText : `Week of ${formatDate(input.weekStart, input.country, 'medium')}`, M, y)
   y += 40
   ctx.fillStyle = '#e5e7eb'
   ctx.fillRect(M, y, W - 2 * M, 2)
@@ -200,7 +207,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
 
   // The week's numbers
   const { week, fourWeeks } = input
-  const tiles: [string, string][] = [
+  const tiles: [string, string][] = input.month ? input.month.tiles : !week ? [] : [
     week.planned ? ['This week', `${week.done} of ${week.planned} days`] : ['This week', `${week.sessions.length} session${week.sessions.length === 1 ? '' : 's'}`],
     ...(fourWeeks && fourWeeks.planned ? [['Last 4 weeks', `${Math.round((fourWeeks.done / fourWeeks.planned) * 100)}%`] as [string, string]] : []),
     ['Minutes', week.minutes.toLocaleString('en-US')],
@@ -238,16 +245,21 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     y += 40
   }
 
-  // Charts: last 8 weeks
-  const labels = input.totals.map(t => formatDate(t.start, input.country, 'dayMonth'))
+  // Charts: last 8 weeks, or the last months for a monthly report (with the year when they cross one)
+  const months = input.month?.months
+  const withYear = !!months && new Set(months.map(m => m.month.slice(0, 4))).size > 1
+  const series = months
+    ? months.map(m => ({ label: formatDate(`${m.month}-01`, input.country, withYear ? 'monthYear' : 'month'), sessions: m.sessions, minutes: m.minutes }))
+    : (input.totals ?? []).map(t => ({ label: formatDate(t.start, input.country, 'dayMonth'), sessions: t.sessions, minutes: t.minutes }))
+  const labels = series.map(t => t.label)
   // Side by side, so a usual week fits on one page
   const chartGap = 40
   const chartW = (W - 2 * M - chartGap) / 2
   const chartH = 320
   ensure(50 + chartH)
   const charts = [
-    ['Sessions per week', 'bar', input.totals.map(t => t.sessions)],
-    ['Minutes per week', 'line', input.totals.map(t => t.minutes)],
+    [months ? 'Sessions per month' : 'Sessions per week', 'bar', series.map(t => t.sessions)],
+    [months ? 'Minutes per month' : 'Minutes per week', 'line', series.map(t => t.minutes)],
   ] as const
   for (const [i, [title, kind, data]] of charts.entries()) {
     const x = M + i * (chartW + chartGap)

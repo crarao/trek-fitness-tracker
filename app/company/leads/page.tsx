@@ -3,6 +3,7 @@
 // Leads / enquiry tracking (ROADMAP #52): walk-ins and DMs, followed up on WhatsApp, converted to members.
 // Leads are never deleted (CLAUDE.md Rule #1, no delete permission on the table): they end as Joined or Lost.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -184,7 +185,7 @@ export default function LeadsPage() {
 
   const handleWhatsApp = () => {
     if (!editing?.phone) return
-    const text = leadMessage(editing, companyName, businessType)
+    const text = leadMessage(editing, companyName, businessType, country)
     // Open first (inside the tap, so phones don't block it), then record the contact
     window.open(`https://wa.me/${dialCode(country ?? 'IN')}${editing.phone}?text=${encodeURIComponent(text)}`, '_blank')
     saveLead(editing.id, { last_contacted_at: new Date().toISOString() })
@@ -250,6 +251,7 @@ export default function LeadsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"
@@ -509,7 +511,7 @@ export default function LeadsPage() {
                 const details = [sourceLabel(lead.source), interestLabel(lead.interest)].filter(Boolean).join(' · ')
                 const fu = followUpText(lead)
                 return (
-                  <li key={lead.id}>
+                  <li key={lead.id} data-testid="lead-row" data-name={lead.name}>
                     <button type="button" onClick={() => openLead(lead)}
                       className="w-full text-left px-4 sm:px-6 py-3.5 hover:bg-gray-800/50 active:bg-gray-800 transition flex items-start justify-between gap-3">
                       <span className="min-w-0 flex-1">

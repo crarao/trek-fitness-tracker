@@ -1,5 +1,6 @@
 'use client'
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
@@ -20,11 +21,15 @@ import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks, linkForDate } from '@/lib/adherence'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
 import { buildProgressMessage, buildSessionMessage, maskPhone, summarizeWeek, planForWeek, recentWeeksAdherence, type ShareClient } from '@/lib/progress-share'
+import { monthOptions, defaultMonth, summarizeMonth, monthlyTotals, buildMonthlyMessage, monthRangeText, strengthGains } from '@/lib/monthly-report'
 import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
+import { workoutTimeLabel } from '@/lib/today-schedule'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
-import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions } from '@/lib/belts'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
+  type StudentGrade, gradeSourceLabel, visibleGradeHistory } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
@@ -245,6 +250,8 @@ export default function ClientDetailPage() {
   // Belt grading (companies.grading_enabled; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
   const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
   const beltsOn = beltRanks.length > 0
+  // Belt history (student_grades, newest first): staff and senseis read it; null = not loaded / couldn't be read
+  const [beltHistory, setBeltHistory] = useState<StudentGrade[] | null>(null)
   // Dojo branches & batches (db/2026-11-03-branches-batches.md): loaded with the client; empty / off before the SQL
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
@@ -340,6 +347,9 @@ export default function ClientDetailPage() {
   // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
   const [shareOpen, setShareOpen] = useState(false)
   const [shareWeek, setShareWeek] = useState<'this' | 'last'>(() => ([1, 2].includes(new Date().getDay()) ? 'last' : 'this'))
+  // Week or Month report (gyms; dojos with attendance keep their own This / Last month). '' = the default month.
+  const [shareKind, setShareKind] = useState<'week' | 'month'>('week')
+  const [shareMonth, setShareMonth] = useState('')
   const [shareNote, setShareNote] = useState('')
   const [shareText, setShareText] = useState('')
   const [shareEdited, setShareEdited] = useState(false) // coach typed in the preview: keep their text
@@ -534,10 +544,16 @@ export default function ClientDetailPage() {
         if (clientData?.company_id) setCompanyId(clientData.company_id)
         // Belt grading on: the gym's belts (Profile tab); an error = none yet, fields stay hidden
         if (clientData?.company_id && gradingOn((clientData as { companies?: { grading_enabled?: boolean | null } }).companies)) {
-          const { data: ranks, error: ranksError } = await supabase.from('belt_ranks').select(BELT_RANK_COLUMNS)
-            .eq('company_id', clientData.company_id).order('rank_order')
+          const [{ data: ranks, error: ranksError }, history] = await Promise.all([
+            supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', clientData.company_id).order('rank_order'),
+            // Belt history: reloaded with the client, so a belt changed with Edit shows its new row
+            // select('*'): voided_at (Undo results) is read once the Phase 2 SQL ran, and works before it
+            supabase.from('student_grades').select('*').eq('student_id', clientId),
+          ])
           if (ranksError) console.error('Belt ranks error:', ranksError)
           else setBeltRanks((ranks || []) as BeltRank[])
+          if (history.error) console.error('Belt history error:', history.error)
+          setBeltHistory(history.error ? null : visibleGradeHistory((history.data || []) as StudentGrade[]))
         }
         // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
         const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
@@ -1533,6 +1549,18 @@ const handleResetPassword = async () => {
     const weekStart = shareWeek === 'this' ? weekStartIso : lastWeekStartIso
     return { plan: planForWeek(plans, weekStart), weekStart }
   }
+  // Month picker: this month back to the month they joined or first trained (at most 12)
+  const shareMonthOptions = () => monthOptions({
+    since: [client?.created_at, sessions[0]?.session_date].filter((d): d is string => !!d).sort()[0] ?? null,
+    country: country ?? 'IN',
+  })
+  const pickedMonth = () => {
+    const options = shareMonthOptions()
+    return options.some(o => o.month === shareMonth) ? shareMonth : defaultMonth(options)
+  }
+  const shareMonthSummary = () => summarizeMonth({
+    plans, sessions: countSessions, month: pickedMonth(), weightKg: client?.weight_kg, businessType: company?.business_type,
+  })
   const shareMessage = () => {
     // Dojo with attendance: classes attended this / last month instead of the session week
     if (attendanceMode && client) {
@@ -1541,6 +1569,15 @@ const handleResetPassword = async () => {
         client, companyName: company?.name || '', staffName: coachName, rows: attRows,
         homeBatch: batchList.find(b => b.id === client.batch_id) ?? null, today,
         month: shareWeek === 'this' ? today : addDays(monthRange(today).from, -1), since: client.created_at ?? null, note: shareNote, country,
+      })
+    }
+    // Monthly report: the chosen calendar month (lib/monthly-report.ts)
+    if (shareKind === 'month' && client) {
+      const summary = shareMonthSummary()
+      return buildMonthlyMessage({
+        client: client as ShareClient, companyName: company?.name || '', businessType: company?.business_type, coachName,
+        summary, gains: exerciseLogsOn ? strengthGains(datedLogs, exLibrary, summary.month, summary.upTo) : [],
+        note: shareNote, country: country ?? 'IN',
       })
     }
     const { plan, weekStart } = shareWeekPlan()
@@ -1561,12 +1598,36 @@ const handleResetPassword = async () => {
     if (!client) return
     setMakingPdf(true)
     try {
+      const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
+      if (shareKind === 'month') {
+        // Monthly report: the month's tiles, sessions / minutes for the last 6 months, the strength
+        // table up to the month's last counted day; no day-by-day plan (a month has several)
+        const m = shareMonthSummary()
+        const { downloadProgressPdf } = await import('@/lib/progress-pdf')
+        await downloadProgressPdf({
+          companyName: company?.name || '', clientName: client.full_name, weekStart: m.from, country: country ?? 'IN', text,
+          month: {
+            rangeText: monthRangeText(m, country ?? 'IN'),
+            tiles: [
+              ...(m.planned ? [['Plan days', `${m.done} of ${m.planned}`] as [string, string]] : []),
+              ['Sessions', String(m.sessions)],
+              ['Minutes', m.minutes.toLocaleString('en-US')],
+              ['Active days', String(m.activeDays)],
+            ],
+            months: monthlyTotals(sessions, m.month, 6),
+          },
+          strength: exerciseLogsOn ? strengthReport(datedLogs, exLibrary, m.upTo) : null,
+          showCalories: false, // no calories in the PDF (5 Nov); WhatsApp keeps them
+        }, `${safeName}-progress-${m.month}.pdf`)
+        showToast('✓ PDF downloaded')
+        setMakingPdf(false)
+        return
+      }
       const { plan, weekStart } = shareWeekPlan()
       const week = summarizeWeek({ plan, sessions: countSessions, weekStart, weightKg: client.weight_kg, businessType: company?.business_type })
       // Last 4 Monday weeks up to this week, counted like the week card (lib/progress-share.ts)
       const four = recentWeeksAdherence({ plans, sessions: countSessions, weekStart })
       const { downloadProgressPdf } = await import('@/lib/progress-pdf')
-      const safeName = client.full_name.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'client'
       await downloadProgressPdf({
         companyName: company?.name || '', clientName: client.full_name, weekStart, country: country ?? 'IN',
         text, week, fourWeeks: four, totals: weeklyTotals(sessions, weekStart, 8), // same weeks as the Progress tab
@@ -1683,6 +1744,27 @@ const handleResetPassword = async () => {
           <button type="button" onClick={() => setShareOpen(false)} aria-label="Close"
             className="text-gray-500 hover:text-white text-lg leading-none px-1">✕</button>
         </div>
+        {!attendanceMode && (
+          <div className="flex gap-1 bg-gray-800 p-1 rounded-xl" role="group" aria-label="Report for">
+            {(['week', 'month'] as const).map(k => (
+              <button key={k} type="button" aria-pressed={shareKind === k} data-testid={`share-kind-${k}`}
+                onClick={() => { setShareKind(k); setShareEdited(false) }}
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition ${shareKind === k ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                {k === 'week' ? 'Week' : 'Month'}
+              </button>
+            ))}
+          </div>
+        )}
+        {!attendanceMode && shareKind === 'month' ? (
+          <div>
+            <label htmlFor="share-month" className="sr-only">Month</label>
+            <select id="share-month" data-testid="share-month" value={pickedMonth()}
+              onChange={e => { setShareMonth(e.target.value); setShareEdited(false) }}
+              className="w-full min-h-[44px] bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm">
+              {shareMonthOptions().map(o => <option key={o.month} value={o.month}>{o.label}</option>)}
+            </select>
+          </div>
+        ) : (
         <div className="flex gap-1 bg-gray-800 p-1 rounded-xl">
           {(['this', 'last'] as const).map(w => (
             <button key={w} type="button" onClick={() => setShareWeek(w)}
@@ -1691,6 +1773,7 @@ const handleResetPassword = async () => {
             </button>
           ))}
         </div>
+        )}
         <textarea value={shareNote} onChange={e => setShareNote(e.target.value)} rows={2} maxLength={300}
           placeholder="Add a note (optional)"
           className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-green-600 border border-gray-700 text-sm resize-none" />
@@ -1726,6 +1809,7 @@ const handleResetPassword = async () => {
         </div>
         {!attendanceMode && (
           <div className="space-y-2">
+            {shareKind === 'week' && (
             <label className="flex items-start gap-2.5 text-xs text-gray-300 cursor-pointer">
               <input type="checkbox" checked={pdfIncludePlan} onChange={e => choosePdfIncludePlan(e.target.checked)}
                 className="mt-0.5 w-4 h-4 accent-green-600 shrink-0" />
@@ -1734,6 +1818,7 @@ const handleResetPassword = async () => {
                 <span className="block text-gray-500">Exercises with sets and weights, day by day. Off: daily summary and the strength table only.</span>
               </span>
             </label>
+            )}
             <button type="button" disabled={makingPdf} onClick={() => handleDownloadPdf(text)}
               className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-sm font-medium py-2.5 rounded-xl transition disabled:opacity-50">
               {makingPdf ? 'Making PDF…' : '⬇ Download PDF (message + charts)'}
@@ -1794,6 +1879,7 @@ const handleResetPassword = async () => {
 
   return (
     <div data-testid="page-client" className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
       {newPlanSheetOpen && client && (() => {
         const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'
@@ -1923,6 +2009,7 @@ const handleResetPassword = async () => {
                 <div className="flex-1 min-w-0 pt-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h1 className="text-2xl font-bold text-white leading-tight break-words">{client?.full_name}</h1>
+                    {beltsOn && client && <BeltChip size="md" showNone rank={beltRanks.find(r => r.id === client.current_rank_id)} />}
                     {client?.client_type === 'pt' && !dojo && (
                       <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
                     )}
@@ -1994,7 +2081,7 @@ const handleResetPassword = async () => {
 
       {/* Edit Client Panel */}
       {showEditClient && !isCoach && (
-        <div className="bg-gray-900 border-b border-gray-800 px-6 py-5">
+        <div data-testid="edit-member-panel" className="bg-gray-900 border-b border-gray-800 px-6 py-5">
           <div className="max-w-2xl mx-auto space-y-4">
 
             {/* Client details */}
@@ -2861,7 +2948,7 @@ const handleResetPassword = async () => {
                         <p className="text-[11px] font-semibold text-orange-400 uppercase tracking-wider">This week</p>
                         <p className="text-sm font-semibold text-white mt-0.5">
                           {formatDate(start, country, 'weekday')} – {formatDate(weekEnd(plan.week_start), country, 'weekday')}
-                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {plan.workout_time}</span>}
+                          {plan.workout_time && <span className="text-xs font-normal text-orange-400"> · ⏰ {workoutTimeLabel(plan.workout_time, country)}</span>}
                         </p>
                       </div>
                       <div className="pt-2">{badge}</div>
@@ -2883,7 +2970,7 @@ const handleResetPassword = async () => {
                             {summary.days.length > 0
                               ? `${s(summary.workoutDays, 'workout')}${summary.exercises > 0 ? ` · ${s(summary.exercises, 'exercise')}` : ''}`
                               : 'Text plan'}
-                            {plan.workout_time ? ` · ⏰ ${plan.workout_time}` : ''}
+                            {plan.workout_time ? ` · ⏰ ${workoutTimeLabel(plan.workout_time, country)}` : ''}
                           </span>
                         </span>
                         {badge}
@@ -3577,6 +3664,31 @@ const handleResetPassword = async () => {
                   {rank ? beltLabel(rank) : <span className="text-gray-400">Belt not set</span>}
                   {rank && <span className="text-gray-400"> · since {client.rank_achieved_on ? formatDate(client.rank_achieved_on, country, 'medium') : '—'}</span>}
                 </p>
+                {/* Belt history (student_grades), newest first: belt, since when, how it was set, by whom */}
+                {beltHistory && beltHistory.length > 0 && (
+                  <div className="mt-3" data-testid="belt-history">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Belt history</p>
+                    <ul className="space-y-1.5">
+                      {beltHistory.map(g => {
+                        const r = beltRanks.find(x => x.id === g.rank_id)
+                        const by = g.created_by ? staff.find(x => x.id === g.created_by)?.full_name.trim() : ''
+                        return (
+                          <li key={g.id} data-testid="belt-history-row" className="flex items-start gap-2 text-sm">
+                            <span className="mt-1 shrink-0"><BeltChip rank={r} dotOnly /></span>
+                            <span className="min-w-0">
+                              <span className="text-gray-200">{r ? beltLabel(r) : 'Belt'}</span>
+                              <span className="block text-xs text-gray-500">
+                                {g.achieved_on ? `since ${formatDate(g.achieved_on, country, 'medium')}` : 'date unknown'}
+                                {gradeSourceLabel(g.source) && ` · ${gradeSourceLabel(g.source)}`}
+                                {by && ` · by ${by}`}
+                              </span>
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                )}
               </div>
             )
           })()}

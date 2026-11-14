@@ -6,12 +6,16 @@
 // again asks first; two classes a day stay allowed (exams, extra practice). Same rows as the roll call page.
 // ?date=YYYY-MM-DD opens another day (past days can be corrected; no future days).
 
+import PageNav from '@/app/page-nav'
+import { rememberBranch, rememberedBranch } from '@/lib/branch-memory'
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
 import { memberWord, staffWord } from '@/lib/labels'
 import { loadGymStaff } from '@/lib/gym-staff'
+import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/belts'
+import BeltChip from '@/app/belt-chip'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, type RosterStudent, type DayEntry, ATTENDANCE_COLUMNS, dayBoard, tapRow, addDays, elsewhereText } from '@/lib/attendance'
 
@@ -38,6 +42,8 @@ function TodayAttendance() {
   const [me, setMe] = useState<{ id: string; role: string; companyId: string } | null>(null)
   const [country, setCountry] = useState<Country>('IN')
   const [businessType, setBusinessType] = useState<string | null>(null)
+  // Belt grading on: the gym's belts by id (one read); empty = no chips
+  const [beltById, setBeltById] = useState<Record<string, BeltRank>>({})
   const [branches, setBranches] = useState<Branch[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [students, setStudents] = useState<Student[]>([])
@@ -66,16 +72,18 @@ function TodayAttendance() {
       const { data: profile } = await supabase.from('profiles')
         .select('id, role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
-      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null } | null }).companies
+      const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
       const cId = profile.company_id as string
-      const [br, ba, people, att, staffList] = await Promise.all([
+      const [br, ba, people, att, staffList, ranks] = await Promise.all([
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
-        supabase.from('profiles').select('id, full_name, branch_id, batch_id, archived_at').eq('company_id', cId)
+        supabase.from('profiles').select('id, full_name, branch_id, batch_id, archived_at, current_rank_id').eq('company_id', cId)
           .eq('role', 'client').is('archived_at', null).order('full_name'),
         supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId).eq('class_date', date),
         loadGymStaff(cId),
+        // Belt grading on: the gym's belts once, for the chips
+        gradingOn(co) ? supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId) : null,
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: cId })
@@ -83,10 +91,13 @@ function TodayAttendance() {
       setBusinessType(co?.business_type ?? null)
       if (att.error || br.error || ba.error) { setProblem("Attendance isn't set up yet."); setLoading(false); return }
       setBranches((br.data || []) as Branch[])
+      setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
       setBatches((ba.data || []) as Batch[])
       setStudents((people.data || []) as Student[])
       setRows((att.data || []) as AttendanceRow[])
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
+      if (ranks?.error) console.error('Belt ranks error:', ranks.error)
+      setBeltById(beltsById((ranks && !ranks.error ? ranks.data || [] : []) as BeltRank[]))
       setLoading(false)
     })()
     return () => { live = false }
@@ -145,6 +156,7 @@ function TodayAttendance() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white pb-10">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status" className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ${toast.kind === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>{toast.text}</div>
@@ -179,7 +191,7 @@ function TodayAttendance() {
             </div>
             {!loading && !problem && (
               <p className="text-sm shrink-0 text-right">
-                <span className="text-green-400 font-bold text-lg">{board.came}</span> <span className="text-gray-500">came</span>
+                <span data-testid="came-count" className="text-green-400 font-bold text-lg">{board.came}</span> <span className="text-gray-500">came</span>
                 {board.twice > 0 && <span className="block text-[11px] text-amber-300">{board.twice} in 2 batches</span>}
               </p>
             )}
@@ -204,7 +216,7 @@ function TodayAttendance() {
             {activeBranches.length > 1 && (
               <div className="flex gap-1.5 flex-wrap">
                 {[{ id: 'all', name: 'All branches' }, ...activeBranches].map(b => (
-                  <button key={b.id} type="button" onClick={() => setBranchFilter(b.id)} aria-pressed={branchFilter === b.id}
+                  <button key={b.id} type="button" onClick={() => { setBranchFilter(b.id); rememberBranch(b.id) }} aria-pressed={branchFilter === b.id}
                     className={`text-xs px-3 py-1.5 rounded-full border ${branchFilter === b.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
                     {b.name}
                   </button>
@@ -253,7 +265,10 @@ function TodayAttendance() {
                               </button>
                             </td>
                             <td className="py-2.5 pr-2 min-w-0">
-                              <span className={`block truncate font-medium ${e.present ? 'text-white' : 'text-gray-300'}`}>{e.student.full_name}</span>
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className={`truncate font-medium ${e.present ? 'text-white' : 'text-gray-300'}`}>{e.student.full_name}</span>
+                                <BeltChip rank={beltById[e.student.current_rank_id || '']} />
+                              </span>
                               {also && <span className="block text-[11px] text-amber-300 truncate">⚠ {e.present ? 'Also came today' : 'Already came today'} · {also}</span>}
                             </td>
                             <td className="py-2.5 pr-4 text-right text-[11px] whitespace-nowrap align-top">

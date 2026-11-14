@@ -110,6 +110,9 @@ test.describe('@smoke', () => {
     await expect(page.getByTestId('page-batches')).toContainText('QA Daily')
     await page.goto(gymUrl('qadojo', '/company/attendance/today'))
     await expect(page.getByTestId('page-attendance-today')).toBeVisible()
+    // Belt grading: the exams page loads (prod QA Dojo has grading off, so it may show the "not switched on" note)
+    await page.goto(gymUrl('qadojo', '/company/grading'))
+    await expect(page.getByTestId('page-grading').or(page.getByText("Belt grading isn't switched on"))).toBeVisible()
   })
 
   test('S14 sensei @smoke', async ({ page }) => {

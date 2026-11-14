@@ -50,3 +50,8 @@ Reference Files/
 /playwright-report/
 /test-results/
 /blob-report/
+
+# Regression tests (reports, failure artifacts, saved logins)
+/playwright-report-regression/
+/test-results-regression/
+/e2e-regression/.auth/

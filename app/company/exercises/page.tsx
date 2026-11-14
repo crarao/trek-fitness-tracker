@@ -5,6 +5,7 @@
 // Exercises are never deleted (CLAUDE.md Rule #1; no delete permission on the table). Plans keep a
 // copy of each exercise's name, so renaming or archiving never changes plans already assigned.
 
+import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -157,6 +158,7 @@ export default function ExercisesPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <PageNav />
       {toast && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
           <div role="status"

@@ -106,3 +106,14 @@ export function phonePlaceholder(country: Country): string {
   if (country === 'AE') return 'Phone, e.g. 50 123 4567'
   return 'Phone number (10 digits)'
 }
+
+// Opening of every WhatsApp message (12 Nov: one standard greeting). India: "Namaste Priya 🙏" on its own line,
+// then the message; other countries keep "Hi Priya, …". `rest` is written in lower case after "Hi Priya, ".
+export function greet(name: string | null | undefined, rest: string, country: Country | null | undefined): string {
+  const n = (name || '').trim()
+  if ((country ?? 'IN') === 'IN') {
+    const body = rest.charAt(0).toUpperCase() + rest.slice(1)
+    return `Namaste${n && n !== 'there' ? ` ${n}` : ''} 🙏\n${body}`
+  }
+  return `Hi ${n || 'there'}, ${rest}`
+}

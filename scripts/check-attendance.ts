@@ -69,7 +69,7 @@ const withParent = buildAttendanceMessage({
 })
 console.log(withParent.text.split('\n').map(l => '      ' + l).join('\n'))
 check('to the parent', [withParent.toPhone, withParent.toLabel], ['919876543210', 'Mother (Anu Rao)'])
-check('greets the parent, counts', [withParent.text.startsWith("Hi Anu, here's Ishan's attendance at Demo Dojo"), withParent.text.includes('✅ 3 of 5 classes attended')], [true, true])
+check('greets the parent, counts', [withParent.text.startsWith("Namaste Anu 🙏\nHere's Ishan's attendance at Demo Dojo"), withParent.text.includes('✅ 3 of 5 classes attended')], [true, true])
 const noParent = buildAttendanceMessage({
   client: { full_name: 'Sam Carter', phone: '+14155550134' }, companyName: 'Peak Dojo', rows: [], homeBatch: seniors, today, country: 'US',
 })

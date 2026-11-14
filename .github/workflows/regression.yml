@@ -1,0 +1,67 @@
+# Regression tests against DEV (CLAUDE.md → Regression tests). They write, so only ever dev:
+# the test config refuses any other base URL / Supabase project, and every request is checked again in the browser.
+name: Regression tests (dev)
+
+on:
+  # Vercel posts a deployment status after each deploy; run for a successful Preview deploy (dev and branches off it:
+  # Preview env vars = the dev Supabase project). Production deploys are ignored here (the smoke tests cover them).
+  deployment_status:
+  # By hand (Actions → Regression tests (dev) → Run workflow); defaults to the dev link
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Dev link or a Vercel preview of a dev branch'
+        default: 'https://getcoachboard-git-dev-craraos-projects.vercel.app'
+
+# One run at a time: tests share the dev QA companies
+concurrency:
+  group: regression-dev
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Preview')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check the dev QA logins secret
+        env:
+          QA_LOGINS: ${{ secrets.QA_LOGINS_DEV }}
+        run: |
+          if [ -z "$QA_LOGINS" ]; then
+            echo "::error::Add the QA_LOGINS_DEV secret (dev passwords; same JSON shape as QA_LOGINS): Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run regression tests
+        run: npm run test:regression
+        env:
+          E2E_BASE_URL: ${{ github.event.inputs.base_url || github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          E2E_SUPABASE_URL: https://nnxrmaiinbmxfwzefbwx.supabase.co
+          # Dev QA logins (same phones as prod QA, dev passwords). No fallback to the prod secret: wrong passwords
+          # only cost failed logins against Supabase's rate limit.
+          QA_LOGINS: ${{ secrets.QA_LOGINS_DEV }}
+          # Only if Vercel deployment protection is on for previews (Vercel → Settings → Deployment Protection → bypass)
+          E2E_VERCEL_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-regression
+          path: playwright-report-regression/
+          retention-days: 14

@@ -15,6 +15,7 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 //   /admin             super_admin
 //   /coach             coach
 //   /company/client    company_admin, partner, coach   (coaches open PT clients; RLS limits them to PT)
+//   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS)
 //   /company           company_admin, partner          (incl. /company/leads, /company/exercises, /company/today)
 //   /client            client
 //   /dashboard         any logged-in user (routes by role)
@@ -41,6 +42,8 @@ const SECTIONS: { prefix: string; roles: Role[] }[] = [
   { prefix: '/company/client', roles: ['company_admin', 'partner', 'coach'] },
   // Attendance (#78): senseis mark classes too (the month view is read-only for them: no money on it)
   { prefix: '/company/attendance', roles: ['company_admin', 'partner', 'coach'] },
+  // Belt grading exams: senseis read them (results), only owner / partner change anything (RLS)
+  { prefix: '/company/grading', roles: ['company_admin', 'partner', 'coach'] },
   { prefix: '/company', roles: ['company_admin', 'partner'] },
   { prefix: '/client', roles: ['client'] },
 ]
