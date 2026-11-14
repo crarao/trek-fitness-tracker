@@ -36,6 +36,25 @@ export function planAdherence(plan: AdherencePlan, sessions: AdherenceSession[])
   return { planned, done: Math.min(planned, days.size + otherDates.size + unlinkedDates.size) }
 }
 
+// 14 Nov: a session dated BEFORE the plan it is linked to started (history logged later while a newer
+// plan was picked, e.g. a backdated Log / Mark done) can't have been that plan's workout: it counts in
+// the week it happened, like a session with no plan link (one per date, for the plan covering that date).
+// Sessions logged late against an older plan (dated after it ended) keep their plan. Counting only:
+// the saved rows are never changed. Plans not in `plans` leave their sessions as they are.
+export function withoutEarlyLinks<T extends { weekly_plan_id?: string | null; session_date: string }>(
+  sessions: T[], plans: { id: string; week_start: string }[],
+): T[] {
+  const starts = new Map(plans.map(p => [p.id, p.week_start.slice(0, 10)]))
+  let changed = false
+  const out = sessions.map(s => {
+    const start = s.weekly_plan_id ? starts.get(s.weekly_plan_id) : undefined
+    if (!start || s.session_date.slice(0, 10) >= start) return s
+    changed = true
+    return { ...s, weekly_plan_id: null }
+  })
+  return changed ? out : sessions
+}
+
 // The plan covering today (newest start wins if two overlap)
 export function currentPlan<T extends AdherencePlan>(plans: T[]): T | null {
   return plans

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { formatMoney } from '@/lib/currency'
 import { type Country, normalizeCountry, formatDate, daysUntil, localDateIso } from '@/lib/locale'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd } from '@/lib/plan-summary'
+import { withoutEarlyLinks } from '@/lib/adherence'
 import { planJsonOf, summarizeAny, dayLabel, todayWeekday, exercisesDoneFor, tickedFromSaved } from '@/lib/plan-structure'
 import PlanDays from '@/app/plan-days'
 import SessionForm, { type SessionDraft, emptyDraft } from '@/app/session-form'
@@ -424,6 +425,8 @@ const handleChangePassword = async () => {
   })()
 
   const activePlan = plans.find(p => p.id === activePlanId)
+  // Done days of a plan: a session dated before its plan started counts in its own week instead (14 Nov)
+  const countSessions = withoutEarlyLinks(sessions, plans)
   // Calorie estimate per session (null without weight or minutes) and this week's total (from Monday)
   const sessionKcal = (s: Session) =>
     estimateKcal({ minutes: s.duration_minutes, weightKg: profile?.weight_kg, label: s.plan_day, activity: s.activity, businessType: profile?.companies?.business_type })
@@ -667,12 +670,12 @@ const handleChangePassword = async () => {
                       const planJson = planJsonOf(activePlan)
                       const summary = summarizeAny(activePlan, activePlan.week_start)
                       const isCurrent = weekStatus(activePlan.week_start) === 'current'
-                      const done = doneDayKeys(activePlan.id, sessions)
+                      const done = doneDayKeys(activePlan.id, countSessions)
                       const workoutLabels = summary.days.filter(d => !isRestDay(d))
                       const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
                       // Done ✓ form for a day, or what was logged if it's already done
                       const renderDayPanel = (label: string, inRow: boolean) => {
-                            const logged = sessions.filter(s => s.weekly_plan_id === activePlan.id && dayKey(s.plan_day) === dayKey(label))
+                            const logged = countSessions.filter(s => s.weekly_plan_id === activePlan.id && dayKey(s.plan_day) === dayKey(label))
                             if (logged.length) return (
                               <div className={`${inRow ? '' : 'mt-3 '}rounded-xl border border-green-800 bg-green-950/40 p-4 space-y-2`}>
                                 {!inRow && <p className="text-sm font-semibold text-green-300">✓ {label}</p>}
@@ -745,7 +748,7 @@ const handleChangePassword = async () => {
                       // Ticks to show per day: saved with the session for done days, else this phone's ticks
                       const dayTicks: Record<string, number[]> = {}
                       if (planJson) for (const d of planJson.days) {
-                        const saved = sessions.filter(x => x.weekly_plan_id === activePlan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
+                        const saved = countSessions.filter(x => x.weekly_plan_id === activePlan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
                         const fromSaved = saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done) : []
                         const local = done.has(d.day) ? [] : ticks[`${activePlan.id}:${d.day}`] || []
                         const list = fromSaved.length ? fromSaved : local
