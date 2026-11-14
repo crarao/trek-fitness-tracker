@@ -24,6 +24,7 @@ import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
 import { latestMembership, daysLeft, membershipStatus } from '@/lib/dojo-home'
+import DojoHome from './dojo-home'
 
 type Membership = {
   id: string
@@ -120,6 +121,10 @@ export default function CompanyAdminPage() {
   const [branchFilter, setBranchFilter] = useState<string>('all')
   // Dojo attendance (#78): today's present rows; null = attendance not set up yet (then sessions as before)
   const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
+  // Dojo: branches / batches / attendance have been asked for (until then a skeleton, not the gym dashboard)
+  const [batchesChecked, setBatchesChecked] = useState(false)
+  // profiles.role of the person logged in (company_admin = Owner, partner = Partner): shown on the dojo home
+  const [myRole, setMyRole] = useState<string | null>(null)
   // Belt grading (companies.grading_enabled, super admin; lib/belts.ts): the gym's belts. Empty = off (Belt fields hidden)
   const [beltRanks, setBeltRanks] = useState<BeltRank[]>([])
   const beltsOn = beltRanks.length > 0
@@ -233,13 +238,14 @@ export default function CompanyAdminPage() {
     const { data: profile } = await supabase
       .from('profiles')
       // companies(*) so the company_type column is read without breaking before its SQL runs
-      .select('company_id, companies:company_id(*)')
+      .select('company_id, role, companies:company_id(*)')
       .eq('id', user.id)
       .single()
 
     if (!profile?.company_id) { router.push('/login'); return }
 
     setCompanyId(profile.company_id)
+    setMyRole((profile as { role?: string | null }).role ?? null)
     // Start loading members straight away, in parallel with setting up the header
     fetchClients(profile.company_id)
     fetchLeadStats(profile.company_id)
@@ -298,13 +304,14 @@ export default function CompanyAdminPage() {
       supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
       supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
     ])
-    if (br.error || ba.error) { setBatchesOn(false); return }
+    if (br.error || ba.error) { setBatchesOn(false); setBatchesChecked(true); return }
     setBranchList((br.data || []) as Branch[])
     setBranchFilter(rememberedBranch((br.data || []) as Branch[]))   // last chip picked on this phone
     setBatchList((ba.data || []) as Batch[])
     setBatchesOn(true)
     const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', cId).eq('class_date', localDateIso()).eq('present', true)
     setAttToday(att.error ? null : (att.data || []) as AttendanceRow[])
+    setBatchesChecked(true)
   }
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
@@ -828,6 +835,33 @@ export default function CompanyAdminPage() {
   const todaysBatches = attendanceMode
     ? batchesMeetingOn(batchList.filter(b => !branchById[b.branch_id]?.is_archived), localDateIso())
     : []
+  const dojoPending = dojo && !batchesChecked
+
+  // The WhatsApp link a row's Remind / Send reminder opens (null = the button opens the member instead).
+  // One rule for the table and the dojo home's Fees card, so both open the same message and number.
+  const reminderUrl = (client: Client): string | null => {
+    const m = latestMembership(client.memberships)
+    const status = membershipStatus(m)
+    const days = m ? daysLeft(m.end_date) : null
+    // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
+    // (lib/guardian.ts feeReminder). Otherwise the row's usual Remind / Follow Up message.
+    const fee = dojo && status === 'expiring' && m
+      ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
+          currency: m.currency || currency, dojoName: companyName, country, upiId })
+      : null
+    if (fee) return `https://wa.me/${fee.waDigits}?text=${encodeURIComponent(fee.text)}`
+    // To the parent when a valid parent phone is set, else the member (lib/guardian.ts). Country code + number
+    // for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts). No parent: as always.
+    const to = reminderRecipient(client, country)
+    if ((status === 'expiring' || status === 'expired') && to.waDigits) {
+      const msg = reminderText({
+        status, memberFirst: client.full_name.split(' ')[0], parentFirst: to.greetName,
+        companyName, endDate: m?.end_date, businessType, toParent: to.toParent, country,
+      })
+      return `https://wa.me/${to.waDigits}?text=${encodeURIComponent(msg)}`
+    }
+    return null
+  }
   // Chips: active branches, plus archived ones that still have students; "No branch" when someone has none
   const branchChips = dojo && batchesOn
     ? branchList.filter(b => !b.is_archived || clients.some(c => c.branch_id === b.id))
@@ -1013,79 +1047,8 @@ export default function CompanyAdminPage() {
     )
   }
 
-  return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      {toast && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
-          <div role="status"
-            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-            {toast.text}
-          </div>
-        </div>
-      )}
-
-      {confirmBox && (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-5" role="dialog" aria-modal="true">
-          <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6">
-            <p className="text-lg font-semibold text-white">{confirmBox.title}</p>
-            <p className="text-sm text-gray-400 mt-2">{confirmBox.body}</p>
-            <div className="flex gap-2 mt-6">
-              <button autoFocus onClick={() => setConfirmBox(null)}
-                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
-                Cancel
-              </button>
-              <button onClick={() => { const run = confirmBox.onConfirm; setConfirmBox(null); run() }}
-                className="flex-1 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2.5 rounded-xl transition">
-                {confirmBox.action}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
-        <div className="flex flex-wrap justify-between items-center gap-3">
-          <div className="flex items-center gap-3">
-            {logoUrl && (
-              <img
-                src={logoUrl}
-                alt={companyName}
-                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-gray-700"
-              />
-            )}
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-xl sm:text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
-              <span className="text-xs text-gray-400 bg-gray-800 border border-gray-700 rounded-full px-2.5 py-1 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block" />
-                {clients.length}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500">Company Admin</p>
-          </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-              Settings
-            </button>
-            <button data-nav onClick={handleLogout}
-              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
-              Logout
-            </button>
-            <button data-testid="add-member-open"
-              onClick={() => { setShowForm(!showForm); setFromLead(null); setMessage('') }}
-              className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
-              + Add {mw.one}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Settings Panel */}
-      {showSettings && (
+  // Sections shared by the gym dashboard and the dojo home (app/company/dojo-home.tsx): the same JSX, shown unchanged
+  const settingsPanel = (
         <div className="mx-4 sm:mx-8 mt-4 mb-0 bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-5">
           {/* Logo is set by the super admin only (admin edit panel → upload). The raw Supabase Storage
               link isn't shown to the gym; the logo itself still shows in the header above. */}
@@ -1131,8 +1094,9 @@ export default function CompanyAdminPage() {
             </button>
           </div>
         </div>
-      )}
-
+  )
+  const subscriptionBanners = (
+    <>
       {/* Subscription banners */}
       {trialInfo?.is_active && (trialDaysLeft() ?? 0) > 0 && (trialDaysLeft() ?? 0) <= 20 && (
         <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3">
@@ -1152,46 +1116,9 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* Expired members alert */}
-      {expiredClients.length > 0 && (
-        <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
-          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
-          <div>
-            <p className="text-amber-400 font-semibold text-sm">
-              {expiredClients.length} membership{expiredClients.length > 1 ? 's' : ''} expired
-            </p>
-            <p className="text-amber-500 text-sm">
-              {expiredClients.slice(0, 3).map(c => c.full_name.split(' ')[0]).join(', ')}
-              {expiredClients.length > 3 ? ` and ${expiredClients.length - 3} more` : ''} — follow up before they leave.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Stat cards */}
-      <div className="px-4 sm:px-8 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
-          <p className="text-3xl font-bold text-white">{clients.length}</p>
-          <p data-testid="slots" data-used={clients.length} data-limit={clientLimit} className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
-        </div>
-        <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
-          <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
-          <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
-          {expiringSoonRevenue > 0 && (
-            <p className="text-xs text-amber-700 mt-0.5">
-              {expiringSoonByCurrency.length > 1
-                ? formatMoneyByCurrency(expiringSoonByCurrency, currency)
-                : formatMoney(expiringSoonRevenue, currency === null ? null : singleCurrency(expiringSoonByCurrency))} at risk
-            </p>
-          )}
-        </div>
-        <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expired</p>
-          <p className="text-3xl font-bold text-red-400">{statusCounts.expired}</p>
-          <p className="text-xs text-gray-600 mt-1">Not renewed</p>
-        </div>
+    </>
+  )
+  const thisMonthCard = (
         <div
           className={`bg-gray-900 border rounded-2xl p-4 cursor-pointer select-none transition ${showRevenueDrillIn ? 'border-green-700' : 'border-green-900/50'}`}
           onClick={() => setShowRevenueDrillIn(!showRevenueDrillIn)}>
@@ -1221,10 +1148,8 @@ export default function CompanyAdminPage() {
             </p>
           )}
         </div>
-      </div>
-
-      {/* Revenue drill-in */}
-      {showRevenueDrillIn && (
+  )
+  const revenueDrillIn = (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-green-900/30 rounded-2xl p-5 space-y-5">
 
@@ -1291,7 +1216,678 @@ export default function CompanyAdminPage() {
 
           </div>
         </div>
+  )
+  const coachesSection = trainModule && !coachCompany ? (
+        <div data-testid="coaches-section" className="px-4 sm:px-8 pt-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+            <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
+              className="w-full flex items-center justify-between text-left">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.many} <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
+              <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+            {showCoaches && (
+              <div className="mt-3">
+                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType)} and plans only: no payments, leads or settings.</p>
+                {coaches.length === 0 ? (
+                  <p className="text-sm text-gray-400 mb-3">No {sw.many.toLowerCase()} yet.</p>
+                ) : (
+                  <ul className="space-y-2 mb-3">
+                    {coaches.map(c => {
+                      const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
+                      // Phone logins (lib/phone.ts loginEmailFor) vs email logins
+                      const phoneLogin = !c.email || isPhoneLogin(c.email)
+                      if (editCoach?.id === c.id) return (
+                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="text" placeholder={`${sw.one} name`} aria-label={`${sw.one} name`}
+                              value={editCoach.full_name}
+                              onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                            <input type="tel" placeholder={phoneLogin ? `Phone (${phoneHint(country ?? 'IN')})` : 'Phone (optional)'} aria-label="Phone"
+                              value={editCoach.phone}
+                              onChange={e => setEditCoach({ ...editCoach, phone: e.target.value })}
+                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                          </div>
+                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && !!splitE164(editCoach.phone, country) && splitE164(editCoach.phone, country)?.local !== splitE164(c.phone, country)?.local && (
+                            <p className="text-[11px] text-amber-300">They log in with their phone: the new number becomes their login. Their password doesn&apos;t change.</p>
+                          )}
+                          {editCoachError && <p className="text-xs text-red-400">{editCoachError}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={handleSaveCoach} disabled={savingEditCoach}
+                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
+                              {savingEditCoach ? 'Saving...' : 'Save'}
+                            </button>
+                            <button type="button" onClick={() => setEditCoach(null)}
+                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
+                              Cancel
+                            </button>
+                          </div>
+                        </li>
+                      )
+                      if (resetCoach?.id === c.id) return (
+                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+                          <p className="text-sm text-white">New password for {c.full_name}</p>
+                          <p className="text-[11px] text-gray-500">
+                            They log in with {c.email && !isPhoneLogin(c.email) ? c.email : `their phone ${displayPhone(c.phone, country)}`}. Tell them the new password; they can change it after logging in.
+                          </p>
+                          <input type="text" placeholder="New password (min 6)" aria-label="New password" autoComplete="new-password"
+                            value={resetCoach.password}
+                            onChange={e => setResetCoach({ ...resetCoach, password: e.target.value, error: '' })}
+                            className="w-full bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
+                          {resetCoach.error && <p className="text-xs text-red-400">{resetCoach.error}</p>}
+                          <div className="flex gap-2">
+                            <button type="button" onClick={handleResetCoachPassword} disabled={resetCoach.saving}
+                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
+                              {resetCoach.saving ? 'Resetting...' : 'Reset password'}
+                            </button>
+                            <button type="button" onClick={() => setResetCoach(null)}
+                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
+                              Cancel
+                            </button>
+                          </div>
+                        </li>
+                      )
+                      return (
+                        <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, country)}
+                              {/* Not for dojos: senseis tap attendance, nothing to tally */}
+                              {!c.archived_at && !dojo && ` · ${today} session${today === 1 ? '' : 's'} today`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button type="button" onClick={() => { setEditCoachError(''); setResetCoach(null); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
+                              className="text-xs text-orange-400 hover:text-orange-300 transition">
+                              Edit
+                            </button>
+                            {!c.archived_at && (
+                              <button type="button" onClick={() => { setEditCoach(null); setResetCoach({ id: c.id, password: '', saving: false, error: '' }) }}
+                                className="text-xs text-gray-300 hover:text-white transition">
+                                Password
+                              </button>
+                            )}
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
+                              {c.archived_at ? 'Off' : 'Active'}
+                            </span>
+                            <button type="button" onClick={() => handleToggleCoach(c)}
+                              className={`text-xs transition ${c.archived_at ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300'}`}>
+                              {c.archived_at ? 'Turn on' : 'Turn off'}
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <input type="text" placeholder={`${sw.one} name`}
+                    value={newCoach.full_name}
+                    onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
+                    className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  {(country ?? 'IN') !== 'IN' && (
+                    <>
+                      <input type="email" placeholder="Email (or leave empty: phone login)" autoComplete="off"
+                        value={newCoach.email}
+                        onChange={e => setNewCoach({ ...newCoach, email: e.target.value })}
+                        className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      {newCoach.email.trim() && (
+                        <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
+                          value={newCoach.password}
+                          onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
+                          className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                      )}
+                    </>
+                  )}
+                  {/* Full row: next to the name, the country-code picker left the number box too narrow on phones */}
+                  <div className="col-span-2 flex gap-2 min-w-0">
+                    <CountryCodePicker value={newCoach.phone_country || (country ?? 'IN')}
+                      onChange={c => setNewCoach({ ...newCoach, phone_country: c })} className="py-2" />
+                    <input type="tel"
+                      placeholder={(country ?? 'IN') !== 'IN' && newCoach.email.trim() ? 'Phone (optional)' : `Phone (${phoneHint(newCoach.phone_country || (country ?? 'IN'))})`}
+                      value={newCoach.phone}
+                      onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
+                      className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
+                  </div>
+                </div>
+                {coachMessage && (
+                  <p className={`text-xs mb-2 ${coachMessage.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{coachMessage}</p>
+                )}
+                <button type="button" onClick={handleAddCoach} disabled={savingCoach}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
+                  {savingCoach ? 'Adding...' : `+ Add ${sw.one.toLowerCase()}`}
+                </button>
+                <p className="text-xs text-gray-600 mt-1.5">
+                  {(country ?? 'IN') === 'IN'
+                    ? `${sw.many} log in with their phone. Default password is their phone number.`
+                    : `With an email, ${sw.many.toLowerCase()} log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.`}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+  ) : null
+  const subscriptionStatus = trialInfo?.trial_end ? (
+        <div className="px-4 sm:px-8 pt-3">
+          {(() => {
+            // days left including today; 0 or less means the end date has passed
+            const days = trialDaysLeft() ?? 0
+            const overdue = days <= 0
+            const expiry = formatDate(trialInfo.trial_end, country, 'medium')
+            const color = overdue ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
+            const borderColor = overdue ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
+            return (
+              <div className={`bg-gray-900 border ${borderColor} rounded-2xl px-5 py-3.5 flex items-center justify-between`}>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">CoachBoard Plan</p>
+                  <p className="text-sm text-white mt-0.5">
+                    {trialInfo.is_trial ? 'Trial' : 'Subscription'} · expires {expiry}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-2xl font-bold ${color}`}>{overdue ? 1 - days : days}</p>
+                  <p className="text-xs text-gray-500">{overdue ? (1 - days === 1 ? 'day overdue' : 'days overdue') : days === 1 ? 'day left (last day)' : 'days left'}</p>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+  ) : null
+  const planBreakdown = (
+      <div className="px-4 sm:px-8 pt-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          {/* Collapsed by default so the member list sits higher on phones */}
+          <button type="button" onClick={() => setShowPlanBreakdown(!showPlanBreakdown)} aria-expanded={showPlanBreakdown}
+            className="w-full flex items-center justify-between text-left">
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Plan Breakdown <span className="normal-case text-gray-600">(active + expiring)</span></p>
+            <span className={`text-gray-500 text-sm transition-transform inline-block ${showPlanBreakdown ? 'rotate-180' : ''}`}>▾</span>
+          </button>
+          {showPlanBreakdown && <div className="mt-3">{(() => {
+            const activeMemberships = clients
+              .filter(c => ['active', 'expiring'].includes(membershipStatus(latestMembership(c.memberships))))
+              .map(c => latestMembership(c.memberships)!)
+            const total = activeMemberships.length
+            const planOrder = ['1 Month', '3 Months', '6 Months', '1 Year']
+            const planColors: Record<string, string> = {
+              '1 Month': 'bg-blue-500', '3 Months': 'bg-teal-500',
+              '6 Months': 'bg-green-500', '1 Year': 'bg-emerald-400'
+            }
+            const counts = planOrder.map(plan => ({
+              plan,
+              count: activeMemberships.filter(m => m.plan_type === plan).length
+            })).filter(p => p.count > 0)
+            if (total === 0) return <p className="text-xs text-gray-600">No active {mw.many.toLowerCase()} yet.</p>
+            return (
+              <div className="space-y-2.5">
+                {counts.map(({ plan, count }) => {
+                  const pct = Math.round((count / total) * 100)
+                  return (
+                    <div key={plan} className="flex items-center gap-3">
+                      <p className="text-xs text-gray-400 w-20 flex-shrink-0">{plan}</p>
+                      <div className="flex-1 bg-gray-800 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${planColors[plan] || 'bg-gray-500'}`}
+                          style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-xs text-gray-400 w-16 text-right flex-shrink-0">{count} <span className="text-gray-600">({pct}%)</span></p>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}</div>}
+        </div>
+      </div>
+  )
+  const membersTable = (
+      <div className="px-4 sm:px-8 py-6">
+
+
+        {/* Members Table */}
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+          {/* Table toolbar */}
+          <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              {attendanceMode ? (
+                // Dojo home: "Students · 45" and the places used (the slots testid moves here with its attributes)
+                <div className="flex items-baseline gap-2">
+                  <h2 className="font-semibold text-white text-sm sm:text-base">{mw.many} · {branchClients.length}</h2>
+                  <span data-testid="slots" data-used={clients.length} data-limit={clientLimit} className="text-xs text-gray-500">{clients.length} of {clientLimit} places</span>
+                </div>
+              ) : (
+                <h2 className="font-semibold text-white text-sm sm:text-base">{mw.many} — {companyName}</h2>
+              )}
+              <div className="flex gap-1 flex-wrap">
+                {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
+                  <button key={f} onClick={() => setActiveFilter(f)}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
+                      activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
+                    }`}>
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                    {f !== 'all' && (
+                      <span className="ml-1 text-xs opacity-60">({statusCounts[f]})</span>
+                    )}
+                  </button>
+                ))}
+                <button data-testid="members-filter-archived" onClick={() => setActiveFilter('archived')}
+                  className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
+                    activeFilter === 'archived' ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
+                  }`}>
+                  Archived
+                  {archivedCount > 0 && (
+                    <span className="ml-1 text-xs opacity-60">({archivedCount})</span>
+                  )}
+                </button>
+              </div>
+            </div>
+            {/* Dojo: branch chips (the list and tab counts follow the chosen branch) */}
+            {/* (On the dojo home the branch switcher sits in the header instead) */}
+            {branchChips.length > 0 && !attendanceMode && (
+              <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Branch">
+                {[{ id: 'all', label: 'All branches', n: clients.length },
+                  ...branchChips.map(b => ({ id: b.id, label: b.name + (b.is_archived ? ' (archived)' : ''), n: clients.filter(c => c.branch_id === b.id).length })),
+                  ...(noBranchCount > 0 ? [{ id: 'none', label: 'No branch', n: noBranchCount }] : [])].map(chip => (
+                  <button key={chip.id} type="button" onClick={() => { setBranchFilter(chip.id); rememberBranch(chip.id) }} aria-pressed={branchFilter === chip.id}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition ${branchFilter === chip.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
+                    {chip.label} <span className={branchFilter === chip.id ? 'text-orange-100' : 'text-gray-500'}>{chip.n}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z" />
+              </svg>
+              <input
+                type="text"
+                placeholder={attendanceMode ? `${mw.one} or parent · name or phone` : isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="divide-y divide-gray-800" aria-busy="true">
+              <span className="sr-only" role="status">Loading {mw.many.toLowerCase()}…</span>
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} className="px-4 sm:px-6 py-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-gray-800 animate-pulse shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3.5 w-1/3 rounded bg-gray-800 animate-pulse" />
+                    <div className="h-3 w-1/4 rounded bg-gray-800/70 animate-pulse" />
+                  </div>
+                  <div className="h-6 w-16 rounded-full bg-gray-800 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : filteredClients.length === 0 ? (
+            <div data-testid="page-company" className="px-6 py-12 text-center text-gray-500 text-sm">
+              {activeFilter === 'archived'
+                ? `No archived ${mw.many.toLowerCase()}.`
+                : clients.length === 0
+                ? `No ${mw.many.toLowerCase()} yet. Add your first one!`
+                : searchQuery.trim()
+                ? `No ${mw.many.toLowerCase()} match "${searchQuery}".`
+                : `No ${activeFilter} ${mw.many.toLowerCase()}.`}
+            </div>
+          ) : (
+            <div data-testid="page-company" className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
+                  <th className="px-4 sm:px-6 py-3 text-left font-medium">{mw.one}</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
+                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Status</th>
+                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Days Left</th>
+                  <th className="px-3 sm:px-4 py-3 text-right sm:text-left font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {filteredClients.map((client, index) => {
+                  const m = latestMembership(client.memberships)
+                  const status = membershipStatus(m)
+                  const days = m ? daysLeft(m.end_date) : null
+
+                  const statusStyle = {
+                    active:   { badge: 'bg-green-900/50 text-green-400',  dot: 'bg-green-500',  bar: 'bg-green-500',  days: 'text-green-400'  },
+                    expiring: { badge: 'bg-amber-900/50 text-amber-400',  dot: 'bg-amber-500',  bar: 'bg-amber-500',  days: 'text-amber-400'  },
+                    expired:  { badge: 'bg-red-900/50 text-red-400',      dot: 'bg-red-500',    bar: 'bg-red-500',    days: 'text-red-400'    },
+                    none:     { badge: 'bg-gray-800 text-gray-500',       dot: 'bg-gray-600',   bar: 'bg-gray-700',   days: 'text-gray-500'   },
+                  }[status]
+
+                  const actionStyle = {
+                    active:   { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
+                    expiring: { label: 'Remind',    cls: 'border-amber-700 text-amber-400 hover:bg-amber-900/30'   },
+                    expired:  { label: 'Follow Up', cls: 'border-red-800 text-red-400 hover:bg-red-900/30'         },
+                    none:     { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
+                  }[status]
+
+                  // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
+                  // (lib/guardian.ts feeReminder). Otherwise the row keeps its usual Remind / Follow Up / View button.
+                  const fee = dojo && status === 'expiring' && m
+                    ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
+                        currency: m.currency || currency, dojoName: companyName, country, upiId })
+                    : null
+
+                  // The link comes from reminderUrl (above): the same one the dojo home's Fees card opens
+                  const handleAction = () => {
+                    const url = reminderUrl(client)
+                    if (url) window.open(url, '_blank')
+                    else openClient(client.id)
+                  }
+
+                  return (
+                    <tr key={client.id}
+                      data-testid="member-row" data-name={client.full_name}
+                      className={`transition cursor-pointer ${openingClientId === client.id
+                        ? 'bg-orange-500/10 outline outline-1 -outline-offset-1 outline-orange-500/60'
+                        : openingClientId ? 'opacity-50' : 'hover:bg-gray-800/50 active:bg-gray-800'}`}
+                      aria-busy={openingClientId === client.id}
+                      onMouseEnter={() => router.prefetch(`/company/client/${client.id}`)}
+                      onTouchStart={() => router.prefetch(`/company/client/${client.id}`)}
+                      data-nav
+                      onClick={() => openClient(client.id)}>
+                      <td className="px-4 sm:px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 sm:w-9 sm:h-9 ${avatarColor(index)} rounded-full flex items-center justify-center flex-shrink-0`}>
+                            <span className="text-white text-xs sm:text-sm font-bold">{initials(client.full_name)}</span>
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {/* Dojo home: the belt colour dot before the name; its name starts the second line */}
+                              {beltsOn && attendanceMode && <BeltChip rank={beltById[client.current_rank_id || '']} dotOnly />}
+                              <p className="font-medium text-white text-sm">{client.full_name}</p>
+                              {beltsOn && !attendanceMode && <BeltChip rank={beltById[client.current_rank_id || '']} showNone={activeFilter !== 'archived'} />}
+                              {client.client_type === 'pt' && !dojo && (
+                                <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
+                              )}
+                              {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
+                                <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
+                              )}
+                              {/* Phones: status sits here (the Status column shows from tablet width up). No membership saved: "No plan" */}
+                              {activeFilter !== 'archived' && (
+                                <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                                  {m ? status.charAt(0).toUpperCase() + status.slice(1) : 'No plan'}
+                                </span>
+                              )}
+
+                            </div>
+                            {openingClientId === client.id ? (
+                              <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
+                                <span className="inline-block w-3 h-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" aria-hidden="true" />
+                                Opening…
+                              </p>
+                            ) : (
+                              <>
+                              {beltsOn && attendanceMode ? (
+                                // Dojo home: the belt in words (text, not colour alone), then the parent
+                                <p className="text-xs text-gray-400">
+                                  {beltById[client.current_rank_id || ''] ? beltLabel(beltById[client.current_rank_id || '']) : activeFilter !== 'archived' ? <span className="text-gray-600">No belt</span> : null}
+                                  {client.guardian_name && <>{beltById[client.current_rank_id || ''] || activeFilter !== 'archived' ? ' · ' : ''}Parent: {client.guardian_name}</>}
+                                </p>
+                              ) : client.guardian_name && (
+                                <p className="text-xs text-gray-400">Parent: {client.guardian_name}</p>
+                              )}
+                              {dojo && batchesOn && (client.branch_id || client.batch_id) && (
+                                <p className="text-xs text-gray-500">{homeBatchLine(branchById[client.branch_id || ''] || (client.batch_id ? branchById[batchById[client.batch_id]?.branch_id || ''] : null), batchById[client.batch_id || ''], country)}</p>
+                              )}
+                              <p className="text-xs text-gray-500">
+                                {displayPhone(client.phone, country) || shownEmail(client.email) || (usernameOf(client.email) ? `Username ${usernameOf(client.email)}` : '')}
+                                {/* PT plan progress this week, on the second line so the row stays phone-width */}
+                                {trainModule && client.client_type === 'pt' && (() => {
+                                  const a = weekAdherence[client.id]
+                                  if (!a) return null
+                                  if (a === 'no-plan') return dojo ? null : <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
+                                  // "Mark today" lives on the Training card (#44), not on each row
+                                  return (
+                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
+                                      {' '}· {a.done}/{a.planned} this wk
+                                    </span>
+                                  )
+                                })()}
+                              </p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
+                      <td className="hidden sm:table-cell px-4 py-4 text-sm font-medium text-white">
+                        {m ? formatMoney(Number(m.amount_paid), currency === null ? null : (m.currency || currency)) : '—'}
+                      </td>
+                      <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
+                        {m ? `${fmtDate(m.start_date, country)} → ${fmtDate(m.end_date, country)}` : '—'}
+                      </td>
+                      <td className="hidden sm:table-cell px-4 py-4">
+                        {activeFilter === 'archived' ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-gray-800 text-gray-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+                            Archived
+                          </span>
+                        ) : m ? (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
+                            No plan
+                          </span>
+                        )}
+                      </td>
+                      <td className="hidden lg:table-cell px-4 py-4">
+                        {days !== null && m ? (
+                          <div>
+                            <p className={`text-sm font-semibold mb-1 ${statusStyle.days}`}>
+                              {days < 0 ? `${days} days` : `${days} days`}
+                            </p>
+                            <div className="w-20 bg-gray-700 rounded-full h-1.5">
+                              <div className={`h-1.5 rounded-full ${statusStyle.bar}`}
+                                style={{ width: `${elapsedPct(m)}%` }} />
+                            </div>
+                          </div>
+                        ) : <span className="text-gray-600 text-sm">—</span>}
+                      </td>
+                      <td className="px-3 sm:px-4 py-4 text-right sm:text-left whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        {activeFilter === 'archived' ? (
+                          <button
+                            onClick={() => handleRestoreClient(client.id)}
+                            className="text-xs px-3 py-1.5 rounded-lg border transition font-medium border-green-800 text-green-400 hover:bg-green-900/30">
+                            Restore
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleAction}
+                            className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${fee ? 'border-green-700 text-green-400 hover:bg-green-900/30' : actionStyle.cls}`}>
+                            {fee ? 'Send reminder' : actionStyle.label}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </div>
+      </div>
+  )
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white">
+      {toast && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-6 pointer-events-none">
+          <div role="status"
+            className={`min-w-[280px] max-w-sm text-center px-10 py-6 rounded-2xl text-lg font-semibold shadow-2xl ring-1 ring-black/20 ${toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {toast.text}
+          </div>
+        </div>
       )}
+
+      {confirmBox && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-5" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-6">
+            <p className="text-lg font-semibold text-white">{confirmBox.title}</p>
+            <p className="text-sm text-gray-400 mt-2">{confirmBox.body}</p>
+            <div className="flex gap-2 mt-6">
+              <button autoFocus onClick={() => setConfirmBox(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
+                Cancel
+              </button>
+              <button onClick={() => { const run = confirmBox.onConfirm; setConfirmBox(null); run() }}
+                className="flex-1 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold py-2.5 rounded-xl transition">
+                {confirmBox.action}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dojo with branches, batches and attendance: the dojo home (app/company/dojo-home.tsx). Gyms, solo coaches and a
+          dojo before branches keep the dashboard below, section for section */}
+      {attendanceMode ? (
+        <DojoHome
+          companyId={companyId} companyName={companyName} logoUrl={logoUrl}
+          roleLabel={myRole === 'partner' ? 'Partner' : myRole === 'company_admin' ? 'Owner' : ''}
+          businessType={businessType} country={country} currency={currency}
+          loading={loading} students={clients} inBranch={inBranch}
+          branches={branchList} batches={batchList} branchFilter={branchFilter}
+          onBranchChange={id => { setBranchFilter(id); rememberBranch(id) }}
+          todaysBatches={todaysBatches} attToday={attToday || []} beltsOn={beltsOn}
+          leadSummary={leadStats?.summary ?? null} monthByCurrency={thisMonthByCurrency}
+          reminderUrl={reminderUrl}
+          onAddStudent={() => { setShowForm(!showForm); setFromLead(null); setMessage('') }}
+          onOpenClient={id => openClient(id)}
+          onShowTab={tab => setActiveFilter(tab)}
+          onLogout={handleLogout}
+          banners={subscriptionBanners}
+          studentList={membersTable}
+          manage={{
+            senseis: coachesSection,
+            onOpenSenseis: () => setShowCoaches(true),
+            revenue: <><div className="px-4 sm:px-8 pt-3">{thisMonthCard}</div>{showRevenueDrillIn && revenueDrillIn}{planBreakdown}</>,
+            onOpenRevenue: () => setShowRevenueDrillIn(true),
+            plan: subscriptionStatus,
+            settings: settingsPanel,
+            settingsOpen: showSettings,
+            onToggleSettings: open => setShowSettings(open),
+          }}
+        />
+      ) : dojoPending ? (
+        // A dojo whose branches / attendance are still loading: a skeleton, not a flash of the gym dashboard
+        <div className="px-4 sm:px-8 pt-4 space-y-3" aria-busy="true">
+          <span className="sr-only" role="status">Loading…</span>
+          {[0, 1, 2].map(n => <div key={n} className="h-24 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" />)}
+        </div>
+      ) : (<>
+      {/* Header */}
+      <div className="bg-gray-900 border-b border-gray-800 px-4 sm:px-8 py-4">
+        <div className="flex flex-wrap justify-between items-center gap-3">
+          <div className="flex items-center gap-3">
+            {logoUrl && (
+              <img
+                src={logoUrl}
+                alt={companyName}
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover border border-gray-700"
+              />
+            )}
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h1 className="text-xl sm:text-2xl font-bold text-white">{companyName || 'CoachBoard'}</h1>
+              <span className="text-xs text-gray-400 bg-gray-800 border border-gray-700 rounded-full px-2.5 py-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block" />
+                {clients.length}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">Company Admin</p>
+          </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              Settings
+            </button>
+            <button data-nav onClick={handleLogout}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition">
+              Logout
+            </button>
+            <button data-testid="add-member-open"
+              onClick={() => { setShowForm(!showForm); setFromLead(null); setMessage('') }}
+              className="bg-white hover:bg-gray-100 text-gray-900 text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition font-medium">
+              + Add {mw.one}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Settings Panel */}
+      {showSettings && settingsPanel}
+
+      {subscriptionBanners}
+
+      {/* Expired members alert */}
+      {expiredClients.length > 0 && (
+        <div className="mx-4 sm:mx-8 mt-4 bg-amber-950 border border-amber-800 rounded-xl px-5 py-3 flex items-start gap-3">
+          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
+          <div>
+            <p className="text-amber-400 font-semibold text-sm">
+              {expiredClients.length} membership{expiredClients.length > 1 ? 's' : ''} expired
+            </p>
+            <p className="text-amber-500 text-sm">
+              {expiredClients.slice(0, 3).map(c => c.full_name.split(' ')[0]).join(', ')}
+              {expiredClients.length > 3 ? ` and ${expiredClients.length - 3} more` : ''} — follow up before they leave.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Stat cards */}
+      <div className="px-4 sm:px-8 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total {mw.many}</p>
+          <p className="text-3xl font-bold text-white">{clients.length}</p>
+          <p data-testid="slots" data-used={clients.length} data-limit={clientLimit} className="text-xs text-gray-600 mt-1">{clients.length}/{clientLimit} slots{dojo ? '' : ptLimit !== null ? ` · ${ptCount}/${ptLimit} PT` : ptCount > 0 ? ` · ${ptCount} PT` : ''}</p>
+        </div>
+        <div className="bg-gray-900 border border-amber-900/50 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expiring Soon</p>
+          <p className="text-3xl font-bold text-amber-400">{expiringSoonCount}</p>
+          <p className="text-xs text-gray-600 mt-1">Within 7 days</p>
+          {expiringSoonRevenue > 0 && (
+            <p className="text-xs text-amber-700 mt-0.5">
+              {expiringSoonByCurrency.length > 1
+                ? formatMoneyByCurrency(expiringSoonByCurrency, currency)
+                : formatMoney(expiringSoonRevenue, currency === null ? null : singleCurrency(expiringSoonByCurrency))} at risk
+            </p>
+          )}
+        </div>
+        <div className="bg-gray-900 border border-red-900/50 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Expired</p>
+          <p className="text-3xl font-bold text-red-400">{statusCounts.expired}</p>
+          <p className="text-xs text-gray-600 mt-1">Not renewed</p>
+        </div>
+        {thisMonthCard}
+      </div>
+
+      {/* Revenue drill-in */}
+      {showRevenueDrillIn && revenueDrillIn}
 
       {/* Leads (#52): follow-ups due, new this week, this month's joined / lost */}
       <div className="px-4 sm:px-8 pt-3">
@@ -1720,516 +2316,16 @@ export default function CompanyAdminPage() {
       )}
 
       {/* Coaches (#40): coach logins, added by the owner or a partner; turned off, never deleted. Gyms only */}
-      {trainModule && !coachCompany && (
-        <div data-testid="coaches-section" className="px-4 sm:px-8 pt-3">
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-            <button type="button" onClick={() => setShowCoaches(!showCoaches)} aria-expanded={showCoaches}
-              className="w-full flex items-center justify-between text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.many} <span className="normal-case text-gray-600">({activeCoaches.length} active)</span></p>
-              <span className={`text-gray-500 text-sm transition-transform inline-block ${showCoaches ? 'rotate-180' : ''}`}>▾</span>
-            </button>
-            {showCoaches && (
-              <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType)} and plans only: no payments, leads or settings.</p>
-                {coaches.length === 0 ? (
-                  <p className="text-sm text-gray-400 mb-3">No {sw.many.toLowerCase()} yet.</p>
-                ) : (
-                  <ul className="space-y-2 mb-3">
-                    {coaches.map(c => {
-                      const today = (recent?.sessions || []).filter(s => s.session_date === todayIso && s.logged_by === c.id).length
-                      // Phone logins (lib/phone.ts loginEmailFor) vs email logins
-                      const phoneLogin = !c.email || isPhoneLogin(c.email)
-                      if (editCoach?.id === c.id) return (
-                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <input type="text" placeholder={`${sw.one} name`} aria-label={`${sw.one} name`}
-                              value={editCoach.full_name}
-                              onChange={e => setEditCoach({ ...editCoach, full_name: e.target.value })}
-                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
-                            <input type="tel" placeholder={phoneLogin ? `Phone (${phoneHint(country ?? 'IN')})` : 'Phone (optional)'} aria-label="Phone"
-                              value={editCoach.phone}
-                              onChange={e => setEditCoach({ ...editCoach, phone: e.target.value })}
-                              className="bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
-                          </div>
-                          {phoneLogin && editCoach.phone.trim() !== (c.phone || '') && !!splitE164(editCoach.phone, country) && splitE164(editCoach.phone, country)?.local !== splitE164(c.phone, country)?.local && (
-                            <p className="text-[11px] text-amber-300">They log in with their phone: the new number becomes their login. Their password doesn&apos;t change.</p>
-                          )}
-                          {editCoachError && <p className="text-xs text-red-400">{editCoachError}</p>}
-                          <div className="flex gap-2">
-                            <button type="button" onClick={handleSaveCoach} disabled={savingEditCoach}
-                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
-                              {savingEditCoach ? 'Saving...' : 'Save'}
-                            </button>
-                            <button type="button" onClick={() => setEditCoach(null)}
-                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
-                              Cancel
-                            </button>
-                          </div>
-                        </li>
-                      )
-                      if (resetCoach?.id === c.id) return (
-                        <li key={c.id} className="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
-                          <p className="text-sm text-white">New password for {c.full_name}</p>
-                          <p className="text-[11px] text-gray-500">
-                            They log in with {c.email && !isPhoneLogin(c.email) ? c.email : `their phone ${displayPhone(c.phone, country)}`}. Tell them the new password; they can change it after logging in.
-                          </p>
-                          <input type="text" placeholder="New password (min 6)" aria-label="New password" autoComplete="new-password"
-                            value={resetCoach.password}
-                            onChange={e => setResetCoach({ ...resetCoach, password: e.target.value, error: '' })}
-                            className="w-full bg-gray-900 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm" />
-                          {resetCoach.error && <p className="text-xs text-red-400">{resetCoach.error}</p>}
-                          <div className="flex gap-2">
-                            <button type="button" onClick={handleResetCoachPassword} disabled={resetCoach.saving}
-                              className="flex-1 bg-white hover:bg-gray-100 text-gray-900 text-sm font-medium py-2 rounded-lg transition disabled:opacity-50">
-                              {resetCoach.saving ? 'Resetting...' : 'Reset password'}
-                            </button>
-                            <button type="button" onClick={() => setResetCoach(null)}
-                              className="px-4 border border-gray-700 rounded-lg text-gray-400 hover:bg-gray-700 text-sm transition">
-                              Cancel
-                            </button>
-                          </div>
-                        </li>
-                      )
-                      return (
-                        <li key={c.id} className="flex items-center justify-between gap-3 bg-gray-800 rounded-xl px-3 py-2.5">
-                          <div className="min-w-0">
-                            <p className={`text-sm truncate ${c.archived_at ? 'text-gray-500' : 'text-white'}`}>{c.full_name}</p>
-                            <p className="text-xs text-gray-500 truncate">
-                              {c.email && !isPhoneLogin(c.email) ? c.email : displayPhone(c.phone, country)}
-                              {/* Not for dojos: senseis tap attendance, nothing to tally */}
-                              {!c.archived_at && !dojo && ` · ${today} session${today === 1 ? '' : 's'} today`}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button type="button" onClick={() => { setEditCoachError(''); setResetCoach(null); setEditCoach({ id: c.id, full_name: c.full_name, phone: c.phone || '', phoneLogin }) }}
-                              className="text-xs text-orange-400 hover:text-orange-300 transition">
-                              Edit
-                            </button>
-                            {!c.archived_at && (
-                              <button type="button" onClick={() => { setEditCoach(null); setResetCoach({ id: c.id, password: '', saving: false, error: '' }) }}
-                                className="text-xs text-gray-300 hover:text-white transition">
-                                Password
-                              </button>
-                            )}
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.archived_at ? 'bg-gray-700 text-gray-400' : 'bg-green-950 text-green-400 border border-green-900'}`}>
-                              {c.archived_at ? 'Off' : 'Active'}
-                            </span>
-                            <button type="button" onClick={() => handleToggleCoach(c)}
-                              className={`text-xs transition ${c.archived_at ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300'}`}>
-                              {c.archived_at ? 'Turn on' : 'Turn off'}
-                            </button>
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <input type="text" placeholder={`${sw.one} name`}
-                    value={newCoach.full_name}
-                    onChange={e => setNewCoach({ ...newCoach, full_name: e.target.value })}
-                    className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                  {(country ?? 'IN') !== 'IN' && (
-                    <>
-                      <input type="email" placeholder="Email (or leave empty: phone login)" autoComplete="off"
-                        value={newCoach.email}
-                        onChange={e => setNewCoach({ ...newCoach, email: e.target.value })}
-                        className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                      {newCoach.email.trim() && (
-                        <input type="text" placeholder="Password (min 6)" autoComplete="new-password"
-                          value={newCoach.password}
-                          onChange={e => setNewCoach({ ...newCoach, password: e.target.value })}
-                          className="col-span-2 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                      )}
-                    </>
-                  )}
-                  {/* Full row: next to the name, the country-code picker left the number box too narrow on phones */}
-                  <div className="col-span-2 flex gap-2 min-w-0">
-                    <CountryCodePicker value={newCoach.phone_country || (country ?? 'IN')}
-                      onChange={c => setNewCoach({ ...newCoach, phone_country: c })} className="py-2" />
-                    <input type="tel"
-                      placeholder={(country ?? 'IN') !== 'IN' && newCoach.email.trim() ? 'Phone (optional)' : `Phone (${phoneHint(newCoach.phone_country || (country ?? 'IN'))})`}
-                      value={newCoach.phone}
-                      onChange={e => setNewCoach({ ...newCoach, phone: e.target.value })}
-                      className="w-full min-w-0 bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600" />
-                  </div>
-                </div>
-                {coachMessage && (
-                  <p className={`text-xs mb-2 ${coachMessage.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>{coachMessage}</p>
-                )}
-                <button type="button" onClick={handleAddCoach} disabled={savingCoach}
-                  className="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm py-2 rounded-xl border border-gray-700 transition disabled:opacity-50">
-                  {savingCoach ? 'Adding...' : `+ Add ${sw.one.toLowerCase()}`}
-                </button>
-                <p className="text-xs text-gray-600 mt-1.5">
-                  {(country ?? 'IN') === 'IN'
-                    ? `${sw.many} log in with their phone. Default password is their phone number.`
-                    : `With an email, ${sw.many.toLowerCase()} log in with it and the password you set. Without one, they log in with their phone (with the country code); default password is their phone number.`}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {coachesSection}
 
       {/* CoachBoard subscription status */}
-      {trialInfo?.trial_end && (
-        <div className="px-4 sm:px-8 pt-3">
-          {(() => {
-            // days left including today; 0 or less means the end date has passed
-            const days = trialDaysLeft() ?? 0
-            const overdue = days <= 0
-            const expiry = formatDate(trialInfo.trial_end, country, 'medium')
-            const color = overdue ? 'text-red-400' : days <= 20 ? 'text-amber-400' : 'text-green-400'
-            const borderColor = overdue ? 'border-red-900/50' : days <= 20 ? 'border-amber-900/50' : 'border-gray-800'
-            return (
-              <div className={`bg-gray-900 border ${borderColor} rounded-2xl px-5 py-3.5 flex items-center justify-between`}>
-                <div>
-                  <p className="text-xs text-gray-500 uppercase tracking-wider">CoachBoard Plan</p>
-                  <p className="text-sm text-white mt-0.5">
-                    {trialInfo.is_trial ? 'Trial' : 'Subscription'} · expires {expiry}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-2xl font-bold ${color}`}>{overdue ? 1 - days : days}</p>
-                  <p className="text-xs text-gray-500">{overdue ? (1 - days === 1 ? 'day overdue' : 'days overdue') : days === 1 ? 'day left (last day)' : 'days left'}</p>
-                </div>
-              </div>
-            )
-          })()}
-        </div>
-      )}
+      {subscriptionStatus}
 
       {/* Plan breakdown */}
-      <div className="px-4 sm:px-8 pt-3">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-          {/* Collapsed by default so the member list sits higher on phones */}
-          <button type="button" onClick={() => setShowPlanBreakdown(!showPlanBreakdown)} aria-expanded={showPlanBreakdown}
-            className="w-full flex items-center justify-between text-left">
-            <p className="text-xs text-gray-500 uppercase tracking-wider">Plan Breakdown <span className="normal-case text-gray-600">(active + expiring)</span></p>
-            <span className={`text-gray-500 text-sm transition-transform inline-block ${showPlanBreakdown ? 'rotate-180' : ''}`}>▾</span>
-          </button>
-          {showPlanBreakdown && <div className="mt-3">{(() => {
-            const activeMemberships = clients
-              .filter(c => ['active', 'expiring'].includes(membershipStatus(latestMembership(c.memberships))))
-              .map(c => latestMembership(c.memberships)!)
-            const total = activeMemberships.length
-            const planOrder = ['1 Month', '3 Months', '6 Months', '1 Year']
-            const planColors: Record<string, string> = {
-              '1 Month': 'bg-blue-500', '3 Months': 'bg-teal-500',
-              '6 Months': 'bg-green-500', '1 Year': 'bg-emerald-400'
-            }
-            const counts = planOrder.map(plan => ({
-              plan,
-              count: activeMemberships.filter(m => m.plan_type === plan).length
-            })).filter(p => p.count > 0)
+      {planBreakdown}
 
-            if (total === 0) return <p className="text-xs text-gray-600">No active {mw.many.toLowerCase()} yet.</p>
-
-            return (
-              <div className="space-y-2.5">
-                {counts.map(({ plan, count }) => {
-                  const pct = Math.round((count / total) * 100)
-                  return (
-                    <div key={plan} className="flex items-center gap-3">
-                      <p className="text-xs text-gray-400 w-20 flex-shrink-0">{plan}</p>
-                      <div className="flex-1 bg-gray-800 rounded-full h-2">
-                        <div className={`h-2 rounded-full ${planColors[plan] || 'bg-gray-500'}`}
-                          style={{ width: `${pct}%` }} />
-                      </div>
-                      <p className="text-xs text-gray-400 w-16 text-right flex-shrink-0">{count} <span className="text-gray-600">({pct}%)</span></p>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })()}</div>}
-        </div>
-      </div>
-
-      <div className="px-4 sm:px-8 py-6">
-
-
-        {/* Members Table */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-
-          {/* Table toolbar */}
-          <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-800 space-y-3">
-            <div className="flex flex-wrap justify-between items-center gap-3">
-              <h2 className="font-semibold text-white text-sm sm:text-base">{mw.many} — {companyName}</h2>
-              <div className="flex gap-1 flex-wrap">
-                {(['all', 'active', 'expiring', 'expired'] as const).map(f => (
-                  <button key={f} onClick={() => setActiveFilter(f)}
-                    className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
-                      activeFilter === f ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
-                    }`}>
-                    {f.charAt(0).toUpperCase() + f.slice(1)}
-                    {f !== 'all' && (
-                      <span className="ml-1 text-xs opacity-60">({statusCounts[f]})</span>
-                    )}
-                  </button>
-                ))}
-                <button data-testid="members-filter-archived" onClick={() => setActiveFilter('archived')}
-                  className={`text-xs px-2.5 py-1.5 rounded-lg transition font-medium ${
-                    activeFilter === 'archived' ? 'bg-white text-gray-900' : 'text-gray-500 hover:bg-gray-800 hover:text-white'
-                  }`}>
-                  Archived
-                  {archivedCount > 0 && (
-                    <span className="ml-1 text-xs opacity-60">({archivedCount})</span>
-                  )}
-                </button>
-              </div>
-            </div>
-            {/* Dojo: branch chips (the list and tab counts follow the chosen branch) */}
-            {branchChips.length > 0 && (
-              <div className="flex gap-1.5 flex-wrap" role="group" aria-label="Branch">
-                {[{ id: 'all', label: 'All branches', n: clients.length },
-                  ...branchChips.map(b => ({ id: b.id, label: b.name + (b.is_archived ? ' (archived)' : ''), n: clients.filter(c => c.branch_id === b.id).length })),
-                  ...(noBranchCount > 0 ? [{ id: 'none', label: 'No branch', n: noBranchCount }] : [])].map(chip => (
-                  <button key={chip.id} type="button" onClick={() => { setBranchFilter(chip.id); rememberBranch(chip.id) }} aria-pressed={branchFilter === chip.id}
-                    className={`text-xs px-3 py-1.5 rounded-full border transition ${branchFilter === chip.id ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
-                    {chip.label} <span className={branchFilter === chip.id ? 'text-orange-100' : 'text-gray-500'}>{chip.n}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="relative">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z" />
-              </svg>
-              <input
-                type="text"
-                placeholder={isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="divide-y divide-gray-800" aria-busy="true">
-              <span className="sr-only" role="status">Loading {mw.many.toLowerCase()}…</span>
-              {[0, 1, 2, 3, 4].map(i => (
-                <div key={i} className="px-4 sm:px-6 py-4 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gray-800 animate-pulse shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-3.5 w-1/3 rounded bg-gray-800 animate-pulse" />
-                    <div className="h-3 w-1/4 rounded bg-gray-800/70 animate-pulse" />
-                  </div>
-                  <div className="h-6 w-16 rounded-full bg-gray-800 animate-pulse" />
-                </div>
-              ))}
-            </div>
-          ) : filteredClients.length === 0 ? (
-            <div data-testid="page-company" className="px-6 py-12 text-center text-gray-500 text-sm">
-              {activeFilter === 'archived'
-                ? `No archived ${mw.many.toLowerCase()}.`
-                : clients.length === 0
-                ? `No ${mw.many.toLowerCase()} yet. Add your first one!`
-                : searchQuery.trim()
-                ? `No ${mw.many.toLowerCase()} match "${searchQuery}".`
-                : `No ${activeFilter} ${mw.many.toLowerCase()}.`}
-            </div>
-          ) : (
-            <div data-testid="page-company" className="overflow-x-auto">{/* safety net: a long name never pushes Action off screen */}
-            <table className="w-full">
-              <thead>
-                <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
-                  <th className="px-4 sm:px-6 py-3 text-left font-medium">{mw.one}</th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Plan</th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Paid</th>
-                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Start → End</th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Status</th>
-                  <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Days Left</th>
-                  <th className="px-3 sm:px-4 py-3 text-right sm:text-left font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {filteredClients.map((client, index) => {
-                  const m = latestMembership(client.memberships)
-                  const status = membershipStatus(m)
-                  const days = m ? daysLeft(m.end_date) : null
-
-                  const statusStyle = {
-                    active:   { badge: 'bg-green-900/50 text-green-400',  dot: 'bg-green-500',  bar: 'bg-green-500',  days: 'text-green-400'  },
-                    expiring: { badge: 'bg-amber-900/50 text-amber-400',  dot: 'bg-amber-500',  bar: 'bg-amber-500',  days: 'text-amber-400'  },
-                    expired:  { badge: 'bg-red-900/50 text-red-400',      dot: 'bg-red-500',    bar: 'bg-red-500',    days: 'text-red-400'    },
-                    none:     { badge: 'bg-gray-800 text-gray-500',       dot: 'bg-gray-600',   bar: 'bg-gray-700',   days: 'text-gray-500'   },
-                  }[status]
-
-                  const actionStyle = {
-                    active:   { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
-                    expiring: { label: 'Remind',    cls: 'border-amber-700 text-amber-400 hover:bg-amber-900/30'   },
-                    expired:  { label: 'Follow Up', cls: 'border-red-800 text-red-400 hover:bg-red-900/30'         },
-                    none:     { label: 'View',      cls: 'border-gray-700 text-gray-400 hover:bg-gray-800'         },
-                  }[status]
-
-                  // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
-                  // (lib/guardian.ts feeReminder). Otherwise the row keeps its usual Remind / Follow Up / View button.
-                  const fee = dojo && status === 'expiring' && m
-                    ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
-                        currency: m.currency || currency, dojoName: companyName, country, upiId })
-                    : null
-
-                  const handleAction = () => {
-                    if (fee) {
-                      window.open(`https://wa.me/${fee.waDigits}?text=${encodeURIComponent(fee.text)}`, '_blank')
-                      return
-                    }
-                    // To the parent when a valid parent phone is set, else the member (lib/guardian.ts). Country code + number
-                    // for wa.me (+919876543210 or old 9876543210; India and US numbers, lib/phone.ts). No parent: as always.
-                    const to = reminderRecipient(client, country)
-                    if ((status === 'expiring' || status === 'expired') && to.waDigits) {
-                      const msg = reminderText({
-                        status, memberFirst: client.full_name.split(' ')[0], parentFirst: to.greetName,
-                        companyName, endDate: m?.end_date, businessType, toParent: to.toParent, country,
-                      })
-                      window.open(`https://wa.me/${to.waDigits}?text=${encodeURIComponent(msg)}`, '_blank')
-                    } else {
-                      openClient(client.id)
-                    }
-                  }
-
-                  return (
-                    <tr key={client.id}
-                      data-testid="member-row" data-name={client.full_name}
-                      className={`transition cursor-pointer ${openingClientId === client.id
-                        ? 'bg-orange-500/10 outline outline-1 -outline-offset-1 outline-orange-500/60'
-                        : openingClientId ? 'opacity-50' : 'hover:bg-gray-800/50 active:bg-gray-800'}`}
-                      aria-busy={openingClientId === client.id}
-                      onMouseEnter={() => router.prefetch(`/company/client/${client.id}`)}
-                      onTouchStart={() => router.prefetch(`/company/client/${client.id}`)}
-                      data-nav
-                      onClick={() => openClient(client.id)}>
-                      <td className="px-4 sm:px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 sm:w-9 sm:h-9 ${avatarColor(index)} rounded-full flex items-center justify-center flex-shrink-0`}>
-                            <span className="text-white text-xs sm:text-sm font-bold">{initials(client.full_name)}</span>
-                          </div>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <p className="font-medium text-white text-sm">{client.full_name}</p>
-                              {beltsOn && <BeltChip rank={beltById[client.current_rank_id || '']} showNone={activeFilter !== 'archived'} />}
-                              {client.client_type === 'pt' && !dojo && (
-                                <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
-                              )}
-                              {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
-                                <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
-                              )}
-                              {/* Phones: status sits here (the Status column shows from tablet width up). No membership saved: "No plan" */}
-                              {activeFilter !== 'archived' && (
-                                <span className={`sm:hidden inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full leading-none ${statusStyle.badge}`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                                  {m ? status.charAt(0).toUpperCase() + status.slice(1) : 'No plan'}
-                                </span>
-                              )}
-
-                            </div>
-                            {openingClientId === client.id ? (
-                              <p className="text-xs text-orange-400 flex items-center gap-1.5" role="status">
-                                <span className="inline-block w-3 h-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" aria-hidden="true" />
-                                Opening…
-                              </p>
-                            ) : (
-                              <>
-                              {client.guardian_name && (
-                                <p className="text-xs text-gray-400">Parent: {client.guardian_name}</p>
-                              )}
-                              {dojo && batchesOn && (client.branch_id || client.batch_id) && (
-                                <p className="text-xs text-gray-500">{homeBatchLine(branchById[client.branch_id || ''] || (client.batch_id ? branchById[batchById[client.batch_id]?.branch_id || ''] : null), batchById[client.batch_id || ''], country)}</p>
-                              )}
-                              <p className="text-xs text-gray-500">
-                                {displayPhone(client.phone, country) || shownEmail(client.email) || (usernameOf(client.email) ? `Username ${usernameOf(client.email)}` : '')}
-                                {/* PT plan progress this week, on the second line so the row stays phone-width */}
-                                {trainModule && client.client_type === 'pt' && (() => {
-                                  const a = weekAdherence[client.id]
-                                  if (!a) return null
-                                  if (a === 'no-plan') return dojo ? null : <span className="whitespace-nowrap text-amber-400/80"> · no plan</span>
-                                  // "Mark today" lives on the Training card (#44), not on each row
-                                  return (
-                                    <span className={`whitespace-nowrap font-semibold ${pctColor(pct(a))}`} title={`${a.done} of ${a.planned} workout days done this week`}>
-                                      {' '}· {a.done}/{a.planned} this wk
-                                    </span>
-                                  )
-                                })()}
-                              </p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="hidden sm:table-cell px-4 py-4 text-sm text-gray-300">{m?.plan_type || '—'}</td>
-                      <td className="hidden sm:table-cell px-4 py-4 text-sm font-medium text-white">
-                        {m ? formatMoney(Number(m.amount_paid), currency === null ? null : (m.currency || currency)) : '—'}
-                      </td>
-                      <td className="hidden lg:table-cell px-4 py-4 text-sm text-gray-400">
-                        {m ? `${fmtDate(m.start_date, country)} → ${fmtDate(m.end_date, country)}` : '—'}
-                      </td>
-                      <td className="hidden sm:table-cell px-4 py-4">
-                        {activeFilter === 'archived' ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-gray-800 text-gray-400">
-                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
-                            Archived
-                          </span>
-                        ) : m ? (
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
-                          </span>
-                        ) : (
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusStyle.badge}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                            No plan
-                          </span>
-                        )}
-                      </td>
-                      <td className="hidden lg:table-cell px-4 py-4">
-                        {days !== null && m ? (
-                          <div>
-                            <p className={`text-sm font-semibold mb-1 ${statusStyle.days}`}>
-                              {days < 0 ? `${days} days` : `${days} days`}
-                            </p>
-                            <div className="w-20 bg-gray-700 rounded-full h-1.5">
-                              <div className={`h-1.5 rounded-full ${statusStyle.bar}`}
-                                style={{ width: `${elapsedPct(m)}%` }} />
-                            </div>
-                          </div>
-                        ) : <span className="text-gray-600 text-sm">—</span>}
-                      </td>
-                      <td className="px-3 sm:px-4 py-4 text-right sm:text-left whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                        {activeFilter === 'archived' ? (
-                          <button
-                            onClick={() => handleRestoreClient(client.id)}
-                            className="text-xs px-3 py-1.5 rounded-lg border transition font-medium border-green-800 text-green-400 hover:bg-green-900/30">
-                            Restore
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleAction}
-                            className={`text-xs px-3 py-1.5 rounded-lg border transition font-medium ${fee ? 'border-green-700 text-green-400 hover:bg-green-900/30' : actionStyle.cls}`}>
-                            {fee ? 'Send reminder' : actionStyle.label}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-            </div>
-          )}
-        </div>
-      </div>
+      {membersTable}
+      </>)}
       {/* Add Member Modal */}
       {showForm && (
         <div data-testid="add-member-form" className="fixed inset-0 z-50 bg-gray-950/95 overflow-y-auto">
