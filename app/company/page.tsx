@@ -23,6 +23,7 @@ import BeltChip from '@/app/belt-chip'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, sortBatches, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn as batchesMeetingOn } from '@/lib/attendance'
+import { latestMembership, daysLeft, membershipStatus } from '@/lib/dojo-home'
 
 type Membership = {
   id: string
@@ -79,28 +80,7 @@ function initials(name: string) {
   return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function latestMembership(memberships: Membership[]): Membership | null {
-  if (!memberships?.length) return null
-  // Latest start date wins; if two start the same day, the most recently created one is current
-  return [...memberships].sort((a, b) =>
-    (b.start_date.localeCompare(a.start_date)) || ((b.created_at || '').localeCompare(a.created_at || ''))
-  )[0]
-}
-
-function daysLeft(endDate: string): number {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const end = new Date(endDate)
-  return Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-}
-
-function membershipStatus(m: Membership | null): 'active' | 'expiring' | 'expired' | 'none' {
-  if (!m) return 'none'
-  const d = daysLeft(m.end_date)
-  if (d < 0) return 'expired'
-  if (d <= 11) return 'expiring'
-  return 'active'
-}
+// latestMembership, daysLeft, membershipStatus: lib/dojo-home.ts (moved there unchanged, shared with the dojo home)
 
 function elapsedPct(m: Membership): number {
   const total = new Date(m.end_date).getTime() - new Date(m.start_date).getTime()
