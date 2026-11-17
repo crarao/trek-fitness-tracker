@@ -741,6 +741,13 @@ export default function ClientDetailPage() {
     return ticks
   }
   const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null); setMarkAddTo(null) }
+  // A session saved part-way through the day's exercises: { n saved, total }; null = whole day (or no ticks saved)
+  const savedProgress = (day: PlanDay, sess: { exercises_done?: unknown } | null | undefined) => {
+    const ed = sess?.exercises_done as ExercisesDone | null | undefined
+    if (!day.exercises.length || !ed || !Array.isArray(ed.done)) return null
+    const n = tickedFromSaved(day, ed).length
+    return n < day.exercises.length ? { n, total: day.exercises.length } : null
+  }
   // The day's session saved earlier TODAY (a half-way save): the day stays open to add the rest to it
   const todaysDaySession = (planId: string, day: string): Session | null =>
     [...sessions].reverse().find(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day && x.session_date.slice(0, 10) === localToday()) ?? null
@@ -3013,7 +3020,13 @@ const handleResetPassword = async () => {
             return (
               <div className="bg-green-950/40 border border-green-800 rounded-xl px-3 py-2.5 mb-3 space-y-2">
                 <div className="flex justify-between items-start gap-2">
-                  <p className="text-xs font-semibold text-green-400">✓ {day ? day.day : 'Session'} done for {clientFirstName}</p>
+                  <p className="text-xs font-semibold text-green-400">{(() => {
+                    // Saved part-way: say how far, never "done" (17 Nov)
+                    const part = day ? savedProgress(day, lastMarked.session) : null
+                    return part
+                      ? `✓ ${day!.day}: ${part.n} of ${part.total} exercises saved for ${clientFirstName}`
+                      : `✓ ${day ? day.day : 'Session'} done for ${clientFirstName}`
+                  })()}</p>
                   <button type="button" onClick={() => setLastMarked(null)} aria-label="Dismiss"
                     className="text-gray-500 hover:text-white text-sm leading-none">✕</button>
                 </div>
@@ -3041,7 +3054,7 @@ const handleResetPassword = async () => {
                 onSubmit={() => handleCoachLogDay(plan, day, label)} onCancel={requestCloseMark}
                 heading={
                   <p className="text-xs font-semibold text-green-400">
-                    {markAddTo && day ? `${day.day}: adding to today's session` : day ? `${day.day} done for ${clientFirstName}` : `Session done for ${clientFirstName}`}
+                    {markAddTo && day ? `${day.day}: adding to today's session` : day ? `${day.day} for ${clientFirstName}` : `Session for ${clientFirstName}`}
                     {day && (n
                       ? <span className="font-normal text-gray-400"> · {n} of {day.exercises.length} exercise{day.exercises.length === 1 ? '' : 's'} ticked</span>
                       : <span className="font-normal text-gray-500"> · tick exercises above, or just save</span>)}
@@ -3063,13 +3076,13 @@ const handleResetPassword = async () => {
           // Saved earlier today: the day stays open, more ticks go into the same session
           const cont = isDone && day ? todaysDaySession(plan.id, day.day) : null
           if (cont && day) {
-            const savedN = tickedFromSaved(day, cont.exercises_done).length
+            const part = savedProgress(day, cont)
             return (
               <div className="border-t border-gray-800 pt-3 space-y-2">
                 {weightsBanner(key)}
                 {sent}
-                {savedN < day.exercises.length && (
-                  <p className="text-xs text-gray-400">Saved {savedN} of {day.exercises.length} exercises today. Tick the next ones to add them to this session.</p>
+                {part && (
+                  <p className="text-xs text-gray-400">Saved {part.n} of {part.total} exercises today. Tick the next ones to add them to this session.</p>
                 )}
                 <button type="button" onClick={() => openMarkForm(key, cont)}
                   className="w-full bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium py-2.5 rounded-xl">
@@ -3177,7 +3190,12 @@ const handleResetPassword = async () => {
                         <div>
                           <p className="text-xs text-gray-500">{formatDate(dates[selIdx], country, 'weekday')}</p>
                           <p className={`text-base font-semibold mt-0.5 ${d.rest ? 'text-gray-300' : 'text-white'}`}>{d.rest ? 'Rest day' : d.focus || 'Workout'}</p>
-                          {dayDone && <p className="text-xs text-green-400 mt-1">✓ Done{notes ? ` · ${notes}` : ''}</p>}
+                          {dayDone && (() => {
+                            const part = contSession ? savedProgress(d, contSession) : null
+                            return part
+                              ? <p className="text-xs text-amber-300 mt-1">In progress · {part.n} of {part.total} exercises saved{notes ? ` · ${notes}` : ''}</p>
+                              : <p className="text-xs text-green-400 mt-1">✓ Done{notes ? ` · ${notes}` : ''}</p>
+                          })()}
                         </div>
                         {d.rest && <p className="text-sm text-gray-400">Rest and recovery. Nothing to log.</p>}
                         {d.exercises.length > 0 && (
