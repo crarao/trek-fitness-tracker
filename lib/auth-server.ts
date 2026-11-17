@@ -21,6 +21,10 @@ export const PLAN_ROLES: Role[] = [...STAFF, 'coach']
 // Shown when a coach whose login was turned off still has an open session
 export const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
 
+// Shown when an archived client (profiles.archived_at set) still has an open session or tries to log in.
+// Restore (archived_at back to null) gives access back on the next request: no Auth ban for clients.
+export const CLIENT_OFF_MESSAGE = 'Your account is inactive. Please contact your gym.'
+
 // Same admin-client pattern as the routes use; only for reading profiles here.
 function adminClient() {
   return createClient(
@@ -72,6 +76,10 @@ export async function getCaller(
   // A turned-off coach (archived_at set) is refused even if their session is still open
   if (role === 'coach' && profile?.archived_at) {
     return { caller: null, error: NextResponse.json({ error: COACH_OFF_MESSAGE }, { status: 403 }) }
+  }
+  // An archived client is refused the same way (same field, archived_at)
+  if (role === 'client' && profile?.archived_at) {
+    return { caller: null, error: NextResponse.json({ error: CLIENT_OFF_MESSAGE }, { status: 403 }) }
   }
 
   return { caller: { userId: user.id, role, companyId: profile?.company_id ?? null }, error: null }

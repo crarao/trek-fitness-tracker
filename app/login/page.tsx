@@ -9,6 +9,8 @@ import { type PhoneCountry, phoneCountry, validLocalDigits, loginEmailFor, phone
 import CountryCodePicker from '@/app/country-code-picker'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
+// Same text as lib/auth-server.ts CLIENT_OFF_MESSAGE (an archived client)
+const CLIENT_OFF_MESSAGE = 'Your account is inactive. Please contact your gym.'
 // The address and the remembered gym don't change while the page is open, so nothing to subscribe to
 const noSubscribe = () => () => {}
 
@@ -37,6 +39,7 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const coachOff = searchParams.get('off') === 'coach'
   const otherGym = searchParams.get('off') === 'gym'
+  const clientOff = searchParams.get('off') === 'client'
   // Which gym's branding to show: the address (syedfitness.getcoachboard.com), else a ?company=<slug>
   // link, else the gym of the last login on this device. null while pre-rendering (no window there).
   const hostSlug = useSyncExternalStore(noSubscribe, () => tenantSlugFromHost(window.location.host), () => null)
@@ -66,11 +69,16 @@ function LoginForm() {
     }
   }, [coachOff])
 
+  // Sent here by proxy.ts because this client is archived: end the open session (the message is shownError below)
+  useEffect(() => {
+    if (clientOff) supabase.auth.signOut()
+  }, [clientOff])
+
   // Sent here by proxy.ts because this login belongs to another gym than this address
   useEffect(() => {
     if (otherGym) supabase.auth.signOut()
   }, [otherGym])
-  const shownError = error || (otherGym && !tried ? otherGymMessage(branding?.name) : '')
+  const shownError = error || (otherGym && !tried ? otherGymMessage(branding?.name) : '') || (clientOff && !tried ? CLIENT_OFF_MESSAGE : '')
 
   useEffect(() => {
     if (!companySlug) return
@@ -182,7 +190,16 @@ function LoginForm() {
       }
       router.push('/coach')
     }
-    else router.push('/client')
+    else {
+      // Archived client: signed straight out again (Restore lets them in with no other step)
+      if (profile.archived_at) {
+        await supabase.auth.signOut()
+        setError(CLIENT_OFF_MESSAGE)
+        setLoading(false)
+        return
+      }
+      router.push('/client')
+    }
   }
 
   return (
