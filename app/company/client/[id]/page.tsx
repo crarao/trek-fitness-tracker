@@ -295,7 +295,8 @@ export default function ClientDetailPage() {
   const toggleCoachTick = (planId: string, day: string, i: number) => {
     const key = `${planId}:${day}`
     // Ticking starts logging this day: open its form so the sticky Save bar shows (17 Nov, FitLoft)
-    const cur = markKey ? coachTicks[key] || [] : openMarkForm(key)
+    // A day saved earlier today: the form adds to that session instead of starting a second one
+    const cur = markKey ? coachTicks[key] || [] : openMarkForm(key, todaysDaySession(planId, day))
     setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
   }
   // Open day row on this week's plan ("Mon"), the open "Mark done" form ("planId:Mon", or "planId:" for a
@@ -308,11 +309,13 @@ export default function ClientDetailPage() {
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
   const savingMarkRef = useRef(false) // blocks a second save while one is running (double tap)
+  // The open form adds to a session already saved today for that day (half-way save, 17 Nov), else null = new session
+  const [markAddTo, setMarkAddTo] = useState<Session | null>(null)
   // Draft safety net (17 Nov): the open form's entries on this device under cb-draft-<clientId>-<YYYY-MM-DD>.
   // draftRestoredAt = when the draft shown in the open form was saved (the "restored" banner), else null.
   const sessionDraftKey = `cb-draft-${clientId}-${localToday()}`
   const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
-  type SessionDraftSaved = { at: number; key: string; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
+  type SessionDraftSaved = { at: number; key: string; addTo?: string | null; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
   const readSessionDraft = (): SessionDraftSaved | null => {
     try {
       const v = JSON.parse(localStorage.getItem(sessionDraftKey) || 'null')
@@ -714,25 +717,33 @@ export default function ClientDetailPage() {
   }
   // Opening a form restores today's unsaved draft for it, if any (banner "Unsaved session from … restored").
   // Returns the ticks in force for the form, so a tick that opened it is added on top of them.
-  const openMarkForm = (key: string): number[] => {
+  // addTo = the session saved earlier today for this day: the form edits it and Save adds the new ticks to it
+  const openMarkForm = (key: string, addTo: Session | null = null): number[] => {
     setMarkError('')
     setMarkAgainKey(null)
     setMarkKey(key)
+    setMarkAddTo(addTo)
+    const base: SessionDraft = addTo
+      ? { ...coachDraft(), session_date: addTo.session_date.slice(0, 10), duration_minutes: String(addTo.duration_minutes || ''), notes: addTo.notes || '' }
+      : coachDraft()
     const draft = readSessionDraft()
     const hasWork = !!draft && (draft.ticks?.length > 0 || !!(draft.weights && Object.keys(draft.weights).length) || !!draft.form.notes?.trim())
-    if (!draft || draft.key !== key || !hasWork) {
-      setMarkForm(coachDraft())
+    if (!draft || draft.key !== key || (draft.addTo ?? null) !== (addTo?.id ?? null) || !hasWork) {
+      setMarkForm(base)
       setDraftRestoredAt(null)
       return coachTicks[key] || []
     }
-    setMarkForm({ ...coachDraft(), ...draft.form })
+    setMarkForm({ ...base, ...draft.form })
     const ticks = coachTicks[key]?.length ? coachTicks[key] : Array.isArray(draft.ticks) ? draft.ticks : []
     if (!coachTicks[key]?.length && ticks.length) setDayTicks(key, ticks)
     if (!logDrafts[key] && draft.weights && Object.keys(draft.weights).length) saveDayDrafts(key, draft.weights)
     setDraftRestoredAt(draft.at || Date.now())
     return ticks
   }
-  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null) }
+  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null); setMarkAddTo(null) }
+  // The day's session saved earlier TODAY (a half-way save): the day stays open to add the rest to it
+  const todaysDaySession = (planId: string, day: string): Session | null =>
+    [...sessions].reverse().find(x => x.weekly_plan_id === planId && dayKey(x.plan_day) === day && x.session_date.slice(0, 10) === localToday()) ?? null
 
   // ---- Weight / reps per exercise (#80) ----
   // Logs with their session's date (for "last time" and months); logs of sessions not loaded are left out
@@ -853,6 +864,7 @@ export default function ClientDetailPage() {
       router.push('/login')
       return false
     }
+    if (markAddTo && plan && day) return await addToCoachSession(markAddTo, plan, day, user.id, minutes)
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
@@ -906,11 +918,47 @@ export default function ClientDetailPage() {
     if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
     // "✓ Session saved · 4 exercises" (a day of a plan), "✓ Session saved · 60 min" (text plan / dojo)
     const savedCount = day ? ticked.filter(i => day.exercises[i]).length : 0
-    const savedWhat = day ? `${savedCount} exercise${savedCount === 1 ? '' : 's'}` : `${minutes} min`
+    const savedWhat = day ? `${savedCount} of ${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'}` : `${minutes} min`
     if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
     else if (ratingErr) showToast(`Session saved, but "How did it feel" wasn't: ${ratingErr}`, 'error')
     else if (link.moved) showToast(`✓ Session saved · ${savedWhat} · on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
     else showToast(`✓ Session saved · ${savedWhat}`)
+    loadData(['sessions'])
+    return true
+  }
+
+  // Half-way save, then more exercises: update the same session (minutes, notes, exercises ticked) and add
+  // weight rows for the newly ticked exercises only. Exercises already saved stay as they were.
+  const addToCoachSession = async (sess: Session, plan: Plan, day: PlanDay, userId: string, minutes: number): Promise<boolean> => {
+    const key = `${plan.id}:${day.day}`
+    const already = tickedFromSaved(day, sess.exercises_done)
+    const added = (coachTicks[key] || []).filter(i => day.exercises[i] && !already.includes(i))
+    const all = [...already, ...added].sort((a, b) => a - b)
+    const patch = { duration_minutes: minutes, notes: markForm.notes, exercises_done: exercisesDoneFor(day, all) }
+    const { data, error } = await supabase.from('logged_sessions').update(patch).eq('id', sess.id).select('id')
+    if (error || !data?.length) {
+      setSavingMark(false)
+      const msg = 'Could not save: ' + (error?.message || 'not allowed for this login')
+      setMarkError(msg)
+      showToast(msg, 'error') // the form stays open with everything still filled in
+      return false
+    }
+    let weightsErr = ''
+    if (exerciseLogsOn && added.length && companyId) {
+      const drafts: Record<number, LogDraft> = Object.fromEntries(added.map(i => [i, draftFor(key, i, day.exercises[i])]))
+      const rows = rowsToSave({ exercises: day.exercises, ticked: added, drafts, sessionId: sess.id, clientId, companyId, loggedBy: userId, library: exLibrary })
+      weightsErr = await insertWeights(rows)
+      setWeightsRetry(weightsErr ? { key, rows, error: weightsErr } : null)
+    }
+    saveDayDrafts(key, null)
+    clearSessionDraft()
+    setSavingMark(false)
+    closeMarkForm()
+    setMarkForm(coachDraft())
+    setDayTicks(key, [])
+    setLastMarked({ key, session: { ...sess, ...patch } })
+    if (weightsErr) showToast(`${day.day} saved, but the weights weren't. Tap Retry under the day.`, 'error')
+    else showToast(`✓ Session saved · ${all.length} of ${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'}`)
     loadData(['sessions'])
     return true
   }
@@ -936,10 +984,10 @@ export default function ClientDetailPage() {
       const m = parseInt(markForm.duration_minutes)
       return m > 0 ? `${m} min` : 'Nothing entered yet'
     }
-    if (!markTicked.length) return 'Nothing entered yet'
+    if (!markTicked.length) return markAddTo ? 'Tick the next exercises to add them' : 'Nothing entered yet'
     const day = markTarget.day
     const sets = markTicked.reduce((n, i) => n + (isTimedOrDistance(day.exercises[i]) ? 0 : draftFor(markKey!, i, day.exercises[i]).sets ?? 0), 0)
-    return `${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'} entered` : ''}`
+    return `${markAddTo ? 'Adding ' : ''}${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'} entered` : ''}`
   })()
   // Shown while the form is open on the tab it lives on; it replaces "Log today's session"
   const saveBarOn = !!markTarget && activeTab === markTarget.tab
@@ -948,19 +996,19 @@ export default function ClientDetailPage() {
   // ---- Warn before losing work (17 Nov) ----
   // Dirty = the open form has a tick, a weight / reps entry or a note. False again after a save or discard.
   const markDirty = !!markTarget && !!markKey && (
-    markTicked.length > 0 || Object.keys(logDrafts[markKey] || {}).length > 0 || markForm.notes.trim() !== '')
+    markTicked.length > 0 || Object.keys(logDrafts[markKey] || {}).length > 0 || markForm.notes.trim() !== (markAddTo?.notes || '').trim())
   // "You have unsaved sets. Save now?": go = what the coach was doing (back, close, other tab, other day)
   const [leaveAsk, setLeaveAsk] = useState<{ go: () => void } | null>(null)
   const askBeforeLeaving = (go: () => void) => { if (markDirty) setLeaveAsk({ go }); else go() }
   // Throws away the open form's ticks, weights and notes (they stay on this device until saved or discarded)
   const discardMark = () => {
     if (markKey && markTarget?.day) { setDayTicks(markKey, []); saveDayDrafts(markKey, null) }
-    setMarkForm(coachDraft())
+    setMarkForm(markAddTo ? { ...coachDraft(), session_date: markAddTo.session_date.slice(0, 10), duration_minutes: String(markAddTo.duration_minutes || ''), notes: markAddTo.notes || '' } : coachDraft())
     clearSessionDraft()
   }
   // Writes the draft about 500 ms after the last change while the form is dirty
   const draftJson = markDirty && markKey
-    ? JSON.stringify({ key: markKey, form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
+    ? JSON.stringify({ key: markKey, addTo: markAddTo?.id ?? null, form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
     : ''
   useEffect(() => {
     if (!draftJson) return
@@ -1707,7 +1755,9 @@ const handleResetPassword = async () => {
     setNewPlanSheetOpen(false)
     if (todayLog.day) setCoachOpenDay(todayLog.day)
     // A day already done asks before logging a second session (same as under the day)
-    if (todayLog.day && doneDayKeys(todayLog.plan.id, countSessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
+    const cont = todayLog.day ? todaysDaySession(todayLog.plan.id, todayLog.day) : null
+    if (cont) openMarkForm(key, cont) // saved half-way earlier today: carry on with the same session
+    else if (todayLog.day && doneDayKeys(todayLog.plan.id, countSessions).has(todayLog.day)) { setMarkError(''); setMarkAgainKey(key) }
     else openMarkForm(key)
     setScrollToPlanId(todayLog.plan.id)
   }
@@ -2984,14 +3034,14 @@ const handleResetPassword = async () => {
               {coveringBadge()}
               {draftBanner()}
               <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
-                feelingEnabled={!isCoach}
+                feelingEnabled={!isCoach && !markAddTo}
                 country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
                 notesLabel="Notes (optional)"
-                error={markError} saving={savingMark} submitLabel={`Done ✓ for ${clientFirstName}`}
+                error={markError} saving={savingMark} submitLabel={markAddTo ? 'Save session' : `Done ✓ for ${clientFirstName}`}
                 onSubmit={() => handleCoachLogDay(plan, day, label)} onCancel={requestCloseMark}
                 heading={
                   <p className="text-xs font-semibold text-green-400">
-                    {day ? `${day.day} done for ${clientFirstName}` : `Session done for ${clientFirstName}`}
+                    {markAddTo && day ? `${day.day}: adding to today's session` : day ? `${day.day} done for ${clientFirstName}` : `Session done for ${clientFirstName}`}
                     {day && (n
                       ? <span className="font-normal text-gray-400"> · {n} of {day.exercises.length} exercise{day.exercises.length === 1 ? '' : 's'} ticked</span>
                       : <span className="font-normal text-gray-500"> · tick exercises above, or just save</span>)}
@@ -3010,6 +3060,26 @@ const handleResetPassword = async () => {
               </div>
             </div>
           )
+          // Saved earlier today: the day stays open, more ticks go into the same session
+          const cont = isDone && day ? todaysDaySession(plan.id, day.day) : null
+          if (cont && day) {
+            const savedN = tickedFromSaved(day, cont.exercises_done).length
+            return (
+              <div className="border-t border-gray-800 pt-3 space-y-2">
+                {weightsBanner(key)}
+                {sent}
+                {savedN < day.exercises.length && (
+                  <p className="text-xs text-gray-400">Saved {savedN} of {day.exercises.length} exercises today. Tick the next ones to add them to this session.</p>
+                )}
+                <button type="button" onClick={() => openMarkForm(key, cont)}
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium py-2.5 rounded-xl">
+                  Update today&apos;s session
+                </button>
+                <button type="button" onClick={() => { setMarkError(''); setMarkAgainKey(key) }}
+                  className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Log another session for {day.day}</button>
+              </div>
+            )
+          }
           if (isDone) return (
             <div className="border-t border-gray-800 pt-3">
               {weightsBanner(key)}
@@ -3061,12 +3131,16 @@ const handleResetPassword = async () => {
                   const notes = dayDone ? doneNotesWithWho(plan.id)[d.day] : ''
                   // What was ticked on the day (latest session for it); this week's days not yet done show the coach's ticks
                   // "Log another session" on a done day (its form is open): tick afresh, with weight rows (#80)
-                  const loggingAgain = isCurrent && dayDone && markKey === `${plan.id}:${d.day}`
+                  const loggingAgain = isCurrent && dayDone && markKey === `${plan.id}:${d.day}` && !markAddTo
+                  // Saved half-way earlier today: saved exercises stay ticked (locked), the rest can still be ticked
+                  const contSession = isCurrent && !d.rest && dayDone && !loggingAgain ? todaysDaySession(plan.id, d.day) : null
+                  const savedTicks = contSession ? tickedFromSaved(d, contSession.exercises_done) : []
                   const saved = countSessions.filter(x => x.weekly_plan_id === plan.id && dayKey(x.plan_day) === d.day && x.exercises_done)
                   const ticks = loggingAgain ? coachTicks[`${plan.id}:${d.day}`] || []
+                    : contSession ? [...new Set([...savedTicks, ...(coachTicks[`${plan.id}:${d.day}`] || [])])]
                     : saved.length ? tickedFromSaved(d, saved[saved.length - 1].exercises_done)
                     : isCurrent && !dayDone ? coachTicks[`${plan.id}:${d.day}`] || [] : []
-                  const canTick = isCurrent && !d.rest && (!dayDone || loggingAgain)
+                  const canTick = isCurrent && !d.rest && (!dayDone || loggingAgain || !!contSession)
                   const showTicks = canTick || ticks.length > 0
                   return (
                     <>
@@ -3126,9 +3200,17 @@ const handleResetPassword = async () => {
                                   </span>
                                 </>
                               )
+                              const savedLog = contSession && savedTicks.includes(i)
+                                ? (logsBySession[contSession.id] || []).find(l => l.position === i) ?? (logsBySession[contSession.id] || []).find(l => l.exercise_name === e.name)
+                                : undefined
                               return (
                                 <li key={i}>
-                                  {canTick ? (
+                                  {contSession && savedTicks.includes(i) ? (
+                                    <>
+                                      <div className="flex items-start gap-3 px-3 py-2">{body}</div>
+                                      <p className="pl-11 pr-3 pb-2 -mt-1 text-[11px] text-green-400">Saved{savedLog && logDetail(savedLog) ? ` · ${logDetail(savedLog)}` : ''}</p>
+                                    </>
+                                  ) : canTick ? (
                                     <>
                                       <button type="button" role="checkbox" aria-checked={ticked}
                                         onClick={() => toggleCoachTick(plan.id, d.day, i)}
