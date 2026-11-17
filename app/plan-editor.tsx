@@ -41,6 +41,7 @@ export default function PlanEditor({
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
   const [open, setOpen] = useState<Weekday>(() => ordered.find(d => !d.rest)?.day ?? ordered[0].day)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [renaming, setRenaming] = useState<number | null>(null) // exercise whose name box was tapped (change it)
   const [copyOpen, setCopyOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({})
   const [dupOpen, setDupOpen] = useState(false)
@@ -205,11 +206,14 @@ export default function PlanEditor({
             <div key={i} className="rounded-lg border border-gray-800 bg-gray-900 p-2.5 space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-gray-500 w-4 text-right shrink-0">{i + 1}</span>
-                <input size={1} aria-label={`${d.day} exercise ${i + 1} name`} value={e.name} maxLength={120}
-                  placeholder="Exercise, e.g. Goblet Squat"
-                  // Typing over a library exercise makes it a typed one (the link would be wrong)
-                  onChange={ev => updateExercise(d.day, i, { name: ev.target.value, exercise_id: undefined })}
-                  className={inputCls + ' font-medium'} />
+                {/* Tap to pick (17 Nov): no typed names, so one exercise keeps one name in reports. A name
+                    from AI or an old plan stays until it's changed here. */}
+                <button type="button" aria-label={`${d.day} exercise ${i + 1}: ${e.name || 'pick an exercise'}. Tap to change`}
+                  onClick={() => setRenaming(i)}
+                  className={inputCls + ' font-medium text-left truncate min-h-[44px] ' + (e.name ? '' : 'text-gray-500')}>
+                  {e.name || 'Tap to pick an exercise'}
+                  {e.name && !e.exercise_id && <span className="ml-1.5 text-[10px] font-normal text-amber-300/80">not in list</span>}
+                </button>
                 <button type="button" onClick={() => removeExercise(d.day, i)} aria-label={`Remove exercise ${i + 1}`}
                   className={iconBtn + ' hover:text-red-400 hover:border-red-500 shrink-0'}>✕</button>
               </div>
@@ -309,6 +313,11 @@ export default function PlanEditor({
 
       <ExercisePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={addPicked}
         companyId={companyId} title={`${d.day}${!d.rest && d.focus ? ' · ' + d.focus : ''}`} />
+      {/* Change one exercise: same picker, one pick, keeps its sets / reps / weight / rest / note */}
+      <ExercisePicker open={renaming !== null} single onClose={() => setRenaming(null)}
+        initialQuery={renaming !== null ? d.exercises[renaming]?.name || '' : ''}
+        onPick={p => { if (renaming !== null) updateExercise(d.day, renaming, { name: p.name, exercise_id: p.exercise_id }) }}
+        companyId={companyId} title={`${d.day} exercise ${renaming !== null ? renaming + 1 : ''}`} />
       <PlanCopySheet open={copyOpen} onClose={() => setCopyOpen(false)} onPick={copyPlan}
         currentClientId={clientId} country={country} />
     </div>
