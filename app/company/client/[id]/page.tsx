@@ -13,7 +13,7 @@ import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, ba
 import { type AttendanceRow, ATTENDANCE_COLUMNS, monthStats, statsText, monthRange, addDays, batchesOn as batchesMeetingOn, tapRow, buildAttendanceMessage } from '@/lib/attendance'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
-import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel } from '@/lib/plan-structure'
+import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel, remapPositions } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import PlanCopySheet from '@/app/plan-copy-sheet'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
@@ -281,6 +281,30 @@ export default function ClientDetailPage() {
     } catch { /* storage unavailable: ticks just won't survive a reload */ }
     return out
   })
+  // The day's exercise names for a "planId:Day" key (null = not this client's plan / not a day plan)
+  const dayNamesFor = (key: string): string[] | null => {
+    const cut = key.indexOf(':')
+    const plan = plans.find(p => p.id === key.slice(0, cut))
+    const json = plan ? planJsonOf(plan) : null
+    const d = json?.days.find(x => x.day === key.slice(cut + 1))
+    return d ? d.exercises.map(e => e.name) : null
+  }
+  // Unsaved ticks / weights are kept by position; this snapshot of the day's names ("coach-tick-names:<key>")
+  // lets them follow their exercise when the plan is edited mid-workout (17 Nov)
+  const COACH_TICK_NAMES = 'coach-tick-names:'
+  const readTickNames = (key: string): string[] | null => {
+    try {
+      const v = JSON.parse(localStorage.getItem(COACH_TICK_NAMES + key) || 'null')
+      return Array.isArray(v) && v.every(n => typeof n === 'string') ? v : null
+    } catch { return null }
+  }
+  const writeTickNames = (key: string, on: boolean) => {
+    try {
+      const names = on ? dayNamesFor(key) : null
+      if (names) localStorage.setItem(COACH_TICK_NAMES + key, JSON.stringify(names))
+      else if (!on) localStorage.removeItem(COACH_TICK_NAMES + key)
+    } catch { /* ignore */ }
+  }
   const setDayTicks = (key: string, list: number[]) => {
     setCoachTicks(prev => {
       const next = { ...prev }
@@ -291,6 +315,7 @@ export default function ClientDetailPage() {
       if (list.length) localStorage.setItem(COACH_TICKS + key, JSON.stringify(list))
       else localStorage.removeItem(COACH_TICKS + key)
     } catch { /* ignore */ }
+    writeTickNames(key, list.length > 0)
   }
   const toggleCoachTick = (planId: string, day: string, i: number) => {
     const key = `${planId}:${day}`
@@ -315,7 +340,7 @@ export default function ClientDetailPage() {
   // draftRestoredAt = when the draft shown in the open form was saved (the "restored" banner), else null.
   const sessionDraftKey = `cb-draft-${clientId}-${localToday()}`
   const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
-  type SessionDraftSaved = { at: number; key: string; addTo?: string | null; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
+  type SessionDraftSaved = { at: number; key: string; addTo?: string | null; names?: string[] | null; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
   const readSessionDraft = (): SessionDraftSaved | null => {
     try {
       const v = JSON.parse(localStorage.getItem(sessionDraftKey) || 'null')
@@ -359,6 +384,18 @@ export default function ClientDetailPage() {
       if (next && Object.keys(next).length) localStorage.setItem(COACH_WEIGHTS + key, JSON.stringify(next))
       else localStorage.removeItem(COACH_WEIGHTS + key)
     } catch { /* ignore */ }
+    if (next && Object.keys(next).length) writeTickNames(key, true)
+  }
+  // Moves unsaved ticks / weights from an older copy of the day (names) to the day as it is now.
+  // Returns how many ticked exercises are no longer in the day.
+  const followPlanEdit = (key: string, oldNames: string[], ticks: number[], weights: Record<number, LogDraft>) => {
+    const names = dayNamesFor(key)
+    if (!names) return { ticks, weights, dropped: 0 }
+    const map = remapPositions(oldNames, names)
+    const moved = ticks.flatMap(i => (map.has(i) ? [map.get(i)!] : []))
+    const movedWeights: Record<number, LogDraft> = Object.fromEntries(
+      Object.entries(weights).flatMap(([i, v]) => (map.has(Number(i)) ? [[map.get(Number(i))!, v]] : [])))
+    return { ticks: moved, weights: movedWeights, dropped: ticks.length - moved.length }
   }
   // Session saved but its weights weren't: kept here to retry the weights only (never the session)
   const [weightsRetry, setWeightsRetry] = useState<{ key: string; rows: LogInsert[]; error: string } | null>(null)
@@ -734,9 +771,13 @@ export default function ClientDetailPage() {
       return coachTicks[key] || []
     }
     setMarkForm({ ...base, ...draft.form })
-    const ticks = coachTicks[key]?.length ? coachTicks[key] : Array.isArray(draft.ticks) ? draft.ticks : []
+    // The draft's ticks / weights follow their exercises if the plan was edited since (by name)
+    const fromDraft = Array.isArray(draft.names)
+      ? followPlanEdit(key, draft.names, Array.isArray(draft.ticks) ? draft.ticks : [], draft.weights || {})
+      : { ticks: Array.isArray(draft.ticks) ? draft.ticks : [], weights: draft.weights || {}, dropped: 0 }
+    const ticks = coachTicks[key]?.length ? coachTicks[key] : fromDraft.ticks
     if (!coachTicks[key]?.length && ticks.length) setDayTicks(key, ticks)
-    if (!logDrafts[key] && draft.weights && Object.keys(draft.weights).length) saveDayDrafts(key, draft.weights)
+    if (!logDrafts[key] && Object.keys(fromDraft.weights).length) saveDayDrafts(key, fromDraft.weights)
     setDraftRestoredAt(draft.at || Date.now())
     return ticks
   }
@@ -1015,7 +1056,7 @@ export default function ClientDetailPage() {
   }
   // Writes the draft about 500 ms after the last change while the form is dirty
   const draftJson = markDirty && markKey
-    ? JSON.stringify({ key: markKey, addTo: markAddTo?.id ?? null, form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
+    ? JSON.stringify({ key: markKey, addTo: markAddTo?.id ?? null, names: dayNamesFor(markKey), form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
     : ''
   useEffect(() => {
     if (!draftJson) return
@@ -1063,6 +1104,24 @@ export default function ClientDetailPage() {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // Plan edited mid-workout (here, or on another phone and loaded now): unsaved ticks / weights follow
+  // their exercise by name; ones no longer in the day are dropped, with a toast saying so (17 Nov)
+  useEffect(() => {
+    if (!plans.length) return
+    let dropped = 0
+    for (const key of new Set([...Object.keys(coachTicks), ...Object.keys(logDrafts)])) {
+      const old = readTickNames(key)
+      const now = dayNamesFor(key)
+      if (!old || !now || (old.length === now.length && old.every((n, i) => n === now[i]))) continue
+      const r = followPlanEdit(key, old, coachTicks[key] || [], logDrafts[key] || {})
+      dropped += r.dropped
+      setDayTicks(key, r.ticks)
+      saveDayDrafts(key, Object.keys(r.weights).length ? r.weights : null)
+    }
+    if (dropped) showToast(`The plan changed: ${dropped} ticked exercise${dropped === 1 ? ' is' : 's are'} no longer in it, so ${dropped === 1 ? 'it was' : 'they were'} removed`, 'error')
+  // Runs when the plans load or change; the ticks / weights are read as they are at that moment
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plans])
   // Browser refresh / close while dirty: the browser's own "Leave site?" prompt
   useEffect(() => {
     if (!markDirty) return
@@ -3002,14 +3061,9 @@ const handleResetPassword = async () => {
                 const status = weekStatus(plan.week_start)
                 const done = doneDayKeys(plan.id, countSessions)
                 const workoutLabels = summary.days.filter(d => !isRestDay(d))
-                // A day saved part-way today isn't counted as done until every exercise is saved (like its circle)
-                const partToday = (label: string) => {
-                  if (status !== 'current' || !planJson) return false
-                  const pd = planJson.days.find(x => x.day === dayKey(label))
-                  const c = pd ? todaysDaySession(plan.id, pd.day) : null
-                  return !!(pd && c && savedProgress(pd, c))
-                }
-                const doneCount = workoutLabels.filter(d => done.has(dayKey(d)) && !partToday(d)).length
+                // Any saved session counts the day (also part-way: skipped exercises are normal); the day's
+                // "In progress · 3 of 8 exercises saved" line shows it is partial (17 Nov)
+                const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
                 const isCurrent = status === 'current'
                 const open = variant === 'current' || expandedPlanId === plan.id
                 const start = plan.week_start.slice(0, 10)
@@ -3167,9 +3221,7 @@ const handleResetPassword = async () => {
                       <div className="px-3 pt-1 pb-3">
                         <div className="grid grid-cols-7 gap-1">
                           {days.map((x, i) => {
-                            // Saved part-way today (more exercises still to add): stays orange until every exercise is saved
-                            const cont = isCurrent && !x.rest && done.has(x.day) ? todaysDaySession(plan.id, x.day) : null
-                            const isDone = !x.rest && done.has(x.day) && !(cont && savedProgress(x, cont))
+                            const isDone = !x.rest && done.has(x.day)
                             const isSel = i === selIdx
                             const circle = isDone ? 'bg-green-600 border-2 border-green-600 text-white'
                               : x.rest ? 'border border-gray-700 text-gray-500'
