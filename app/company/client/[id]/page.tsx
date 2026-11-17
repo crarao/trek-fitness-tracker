@@ -1058,22 +1058,35 @@ export default function ClientDetailPage() {
   const planDirty = planDraftKind === 'ai' || (planDraftKind === 'manual' && (newPlanTextMode
     ? !!newPlan.plan_details.trim()
     : !!newPlanJson?.days.some(d => d.exercises.some(e => e.name.trim()))))
-  const anyDirty = markDirty || planDirty
+  // Editing a saved plan (17 Nov): changed from the saved copy (week, time, text or days)
+  const editDirty = (() => {
+    if (!editingPlan) return false
+    const saved = plans.find(p => p.id === editingPlan.id)
+    if (!saved) return false
+    const now = JSON.stringify([editingPlan.week_start.slice(0, 10), editingPlan.workout_time || '', editingPlan.plan_details, editingJson])
+    const was = JSON.stringify([saved.week_start.slice(0, 10), saved.workout_time || '', saved.plan_details, planJsonOf(saved)])
+    return now !== was
+  })()
+  const anyDirty = markDirty || planDirty || editDirty
   // Sticky "Assign plan" bar on the Plans tab while a draft is open (the Save session bar wins if both are)
   const assignBarOn = !!planDraftKind && activeTab === 'plans' && !saveBarOn
   const assignDisabled = saving || !planDraftWeek || (planDraftKind === 'ai'
     ? (!generatedJson && !generatedPlan.trim())
     : newPlanTextMode && !newPlan.plan_details.trim())
   // kind: what is unsaved, the open session form ('mark') or a plan not yet assigned ('plan', 17 Nov)
-  const [leaveAsk, setLeaveAsk] = useState<{ go: () => void; kind: 'mark' | 'plan' } | null>(null)
+  const [leaveAsk, setLeaveAsk] = useState<{ go: () => void; kind: 'mark' | 'plan' | 'edit' } | null>(null)
   // Closing the form / another day / another tab: only the session form's sets can be lost there
   const askMark = (go: () => void) => { if (markDirty) setLeaveAsk({ go, kind: 'mark' }); else go() }
   // Leaving the page (Back, Home, Log out, phone Back): unsaved sets first, then a plan not yet assigned
   const askBeforeLeaving = (go: () => void) => {
     if (markDirty) setLeaveAsk({ go, kind: 'mark' })
     else if (planDirty) setLeaveAsk({ go, kind: 'plan' })
+    else if (editDirty) setLeaveAsk({ go, kind: 'edit' })
     else go()
   }
+  // Cancel / editing another plan while a saved plan has unsaved changes
+  const askEdit = (go: () => void) => { if (editDirty) setLeaveAsk({ go, kind: 'edit' }); else go() }
+  const discardEdit = () => { setEditingPlan(null); setEditingJson(null); setPlanError('') }
   // Throws away the open form's ticks, weights and notes (they stay on this device until saved or discarded)
   const discardMark = () => {
     if (markKey && markTarget?.day) { setDayTicks(markKey, []); saveDayDrafts(markKey, null) }
@@ -1114,8 +1127,10 @@ export default function ClientDetailPage() {
   const guardEntry = useRef(false)
   const markDirtyRef = useRef(false)
   const planDirtyRef = useRef(false)
+  const editDirtyRef = useRef(false)
   useEffect(() => { markDirtyRef.current = markDirty }, [markDirty])
   useEffect(() => { planDirtyRef.current = planDirty }, [planDirty])
+  useEffect(() => { editDirtyRef.current = editDirty }, [editDirty])
   useEffect(() => {
     if (!anyDirty || guardEntry.current) return
     window.history.pushState({ cbUnsaved: true }, '')
@@ -1125,10 +1140,10 @@ export default function ClientDetailPage() {
     const onPop = () => {
       if (!guardEntry.current) return
       guardEntry.current = false // Back just left the extra entry
-      if (!markDirtyRef.current && !planDirtyRef.current) { window.history.back(); return } // saved since: leave as usual
+      if (!markDirtyRef.current && !planDirtyRef.current && !editDirtyRef.current) { window.history.back(); return } // saved since: leave as usual
       window.history.pushState({ cbUnsaved: true }, '')
       guardEntry.current = true
-      setLeaveAsk({ go: () => { guardEntry.current = false; window.history.go(-2) }, kind: markDirtyRef.current ? 'mark' : 'plan' })
+      setLeaveAsk({ go: () => { guardEntry.current = false; window.history.go(-2) }, kind: markDirtyRef.current ? 'mark' : planDirtyRef.current ? 'plan' : 'edit' })
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -1170,7 +1185,9 @@ export default function ClientDetailPage() {
     setLeaveSaving(true)
     const ok = leaveAsk.kind === 'plan'
       ? await assignPlanDraft() // failed: the plan stays open with its error
-      : await handleCoachLogDay(markTarget!.plan, markTarget!.day, markTarget!.label)
+      : leaveAsk.kind === 'edit'
+        ? await handleUpdatePlan() // failed: the edit stays open with its error
+        : await handleCoachLogDay(markTarget!.plan, markTarget!.day, markTarget!.label)
     setLeaveSaving(false)
     const { go } = leaveAsk
     setLeaveAsk(null)
@@ -1180,6 +1197,7 @@ export default function ClientDetailPage() {
     if (!leaveAsk) return
     const { go, kind } = leaveAsk
     if (kind === 'plan') discardPlanDraft()
+    else if (kind === 'edit') discardEdit()
     else { discardMark(); closeMarkForm() }
     setLeaveAsk(null)
     go()
@@ -1404,16 +1422,16 @@ export default function ClientDetailPage() {
   // dates (no day shift in the US) and uses the company's country format.
   const formatWeekStart = (d: string) => formatDate(d.slice(0, 10), country, 'long')
 
-const handleUpdatePlan = async () => {
-  if (!editingPlan) return
+const handleUpdatePlan = async (): Promise<boolean> => {
+  if (!editingPlan) return false
   let cleaned: PlanJson | null = null
   if (editingJson) {
-    if (!editingPlan.week_start) { setPlanError('Pick the week first.'); return }
+    if (!editingPlan.week_start) { setPlanError('Pick the week first.'); return false }
     cleaned = readyToSave(editingJson)
-    if (!cleaned) return
+    if (!cleaned) return false
   } else if (!editingPlan.week_start || !editingPlan.plan_details.trim()) {
     setPlanError('Pick a week and add plan details before saving.')
-    return
+    return false
   }
   setSaving(true)
   setPlanError('')
@@ -1433,11 +1451,11 @@ const handleUpdatePlan = async () => {
   setSaving(false)
   if (error) {
     setPlanError('Could not save changes: ' + error.message)
-    return
+    return false
   }
   if (!updated?.length) {
     setPlanError("Couldn't save: not allowed for this login")
-    return
+    return false
   }
   const editedId = editingPlan.id
   setEditingPlan(null)
@@ -1447,6 +1465,7 @@ const handleUpdatePlan = async () => {
   setTimeout(() => setHighlightPlanId(prev => (prev === editedId ? null : prev)), 4000)
   loadData(['plans'])
   showToast('Plan updated ✓')
+  return true
 }
 
 const handleDeletePlan = async (planId: string) => {
@@ -2307,16 +2326,22 @@ const handleResetPassword = async () => {
           <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-4 shadow-2xl">
             <div>
               <p id="unsaved-title" className="text-base font-semibold text-white">
-                {leaveAsk.kind === 'plan' ? 'This plan isn\'t assigned yet. Assign now?' : 'You have unsaved sets. Save now?'}
+                {leaveAsk.kind === 'plan' ? 'This plan isn\'t assigned yet. Assign now?'
+                  : leaveAsk.kind === 'edit' ? 'Your changes to this plan aren\'t saved. Save now?'
+                  : 'You have unsaved sets. Save now?'}
               </p>
-              {leaveAsk.kind === 'plan'
+              {leaveAsk.kind === 'edit'
+                ? editingPlan && <p className="text-xs text-gray-400 mt-1">Plan for the week of {formatDate(editingPlan.week_start.slice(0, 10), country, 'dayMonth')}</p>
+                : leaveAsk.kind === 'plan'
                 ? <p className="text-xs text-gray-400 mt-1">{planDraftSummary}{planDraftWeek ? ` · week of ${formatDate(planDraftWeek, country, 'dayMonth')}` : ' · pick the week first'}</p>
                 : saveSummary && <p className="text-xs text-gray-400 mt-1">{saveSummary}</p>}
             </div>
             <div className="space-y-2">
               <button type="button" onClick={leaveSave} disabled={leaveSaving || savingMark || (leaveAsk.kind === 'plan' && assignDisabled)}
                 className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-white text-sm font-semibold rounded-xl">
-                {leaveAsk.kind === 'plan' ? (leaveSaving ? 'Assigning…' : `Assign to ${clientFirstName}`) : leaveSaving ? 'Saving…' : 'Save'}
+                {leaveAsk.kind === 'plan' ? (leaveSaving ? 'Assigning…' : `Assign to ${clientFirstName}`)
+                  : leaveAsk.kind === 'edit' ? (leaveSaving ? 'Saving…' : 'Save changes')
+                  : leaveSaving ? 'Saving…' : 'Save'}
               </button>
               <div className="flex gap-2">
                 <button type="button" onClick={leaveDiscard} disabled={leaveSaving}
@@ -3109,7 +3134,7 @@ const handleResetPassword = async () => {
                             className={`${item} text-orange-400 border-b border-gray-800 disabled:opacity-50`}>+ New plan</button>
                         )}
                         <button role="menuitem" type="button"
-                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }}
+                          onClick={e => { e.stopPropagation(); setPlanMenuId(null); askEdit(() => { setPlanError(''); setEditingPlan(plan); setEditingJson(planJsonOf(plan)) }) }}
                           className={`${item} text-gray-100`}>Edit plan</button>
                         <button role="menuitem" type="button" disabled={saving}
                           onClick={e => { e.stopPropagation(); setPlanMenuId(null); copyPlanTo(plan, nextStart) }}
@@ -3173,7 +3198,7 @@ const handleResetPassword = async () => {
             className="flex-1 bg-orange-500 hover:bg-orange-400 text-white text-sm py-2.5 rounded-xl transition disabled:opacity-50 font-medium">
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
-          <button onClick={() => { setEditingPlan(null); setEditingJson(null); setPlanError('') }}
+          <button onClick={() => askEdit(discardEdit)}
             className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
             Cancel
           </button>
