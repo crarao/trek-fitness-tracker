@@ -2,7 +2,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-exercises.ts --outDir /tmp/ce --module commonjs --target es2020 --skipLibCheck && node /tmp/ce/scripts/check-exercises.js
 
-import { searchExercises, hasExactName, recentFromPlans, tidyName, type Exercise } from '../lib/exercises'
+import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, type Exercise } from '../lib/exercises'
 import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan } from '../lib/plan-structure'
 
 const ex = (id: string, name: string, muscle_group: string, equipment: string, aliases: string[] = [], company_id: string | null = null): Exercise =>
@@ -72,6 +72,25 @@ check('round trip text → plan', textToPlan(planToText(plan))?.days[0].exercise
 console.log('\n4. Recently used in the gym (newest plan first)')
 check('ids, then names', recentFromPlans([{ plan_json: plan }, { plan_json: { days: [{ day: 'Tue', focus: 'Legs', exercises: [{ name: 'Goblet Squat' }] }] } }]).join(', '),
   '00000000-0000-0000-0000-000000000009, pushup, goblet squat')
+
+console.log('— name_key (same as the database) and findExercise (17 Nov)')
+check('nameKey strips and lowercases', nameKey('Bar-Bell  Squat (DB)'), 'barbellsquatdb')
+check('nameKey empty', nameKey('  -- '), '')
+const lib2: Exercise[] = [
+  ...list,
+  ex('00000000-0000-0000-0000-000000000010', 'Barbell Squat', 'legs', 'barbell'),
+  ex('00000000-0000-0000-0000-000000000011', 'Barbell Bench Press', 'chest', 'barbell', ['bench', 'flat bench']),
+  ex('00000000-0000-0000-0000-000000000012', 'Romanian Deadlift', 'legs', 'barbell', ['rdl']),
+]
+const find = (q: string) => { const m = findExercise(q, lib2); return m ? `${m.kind}: ${m.exercise.name}` : '(none)' }
+check('"Bar Bell Squat" = same key', find('Bar Bell Squat'), 'name: Barbell Squat')
+check('"bench" via alias', find('bench'), 'alias: Barbell Bench Press')
+check('"barbel squat" close', find('barbel squat'), 'close: Barbell Squat')
+check('"Squat Barbell" reordered', find('Squat Barbell'), 'reordered: Barbell Squat')
+check('"row" → TRX Row? no (short keys: exact only)', find('row'), '(none)')
+check('"rdl" alias', find('rdl'), 'alias: Romanian Deadlift')
+check('archived skipped', find('Old Machine Row'), '(none)')
+check('unknown', find('Battle Ropes'), '(none)')
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed')
 if (fails) process.exit(1)

@@ -11,6 +11,7 @@ import {
 } from '../lib/exercise-logs'
 import { withoutCalories } from '../lib/progress-share'
 import { remapPositions } from '../lib/plan-structure'
+import { setsOf, heaviestSet, setsVolume } from '../lib/exercise-logs'
 
 const ID_SQUAT = '00000000-0000-0000-0000-000000000002'
 const ID_LAT = '00000000-0000-0000-0000-000000000001'
@@ -237,6 +238,17 @@ check('after minutes', withoutCalories('Done 3 of 3\n\n⏱ 180 min · 🔥 about
 check('on its own line', withoutCalories('Done\n\n🔥 about 900 kcal (estimate)\nNote'), 'Done\n\nNote')
 check('no calories: unchanged', withoutCalories('Done\n\n⏱ 60 min'), 'Done\n\n⏱ 60 min')
 check('coach\'s own words kept', withoutCalories('Burned lots of kcal today!'), 'Burned lots of kcal today!')
+
+console.log('— Sets (17 Nov): setsOf, heaviest set, volume')
+check('new rows: set_details {kg, reps}', setsOf({ set_details: [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }], sets: 2, reps: 4, weight: 7 }), [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }])
+check('{weight, reps} read too', setsOf({ set_details: [{ weight: 20, reps: 10 }] }), [{ kg: 20, reps: 10 }])
+check('old row = equal sets', setsOf({ sets: 3, reps: 10, weight: 12 }), [{ kg: 12, reps: 10 }, { kg: 12, reps: 10 }, { kg: 12, reps: 10 }])
+check('old row, no sets count = one set', setsOf({ sets: null, reps: 10, weight: null }), [{ kg: null, reps: 10 }])
+check('empty row = no sets', setsOf({ sets: null, reps: null, weight: null }), [])
+check('empty set_details falls back', setsOf({ set_details: [], sets: 2, reps: 5, weight: 40 }), [{ kg: 40, reps: 5 }, { kg: 40, reps: 5 }])
+check('heaviest set (ties: more reps)', heaviestSet([{ kg: 5, reps: 3 }, { kg: 9, reps: 4 }, { kg: 9, reps: 6 }]), { kg: 9, reps: 6 })
+check('bodyweight: most reps', heaviestSet([{ kg: null, reps: 12 }, { kg: null, reps: 15 }]), { kg: null, reps: 15 })
+check('volume Σ kg × reps', setsVolume([{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }, { kg: null, reps: 10 }]), 43)
 
 console.log('— Plan edited mid-workout: unsaved ticks follow the exercise by name')
 const remap = (o: string[], n: string[]) => [...remapPositions(o, n).entries()]

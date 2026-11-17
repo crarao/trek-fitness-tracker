@@ -34,6 +34,71 @@ export function normalizeName(s: string): string {
 }
 const squash = (s: string) => normalizeName(s).replace(/ /g, '')
 
+// The database's exercises.name_key (db/2026-11-17-exercises-name-key.md), exactly:
+// lower(regexp_replace(name, '[^a-zA-Z0-9]', '', 'g')). "Bar-Bell Squat" → "barbellsquat".
+// Same result as squash() for plain names; this one follows the SQL order (strip, then lower case).
+export const nameKey = (name: string) => (name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+
+// Edit distance (insert / delete / change one letter), stopping early above `max`
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    let best = i
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+      best = Math.min(best, cur[j])
+    }
+    if (best > max) return max + 1
+    prev = cur
+  }
+  return prev[b.length]
+}
+
+// Typos allowed for a key of this length: 2 from 6 letters, 1 from 4, none for shorter keys
+// (so "row" never turns into "rdl")
+const typosAllowed = (len: number) => (len >= 6 ? 2 : len >= 4 ? 1 : 0)
+
+export type ExerciseMatch = {
+  exercise: Exercise
+  // name / alias: the same exercise (same key); reordered: the same words in another order;
+  // close: a likely typo, offered as "Did you mean …?" and never used without asking
+  kind: 'name' | 'alias' | 'reordered' | 'close'
+}
+
+// The exercise a typed or AI name means: same key as the name, else as an alias, else the same words
+// in a different order, else a close spelling (edit distance on the key). Archived exercises are skipped;
+// the gym's own exercise wins over the starter list. null = nothing like it.
+export function findExercise(name: string, list: Exercise[]): ExerciseMatch | null {
+  const key = nameKey(name)
+  if (!key) return null
+  const pool = list.filter(e => !e.is_archived)
+  const first = (xs: Exercise[]) => [...xs].sort((a, b) => (a.company_id ? 0 : 1) - (b.company_id ? 0 : 1))[0]
+  const byName = pool.filter(e => nameKey(e.name) === key)
+  if (byName.length) return { exercise: first(byName), kind: 'name' }
+  const byAlias = pool.filter(e => (e.aliases || []).some(a => nameKey(a) === key))
+  if (byAlias.length) return { exercise: first(byAlias), kind: 'alias' }
+  const words = (s: string) => normalizeName(s).split(' ').filter(Boolean).sort().join(' ')
+  const w = words(name)
+  if (w.includes(' ')) {
+    const reordered = pool.filter(e => [e.name, ...(e.aliases || [])].some(n => words(n) === w))
+    if (reordered.length) return { exercise: first(reordered), kind: 'reordered' }
+  }
+  let best: { e: Exercise; d: number } | null = null
+  for (const e of pool) {
+    for (const n of [e.name, ...(e.aliases || [])]) {
+      const k = nameKey(n)
+      const max = typosAllowed(Math.min(k.length, key.length))
+      if (!max) continue
+      const d = editDistance(key, k, max)
+      if (d > max) continue
+      if (!best || d < best.d || (d === best.d && e.company_id && !best.e.company_id)) best = { e, d }
+    }
+  }
+  return best ? { exercise: best.e, kind: 'close' } : null
+}
+
 // Name typed for a new exercise: trimmed, single spaces, first letter of each word capitalised
 // only when the coach typed it all in lower case ("lat pulldown" → "Lat Pulldown"; "TRX Row" kept)
 export function tidyName(s: string): string {

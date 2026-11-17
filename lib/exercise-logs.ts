@@ -37,6 +37,49 @@ const MAX_SETS = 20
 const MAX_REPS = 200
 const MAX_WEIGHT = 1000
 
+// ---- Sets (17 Nov: a weight and reps per set) ----
+
+// One set: kg null = bodyweight / no weight; reps null = not entered
+export type SetEntry = { kg: number | null; reps: number | null }
+
+const posNum = (v: unknown): number | null => {
+  const n = typeof v === 'string' ? Number(v) : v
+  return typeof n === 'number' && isFinite(n) && n > 0 ? n : null
+}
+
+// The sets of any logged exercise, old or new. New rows keep them in set_details as [{kg, reps}]
+// ({weight, reps} is read too); old rows have one sets / reps / weight, which becomes that many equal sets
+// (no sets count = one set). Every reader goes through this.
+export function setsOf(entry: { set_details?: unknown; sets?: number | null; reps?: number | null; weight?: number | null }): SetEntry[] {
+  if (Array.isArray(entry.set_details)) {
+    const out = entry.set_details.flatMap(x => {
+      if (!x || typeof x !== 'object') return []
+      const o = x as Record<string, unknown>
+      const kg = posNum(o.kg ?? o.weight)
+      const reps = posNum(o.reps)
+      return kg == null && reps == null ? [] : [{ kg, reps: reps == null ? null : Math.round(reps) }]
+    })
+    if (out.length) return out.slice(0, MAX_SETS)
+  }
+  const kg = posNum(entry.weight)
+  const reps = posNum(entry.reps)
+  if (kg == null && reps == null && !entry.sets) return []
+  const n = Math.max(1, Math.min(MAX_SETS, Math.round(entry.sets || 1)))
+  return Array.from({ length: n }, () => ({ kg, reps }))
+}
+
+// The heaviest set (ties: more reps); with no weights, the set with the most reps. null for no sets.
+export function heaviestSet(sets: SetEntry[]): SetEntry | null {
+  let best: SetEntry | null = null
+  for (const s of sets) {
+    if (!best || (s.kg ?? 0) > (best.kg ?? 0) || ((s.kg ?? 0) === (best.kg ?? 0) && (s.reps ?? 0) > (best.reps ?? 0))) best = s
+  }
+  return best
+}
+
+// Σ kg × reps over the sets that have both
+export const setsVolume = (sets: SetEntry[]) => Math.round(sets.reduce((n, s) => n + (s.kg && s.reps ? s.kg * s.reps : 0), 0) * 10) / 10
+
 // ---- Reading the plan's text ----
 
 // Reps / time written as a duration or a distance: "30 s", "45 sec", "2 min", "1 km", "400 m", "20 min walk"
