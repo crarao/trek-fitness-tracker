@@ -3160,7 +3160,9 @@ const handleResetPassword = async () => {
                       <div className="px-3 pt-1 pb-3">
                         <div className="grid grid-cols-7 gap-1">
                           {days.map((x, i) => {
-                            const isDone = !x.rest && done.has(x.day)
+                            // Saved part-way today (more exercises still to add): stays orange until every exercise is saved
+                            const cont = isCurrent && !x.rest && done.has(x.day) ? todaysDaySession(plan.id, x.day) : null
+                            const isDone = !x.rest && done.has(x.day) && !(cont && savedProgress(x, cont))
                             const isSel = i === selIdx
                             const circle = isDone ? 'bg-green-600 border-2 border-green-600 text-white'
                               : x.rest ? 'border border-gray-700 text-gray-500'
