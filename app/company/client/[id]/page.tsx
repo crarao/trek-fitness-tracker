@@ -296,6 +296,8 @@ export default function ClientDetailPage() {
     const key = `${planId}:${day}`
     const cur = coachTicks[key] || []
     setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
+    // Ticking starts logging this day: open its form so the sticky Save bar shows (17 Nov, FitLoft)
+    if (!markKey) openMarkForm(key)
   }
   // Open day row on this week's plan ("Mon"), the open "Mark done" form ("planId:Mon", or "planId:" for a
   // text plan), and a day already done that the coach asked to log again (confirm step)
@@ -306,6 +308,7 @@ export default function ClientDetailPage() {
   const [markForm, setMarkForm] = useState<SessionDraft>(coachDraft)
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
+  const savingMarkRef = useRef(false) // blocks a second save while one is running (double tap)
   // The session the coach just marked done ("planId:Mon" key), for "Send to <client> on WhatsApp"
   const [lastMarked, setLastMarked] = useState<{ key: string; session: Session } | null>(null)
   // Weight / reps per exercise (#80, db/2026-11-05-exercise-logs.md): on once the table answers.
@@ -795,14 +798,22 @@ export default function ClientDetailPage() {
   // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
   // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
   // plan null = a dojo session with no plan (Sessions tab → Log session; weekly_plan_id stays empty)
-  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null) => {
+  // Returns true once the session is saved. One save at a time (savingMarkRef): a double tap on the
+  // Save bar or the form's button never creates two sessions.
+  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null): Promise<boolean> => {
+    if (savingMarkRef.current) return false
+    savingMarkRef.current = true
+    try { return await saveCoachSession(plan, day, label) }
+    finally { savingMarkRef.current = false }
+  }
+  const saveCoachSession = async (plan: Plan | null, day: PlanDay | null, label: string | null): Promise<boolean> => {
     setMarkError('')
     const minutes = parseInt(markForm.duration_minutes)
-    if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return }
-    if (!markForm.session_date) { setMarkError('Pick the date'); return }
+    if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return false }
+    if (!markForm.session_date) { setMarkError('Pick the date'); return false }
     setSavingMark(true)
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSavingMark(false); router.push('/login'); return }
+    if (!user) { setSavingMark(false); router.push('/login'); return false }
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
@@ -828,7 +839,7 @@ export default function ClientDetailPage() {
     if (error || !session) {
       setSavingMark(false)
       setMarkError('Could not save: ' + (error?.message || 'please try again'))
-      return
+      return false
     }
     if (markForm.star_rating > 0 && !isCoach) {
       await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
@@ -853,7 +864,38 @@ export default function ClientDetailPage() {
     else if (link.moved) showToast(`✓ Saved on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
     else showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
     loadData(['sessions'])
+    return true
   }
+
+  // ---- Sticky Save bar (17 Nov, FitLoft: a coach typed reps, never scrolled to Save, the session was lost) ----
+  // The open logging form: which plan / day it is for (same arguments as the form's own Save button)
+  const markTarget = (() => {
+    if (!markKey) return null
+    if (markKey === DOJO_LOG_KEY) return { plan: null, day: null, label: null, tab: 'sessions' as const }
+    const cut = markKey.indexOf(':')
+    const plan = plans.find(p => p.id === markKey.slice(0, cut))
+    if (!plan) return null
+    const json = planJsonOf(plan)
+    const day = json ? json.days.find(d => d.day === markKey.slice(cut + 1)) ?? null : null
+    return { plan, day, label: day ? dayLabel(day) : null, tab: 'plans' as const }
+  })()
+  // Ticked exercises of the open form (only ones still in the day)
+  const markTicked = markTarget?.day && markKey ? (coachTicks[markKey] || []).filter(i => markTarget.day!.exercises[i]) : []
+  // "4 exercises · 11 sets entered" (sets of ticked strength exercises: what the coach typed, else the pre-fill)
+  const saveSummary = (() => {
+    if (!markTarget) return ''
+    if (!markTarget.day) {
+      const m = parseInt(markForm.duration_minutes)
+      return m > 0 ? `${m} min` : 'Nothing entered yet'
+    }
+    if (!markTicked.length) return 'Nothing entered yet'
+    const day = markTarget.day
+    const sets = markTicked.reduce((n, i) => n + (isTimedOrDistance(day.exercises[i]) ? 0 : draftFor(markKey!, i, day.exercises[i]).sets ?? 0), 0)
+    return `${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'} entered` : ''}`
+  })()
+  // Shown while the form is open on the tab it lives on; it replaces "Log today's session"
+  const saveBarOn = !!markTarget && activeTab === markTarget.tab
+  const saveFromBar = () => { if (markTarget) handleCoachLogDay(markTarget.plan, markTarget.day, markTarget.label) }
 
   // Shared insert for both the manual form and the AI panel.
   // Only clears/closes the form when the database confirms the save.
@@ -2455,7 +2497,8 @@ const handleResetPassword = async () => {
         </div>
       )}
 
-      <div className={`max-w-2xl mx-auto px-6 ${todayLog ? 'pb-32' : 'pb-8'}`}>
+      {/* Bottom padding so a fixed bar (Save session / Log today's session) never covers the last exercise */}
+      <div className={`max-w-2xl mx-auto px-6 ${saveBarOn ? 'pb-48' : todayLog || (dojo && !attendanceMode && client?.client_type === 'pt' && trainModule) ? 'pb-32' : 'pb-8'}`}>
 
         {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
@@ -3822,7 +3865,7 @@ const handleResetPassword = async () => {
 )}
       </div>
       {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
-      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
+      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && !saveBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
@@ -3832,8 +3875,22 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
-      {/* Log today's session: fixed at the bottom on every tab */}
-      {todayLog && (
+      {/* Save session: fixed at the bottom while a logging form is open (17 Nov). The form's own
+          button and this one call the same save (handleCoachLogDay). */}
+      {saveBarOn && (
+        <div data-testid="save-session-bar"
+          className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-2 pb-3">
+            <p className="text-xs text-gray-400 text-center mb-2 truncate" aria-live="polite">{saveSummary}</p>
+            <button type="button" onClick={saveFromBar} disabled={savingMark}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              {savingMark ? 'Saving…' : 'Save session'}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Log today's session: fixed at the bottom on every tab (the Save bar replaces it while logging) */}
+      {todayLog && !saveBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={openTodayLog}
