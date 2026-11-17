@@ -166,6 +166,15 @@ function LoginForm() {
       return
     }
 
+    // Archived client / turned-off coach: signed straight out again. Checked first: the database gives an archived
+    // login nothing but its own profile row (db/2026-11-17-archived-logins-rls.md), so the gym check below can't run
+    if ((profile.role === 'client' || profile.role === 'coach') && profile.archived_at) {
+      await supabase.auth.signOut()
+      setError(profile.role === 'coach' ? COACH_OFF_MESSAGE : CLIENT_OFF_MESSAGE)
+      setLoading(false)
+      return
+    }
+
     // On a gym's own address, only that gym's logins (and super admin) get in
     if (profile.role !== 'super_admin') {
       const { data: own } = await supabase.from('companies').select('slug').eq('id', profile.company_id).maybeSingle()

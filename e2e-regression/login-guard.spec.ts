@@ -4,7 +4,9 @@
 import type { Browser, Page } from '@playwright/test'
 import { devices } from '@playwright/test'
 import { test, expect, rest, e2eName, myCompanyId, callApi, createMember, archiveMember } from './fixtures'
-import { checkTarget } from './target'
+import { checkTarget, isForeignSupabase } from './target'
+import { usernameEmail } from '../lib/phone'
+import { token } from './session'
 import { submitLogin } from '../e2e/fixtures'
 import { fakeIndianMobile } from './helpers'
 
@@ -165,5 +167,63 @@ test.describe.serial('Login guards', () => {
     const { rows: c } = await rest('dojoOwner').get<{ email: string }>(`profiles?select=email&id=eq.${child}`)
     expect(c[0]?.email).toMatch(/^student-[a-z0-9]{8}@getcoachboard\.in$/)
     await archiveMember('dojoOwner', child)
+  })
+
+  // Database-level block (db/2026-11-17-archived-logins-rls.md): with a token taken straight from Supabase Auth
+  // (not through the app), an archived member gets nothing but their own profile row; Restore gives it all back.
+  test('R29 archived member: the database refuses their token (RLS), Restore gives access back', async ({ as }) => {
+    const owner = await as('gymOwner')
+    await owner.goto('/company')
+    const companyId = await myCompanyId('gymOwner')
+    const user = uname('r')
+    const name = e2eName('rls archived')
+    const id = await createMember(owner, companyId, name, { no_login: false, username: user, password: PASSWORD })
+
+    // Sign in through Supabase Auth directly (the publishable key the app itself sends), dev project only
+    const { supabaseUrl } = checkTarget()
+    const apikey = token('gymOwner').apikey
+    const login = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers: { apikey, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: usernameEmail(user), password: PASSWORD }),
+    })
+    expect(login.status, 'Supabase Auth still accepts the password (the block is in the data, not the login)').toBe(200)
+    const accessToken = (await login.json()).access_token as string
+    const call = async (method: string, path: string, body?: object) => {
+      const url = `${supabaseUrl}/rest/v1/${path}`
+      if (isForeignSupabase(url)) throw new Error('Refused: not the dev project')
+      const res = await fetch(url, {
+        method, body: body ? JSON.stringify(body) : undefined,
+        headers: { apikey, authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', prefer: 'return=representation' },
+      })
+      const text = await res.text()
+      let rows: unknown = []
+      try { rows = text ? JSON.parse(text) : [] } catch { rows = [] }
+      return { status: res.status, rows: Array.isArray(rows) ? rows : [] }
+    }
+    const count = async (path: string) => (await call('GET', path)).rows.length
+
+    // Active: their gym and the starter exercise list are readable
+    expect(await count(`companies?select=id&id=eq.${companyId}`), 'active: own gym').toBe(1)
+    expect(await count('exercises?select=id&limit=1'), 'active: exercise list').toBe(1)
+
+    await setArchived(id, true)
+    expect(await count(`profiles?select=id&id=eq.${id}`), 'archived: own profile row (login message)').toBe(1)
+    expect(await count('profiles?select=id&limit=5'), 'archived: nobody else').toBe(1)
+    expect(await count(`companies?select=id&id=eq.${companyId}`), 'archived: gym').toBe(0)
+    expect(await count('exercises?select=id&limit=1'), 'archived: exercise list').toBe(0)
+    for (const table of ['memberships', 'weekly_plans', 'logged_sessions', 'session_feedback', 'attendance', 'exercise_logs'])
+      expect(await count(`${table}?select=id&limit=1`), `archived: ${table}`).toBe(0)
+    const logSession = await call('POST', 'logged_sessions', { client_id: id, session_date: new Date().toISOString().slice(0, 10), duration_minutes: 30 })
+    expect(logSession.status, 'archived: logging a session is refused').toBeGreaterThanOrEqual(400)
+    const rename = await call('PATCH', `profiles?id=eq.${id}`, { full_name: name })
+    expect(rename.rows, 'archived: own profile can\'t be changed').toEqual([])
+    const staff = await call('POST', 'rpc/gym_staff', {})
+    expect(staff.rows, 'archived: no staff names').toEqual([])
+
+    // Restore: the same token works again straight away
+    await setArchived(id, false)
+    expect(await count(`companies?select=id&id=eq.${companyId}`), 'restored: own gym').toBe(1)
+    expect(await count('exercises?select=id&limit=1'), 'restored: exercise list').toBe(1)
+    await archiveMember('gymOwner', id)
   })
 })
