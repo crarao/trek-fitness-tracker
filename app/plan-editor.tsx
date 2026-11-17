@@ -144,6 +144,11 @@ export default function PlanEditor({
 
   return (
     <div className="space-y-3">
+      {/* Planning vs logging (17 Nov, FitLoft: reps typed into an AI draft were taken as a logged workout) */}
+      <p className="text-[11px] text-gray-400 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2" data-testid="plan-vs-log-note">
+        This is the plan: target sets, reps and weights. To record a workout, assign the plan, then tick the
+        exercises on the day under <span className="text-white">This week</span>.
+      </p>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-gray-400">
           {workoutCount} workout day{workoutCount === 1 ? '' : 's'} · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}
