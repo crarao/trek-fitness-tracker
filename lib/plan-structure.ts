@@ -258,6 +258,19 @@ export function exercisesDoneFor(day: PlanDay, ticked: number[]): ExercisesDone 
   return { done: day.exercises.filter((_, i) => ticked.includes(i)).map(e => e.name), total: day.exercises.length }
 }
 
+// Positions on an older copy of a day -> positions on the edited day, matched by exercise name (the n-th
+// "Squat" goes to the n-th "Squat"). Exercises no longer in the day are left out of the map.
+// Used for the coach's unsaved ticks / weights when the plan is edited mid-workout (17 Nov).
+export function remapPositions(oldNames: string[], newNames: string[]): Map<number, number> {
+  const used = new Set<number>()
+  const map = new Map<number, number>()
+  oldNames.forEach((name, i) => {
+    const j = newNames.findIndex((n, k) => n === name && !used.has(k))
+    if (j >= 0) { used.add(j); map.set(i, j) }
+  })
+  return map
+}
+
 // Saved names -> positions to show as ticked (matched by name, so a later plan edit can't misplace them)
 export function tickedFromSaved(day: PlanDay, saved: unknown): number[] {
   const names = saved && typeof saved === 'object' && Array.isArray((saved as ExercisesDone).done) ? (saved as ExercisesDone).done : []

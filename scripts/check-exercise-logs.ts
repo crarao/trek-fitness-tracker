@@ -10,6 +10,7 @@ import {
   weekOf, weeklyProgress, changeThisPeriod, lastWeeks, withWeightIn, strengthReport, changeSinceStart, fromFirstWeight,
 } from '../lib/exercise-logs'
 import { withoutCalories } from '../lib/progress-share'
+import { remapPositions } from '../lib/plan-structure'
 
 const ID_SQUAT = '00000000-0000-0000-0000-000000000002'
 const ID_LAT = '00000000-0000-0000-0000-000000000001'
@@ -236,6 +237,14 @@ check('after minutes', withoutCalories('Done 3 of 3\n\n⏱ 180 min · 🔥 about
 check('on its own line', withoutCalories('Done\n\n🔥 about 900 kcal (estimate)\nNote'), 'Done\n\nNote')
 check('no calories: unchanged', withoutCalories('Done\n\n⏱ 60 min'), 'Done\n\n⏱ 60 min')
 check('coach\'s own words kept', withoutCalories('Burned lots of kcal today!'), 'Burned lots of kcal today!')
+
+console.log('— Plan edited mid-workout: unsaved ticks follow the exercise by name')
+const remap = (o: string[], n: string[]) => [...remapPositions(o, n).entries()]
+check('unchanged', remap(['Squat', 'Bench', 'Row'], ['Squat', 'Bench', 'Row']), [[0, 0], [1, 1], [2, 2]])
+check('exercise inserted above', remap(['Squat', 'Bench'], ['Lunge', 'Squat', 'Bench']), [[0, 1], [1, 2]])
+check('reordered', remap(['Squat', 'Bench', 'Row'], ['Row', 'Squat', 'Bench']), [[0, 1], [1, 2], [2, 0]])
+check('removed exercise dropped', remap(['Squat', 'Bench', 'Row'], ['Squat', 'Row']), [[0, 0], [2, 1]])
+check('same name twice keeps order', remap(['Squat', 'Squat'], ['Lunge', 'Squat', 'Squat']), [[0, 1], [1, 2]])
 
 console.log(fails ? `\n${fails} FAILED` : '\nAll passed')
 if (fails) process.exit(1)
