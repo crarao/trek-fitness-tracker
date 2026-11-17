@@ -3,7 +3,7 @@
 //   npx tsc scripts/check-exercises.ts --outDir /tmp/ce --module commonjs --target es2020 --skipLibCheck && node /tmp/ce/scripts/check-exercises.js
 
 import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, linkPlanExercises, type Exercise } from '../lib/exercises'
-import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan } from '../lib/plan-structure'
+import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan, withSetTargets, withoutSetTargets, startSetTargets } from '../lib/plan-structure'
 
 const ex = (id: string, name: string, muscle_group: string, equipment: string, aliases: string[] = [], company_id: string | null = null): Exercise =>
   ({ id, company_id, name, aliases, muscle_group, equipment, is_archived: false })
@@ -101,6 +101,20 @@ const aiPlan = normalizePlan({ days: [{ day: 'Mon', focus: 'Legs', exercises: [
 const linked = linkPlanExercises(aiPlan, lib2).days.find(d => d.day === 'Mon')!.exercises.map(e => `${e.name}=${e.exercise_id ?? '-'}`)
 check('same key / alias linked; typo and unknown left; existing id kept', linked.join(', '),
   'Bar Bell Squat=00000000-0000-0000-0000-000000000010, Bench=00000000-0000-0000-0000-000000000011, Barbel Squat=-, Battle Ropes=-, Push-Up=00000000-0000-0000-0000-0000000000aa')
+
+console.log('— Plan: a weight / reps per set (17 Nov)')
+const pyr = withSetTargets({ name: 'Squat', sets: '3', reps: '10', rest: '90 s', note: '', weight: '20 kg' },
+  [{ kg: 20, reps: 10 }, { kg: 25, reps: 8 }, { kg: 30, reps: 6 }])
+check('fields rewritten from the rows', JSON.stringify([pyr.sets, pyr.reps, pyr.weight]), '["3","10/8/6","20/25/30 kg"]')
+check('detail lists the sets', exerciseDetail(pyr), '20 kg × 10 · 25 kg × 8 · 30 kg × 6, rest 90 s')
+check('kept by normalizePlan', JSON.stringify(normalizePlan({ days: [{ day: 'Mon', focus: 'Legs', exercises: [pyr] }] })!.days[0].exercises[0].set_targets),
+  '[{"kg":20,"reps":10},{"kg":25,"reps":8},{"kg":30,"reps":6}]')
+const back = withoutSetTargets(pyr)
+check('back to one target: the first set', JSON.stringify([back.sets, back.reps, back.weight, 'set_targets' in back]), '["3","10","20 kg",false]')
+check('starting rows from the exercise', JSON.stringify(startSetTargets({ name: 'Row', sets: '4', reps: '8–12', rest: '', note: '', weight: '12.5 kg' })),
+  '[{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8}]')
+check('bodyweight: no kg', JSON.stringify(startSetTargets({ name: 'Push-Up', sets: '', reps: '12', rest: '', note: '', weight: 'bodyweight' })),
+  '[{"kg":null,"reps":12},{"kg":null,"reps":12},{"kg":null,"reps":12}]')
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed')
 if (fails) process.exit(1)

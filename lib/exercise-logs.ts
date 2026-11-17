@@ -184,6 +184,8 @@ export function lastLogFor(e: Pick<PlanExercise, 'name' | 'exercise_id'>, logs: 
 export function prefill(e: PlanExercise, last: Pick<ExerciseLog, 'sets' | 'reps' | 'weight' | 'set_details'> | null): LogDraft {
   const count = Math.min(MAX_SETS, parseSets(e.sets) ?? 3)
   if (isTimedOrDistance(e)) return { sets: Array.from({ length: count }, () => ({ kg: null, reps: null })) }
+  // The plan sets a weight / reps per set (17 Nov): the rows start from those, whatever last time was
+  if (e.set_targets?.length) return { sets: e.set_targets.slice(0, MAX_SETS).map(t => ({ kg: t.kg, reps: t.reps })) }
   const lastSets = last ? setsOf(last) : []
   const plan: SetEntry = { kg: parseWeight(e.weight), reps: parseReps(e.reps) }
   return {

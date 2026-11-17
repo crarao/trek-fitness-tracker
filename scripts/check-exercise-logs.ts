@@ -105,6 +105,8 @@ check('prefill from last log (old row: equal sets, 4 rows from the plan)', prefi
   { sets: [S(50, 8), S(50, 8), S(50, 8), S(50, 8)] })
 check('prefill set by set, last set repeated', prefill(squatPlan, { sets: 2, reps: 4, weight: 7, set_details: [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }] }),
   { sets: [S(5, 3), S(7, 4), S(7, 4), S(7, 4)] })
+check('prefill from the plan\'s per-set targets (beats the last log)', prefill({ ...squatPlan, set_targets: [{ kg: 20, reps: 10 }, { kg: 25, reps: 8 }] }, { sets: 3, reps: 8, weight: 50 }),
+  { sets: [S(20, 10), S(25, 8)] })
 check('prefill from plan text', prefill(squatPlan, null), { sets: [S(30, 6), S(30, 6), S(30, 6), S(30, 6)] })
 check('prefill no sets in plan → 3 rows', prefill({ name: 'Row', sets: '', reps: '10', rest: '', note: '' }, null), { sets: [S(null, 10), S(null, 10), S(null, 10)] })
 check('prefill timed: empty rows', prefill({ name: 'Plank', sets: '3', reps: '30 s', rest: '', note: '' }, null), { sets: [S(null, null), S(null, null), S(null, null)] })
