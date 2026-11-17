@@ -4,7 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   type PlanJson, type PlanDay, type PlanExercise, type Weekday,
   daysInWeekOrder, emptyExercise, exerciseDetail, MAX_EXERCISES_PER_DAY,
+  type SetTarget, withSetTargets, withoutSetTargets, startSetTargets,
 } from '@/lib/plan-structure'
+import NumBox from '@/app/num-box'
 import { type Country } from '@/lib/locale'
 import ExercisePicker, { type PickedExercise } from '@/app/exercise-picker'
 import PlanCopySheet from '@/app/plan-copy-sheet'
@@ -80,6 +82,9 @@ export default function PlanEditor({
   const updateDay = (day: Weekday, change: (d: PlanDay) => PlanDay) => onChange(updateDayIn(value, day, change))
   const updateExercise = (day: Weekday, i: number, patch: Partial<PlanExercise>) =>
     updateDay(day, d => ({ ...d, exercises: d.exercises.map((e, j) => (j === i ? { ...e, ...patch } : e)) }))
+  // Replace one exercise as a whole (per-set targets rewrite sets / reps / weight and may drop fields)
+  const updateExerciseTo = (day: Weekday, i: number, next: PlanExercise) =>
+    updateDay(day, d => ({ ...d, exercises: d.exercises.map((e, j) => (j === i ? next : e)) }))
   const moveExercise = (day: Weekday, i: number, by: -1 | 1) =>
     updateDay(day, d => {
       const list = [...d.exercises]
@@ -161,7 +166,7 @@ export default function PlanEditor({
               onClick={() => { setOpen(x.day); setDupOpen(false) }}
               className={`rounded-lg border py-1.5 text-center leading-tight ${sel ? 'border-orange-500 bg-orange-500/15' : x.rest ? 'border-gray-800' : 'border-gray-700 bg-gray-800/50'}`}>
               <span className={`block text-xs font-semibold ${sel ? 'text-orange-300' : x.rest ? 'text-gray-500' : 'text-white'}`}>{x.day}</span>
-              <span className={`block text-[10px] ${x.rest ? 'text-gray-600' : 'text-gray-400'}`}>{x.rest ? (n ? `Rest+${n}` : 'Rest') : n}</span>
+              <span className={`block text-[10px] ${x.rest ? 'text-gray-600' : 'text-gray-400'}`}>{x.rest ? (n ? `Rest+${n}` : 'Rest') : n ? `${n} ex` : '—'}</span>
             </button>
           )
         })}
@@ -217,6 +222,39 @@ export default function PlanEditor({
                 <button type="button" onClick={() => removeExercise(d.day, i)} aria-label={`Remove exercise ${i + 1}`}
                   className={iconBtn + ' hover:text-red-400 hover:border-red-500 shrink-0'}>✕</button>
               </div>
+              {e.set_targets?.length ? (() => {
+                // Different weight / reps per set (17 Nov): one row per set; the logging rows start from these
+                const rows = e.set_targets
+                const setRows = (next: SetTarget[]) => updateExerciseTo(d.day, i, withSetTargets(e, next))
+                const box = 'min-w-0 h-10 bg-gray-800 text-white text-center rounded-lg px-1 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-xs'
+                return (
+                  <div className="pl-6 space-y-1.5">
+                    {rows.map((r, j) => (
+                      <div key={j} className="flex items-center gap-1.5">
+                        <span className="w-10 shrink-0 text-[10px] text-gray-500">Set {j + 1}</span>
+                        <NumBox kind="weight" label={`${e.name || 'Exercise'} set ${j + 1} kg`} placeholder="kg" className={`${box} w-16`}
+                          value={r.kg} onValue={kg => setRows(rows.map((x, k) => (k === j ? { ...x, kg } : x)))} />
+                        <span className="text-gray-500 text-[11px]">kg ×</span>
+                        <NumBox kind="reps" label={`${e.name || 'Exercise'} set ${j + 1} reps`} placeholder="reps" className={`${box} w-14`}
+                          value={r.reps} onValue={reps => setRows(rows.map((x, k) => (k === j ? { ...x, reps } : x)))} />
+                        <button type="button" aria-label={`Remove set ${j + 1}`} disabled={rows.length <= 1}
+                          onClick={() => setRows(rows.filter((_, k) => k !== j))}
+                          className="w-10 h-10 shrink-0 rounded-lg text-gray-500 hover:text-white disabled:opacity-30">✕</button>
+                      </div>
+                    ))}
+                    <div className="flex items-end gap-2">
+                      <button type="button" disabled={rows.length >= 20}
+                        onClick={() => setRows([...rows, { ...rows[rows.length - 1] }])}
+                        className="h-10 px-3 rounded-lg border border-gray-700 text-xs text-orange-300 hover:border-orange-500 disabled:opacity-40">+ Set</button>
+                      <label className="block flex-1">
+                        <span className="block text-[10px] text-gray-500 mb-0.5">Rest</span>
+                        <input size={1} value={e.rest} maxLength={30} placeholder="60 s" aria-label="Rest between sets"
+                          onChange={ev => updateExercise(d.day, i, { rest: ev.target.value })} className={smallInput} />
+                      </label>
+                    </div>
+                  </div>
+                )
+              })() : (
               <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-1.5 pl-6 items-end">
                 <div>
                   <span className="block text-[10px] text-gray-500 mb-0.5">Sets</span>
@@ -251,6 +289,7 @@ export default function PlanEditor({
                     onChange={ev => updateExercise(d.day, i, { rest: ev.target.value })} className={smallInput} />
                 </label>
               </div>
+              )}
               {showNote && (
                 <div className="pl-6">
                   <input size={1} aria-label="Note" value={e.note} maxLength={160} placeholder="Note, e.g. keep back flat"
@@ -259,10 +298,18 @@ export default function PlanEditor({
                 </div>
               )}
               <div className="flex items-center justify-between gap-2 pl-6">
-                {showNote
-                  ? <span className="text-[11px] text-orange-300 truncate">{exerciseDetail(e)}</span>
-                  : <button type="button" onClick={() => setNotesOpen(o => ({ ...o, [noteKey]: true }))}
-                      className="text-[11px] text-gray-400 hover:text-white">+ Note</button>}
+                <div className="flex items-center gap-3 min-w-0">
+                  {showNote
+                    ? <span className="text-[11px] text-orange-300 truncate">{exerciseDetail(e)}</span>
+                    : <button type="button" onClick={() => setNotesOpen(o => ({ ...o, [noteKey]: true }))}
+                        className="text-[11px] text-gray-400 hover:text-white">+ Note</button>}
+                  {/* Switch between one target for every set and a weight / reps per set (17 Nov) */}
+                  <button type="button" aria-pressed={!!e.set_targets?.length}
+                    onClick={() => updateExerciseTo(d.day, i, e.set_targets?.length ? withoutSetTargets(e) : withSetTargets(e, startSetTargets(e)))}
+                    className="text-[11px] text-gray-400 hover:text-white shrink-0">
+                    {e.set_targets?.length ? 'Same for every set' : 'Different weight per set'}
+                  </button>
+                </div>
                 <div className="flex gap-1 shrink-0">
                   <button type="button" onClick={() => moveExercise(d.day, i, -1)} disabled={i === 0} aria-label="Move up" className={iconBtn}>↑</button>
                   <button type="button" onClick={() => moveExercise(d.day, i, 1)} disabled={i === d.exercises.length - 1} aria-label="Move down" className={iconBtn}>↓</button>

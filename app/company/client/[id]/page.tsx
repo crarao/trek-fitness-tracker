@@ -1,6 +1,7 @@
 'use client'
 
 import PageNav from '@/app/page-nav'
+import NumBox from '@/app/num-box'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
@@ -33,7 +34,7 @@ import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS, linkPlanExercises } from '@/lib/exercises'
-import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, numberFromInput, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
+import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -136,36 +137,6 @@ function elapsedPct(startDate: string, endDate: string): number {
 const formatIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 // A date-only value plus n days, as YYYY-MM-DD
 const isoAdd = (iso: string, n: number) => { const d = parseDate(iso.slice(0, 10)); d.setDate(d.getDate() + n); return formatIso(d) }
-
-// A number box for a set's kg / reps (17 Nov). Keeps what is typed ("12." on the way to "12.5") and
-// reports the number on every key, so the Save bar summary follows live; shows the saved value again
-// whenever it changes from outside (prefill loaded, a row removed above) while the box isn't being typed in.
-function NumBox({ value, kind, label, onValue, className, placeholder }: {
-  value: number | null
-  kind: 'reps' | 'weight'
-  label: string
-  onValue: (n: number | null) => void
-  className: string
-  placeholder?: string
-}) {
-  const fmt = (v: number | null) => (v == null ? '' : String(v))
-  const [text, setText] = useState(fmt(value))
-  const [shown, setShown] = useState(value)
-  const [typing, setTyping] = useState(false)
-  if (!typing && value !== shown) { setShown(value); setText(fmt(value)) }
-  return (
-    <input type="text" inputMode={kind === 'weight' ? 'decimal' : 'numeric'} aria-label={label} placeholder={placeholder}
-      className={className} value={text}
-      onFocus={() => setTyping(true)}
-      onBlur={() => { setTyping(false); setText(fmt(value)); setShown(value) }}
-      onChange={ev => {
-        const n = numberFromInput(ev.target.value, kind)
-        setText(ev.target.value)
-        setShown(n)
-        onValue(n)
-      }} />
-  )
-}
 
 export default function ClientDetailPage() {
   const router = useRouter()
