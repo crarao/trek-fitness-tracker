@@ -2,7 +2,7 @@
 // company_id null = the shared starter list (read-only); set = the gym's own exercise.
 // Plans keep a copy of the name (plan_json), so renaming or archiving here never changes old plans.
 
-import { normalizePlan } from './plan-structure'
+import { normalizePlan, type PlanJson } from './plan-structure'
 
 export type Exercise = {
   id: string
@@ -152,6 +152,23 @@ export function searchExercises(list: Exercise[], f: ExerciseFilter, recent: str
 export function hasExactName(list: Exercise[], typed: string): boolean {
   const t = squash(typed)
   return !!t && list.some(e => squash(e.name) === t)
+}
+
+// AI plan save (17 Nov): each exercise without an id gets one when findExercise is sure (the same key as a
+// name or alias, or the same words in another order). A close spelling stays unlinked: that needs a person
+// ("Did you mean" in the picker). Names are never changed.
+export function linkPlanExercises(plan: PlanJson, list: Exercise[]): PlanJson {
+  return {
+    ...plan,
+    days: plan.days.map(d => ({
+      ...d,
+      exercises: d.exercises.map(e => {
+        if (e.exercise_id || !e.name.trim()) return e
+        const m = findExercise(e.name, list)
+        return m && m.kind !== 'close' ? { ...e, exercise_id: m.exercise.id } : e
+      }),
+    })),
+  }
 }
 
 // Exercises used in the gym's recent plans, most recent first: ids where the plan has them,

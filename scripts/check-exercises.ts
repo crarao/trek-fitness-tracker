@@ -2,7 +2,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-exercises.ts --outDir /tmp/ce --module commonjs --target es2020 --skipLibCheck && node /tmp/ce/scripts/check-exercises.js
 
-import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, type Exercise } from '../lib/exercises'
+import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, linkPlanExercises, type Exercise } from '../lib/exercises'
 import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan } from '../lib/plan-structure'
 
 const ex = (id: string, name: string, muscle_group: string, equipment: string, aliases: string[] = [], company_id: string | null = null): Exercise =>
@@ -91,6 +91,16 @@ check('"row" → TRX Row? no (short keys: exact only)', find('row'), '(none)')
 check('"rdl" alias', find('rdl'), 'alias: Romanian Deadlift')
 check('archived skipped', find('Old Machine Row'), '(none)')
 check('unknown', find('Battle Ropes'), '(none)')
+
+console.log('— AI plan save links exercise ids (17 Nov)')
+const aiPlan = normalizePlan({ days: [{ day: 'Mon', focus: 'Legs', exercises: [
+  { name: 'Bar Bell Squat', sets: '3', reps: '10' }, { name: 'Bench', sets: '3', reps: '8' },
+  { name: 'Barbel Squat', sets: '3', reps: '8' }, { name: 'Battle Ropes', sets: '3', reps: '30 s' },
+  { name: 'Push-Up', sets: '3', reps: '12', exercise_id: '00000000-0000-0000-0000-0000000000aa' },
+] }] })!
+const linked = linkPlanExercises(aiPlan, lib2).days.find(d => d.day === 'Mon')!.exercises.map(e => `${e.name}=${e.exercise_id ?? '-'}`)
+check('same key / alias linked; typo and unknown left; existing id kept', linked.join(', '),
+  'Bar Bell Squat=00000000-0000-0000-0000-000000000010, Bench=00000000-0000-0000-0000-000000000011, Barbel Squat=-, Battle Ropes=-, Push-Up=00000000-0000-0000-0000-0000000000aa')
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed')
 if (fails) process.exit(1)

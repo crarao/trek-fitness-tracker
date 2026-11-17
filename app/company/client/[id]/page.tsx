@@ -32,7 +32,7 @@ import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
 import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
-import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
+import { type Exercise, EXERCISE_COLUMNS, linkPlanExercises } from '@/lib/exercises'
 import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, numberFromInput, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
@@ -1294,7 +1294,11 @@ export default function ClientDetailPage() {
     if (generatedJson) {
       const cleaned = readyToSave(generatedJson)
       if (!cleaned) return
-      ok = await insertPlan({ ...aiPlanMeta, plan_details: planToText(cleaned), plan_json: cleaned })
+      // AI names get their exercise_id where the library has them (17 Nov); unmatched names stay as they are
+      const library = exLibrary.length ? exLibrary
+        : ((await supabase.from('exercises').select(EXERCISE_COLUMNS).order('name').limit(1000)).data || []) as Exercise[]
+      const linked = linkPlanExercises(cleaned, library)
+      ok = await insertPlan({ ...aiPlanMeta, plan_details: planToText(linked), plan_json: linked })
     } else {
       ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan })
     }
