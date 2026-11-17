@@ -294,7 +294,8 @@ export default function ClientDetailPage() {
   }
   const toggleCoachTick = (planId: string, day: string, i: number) => {
     const key = `${planId}:${day}`
-    const cur = coachTicks[key] || []
+    // Ticking starts logging this day: open its form so the sticky Save bar shows (17 Nov, FitLoft)
+    const cur = markKey ? coachTicks[key] || [] : openMarkForm(key)
     setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
   }
   // Open day row on this week's plan ("Mon"), the open "Mark done" form ("planId:Mon", or "planId:" for a
@@ -306,6 +307,22 @@ export default function ClientDetailPage() {
   const [markForm, setMarkForm] = useState<SessionDraft>(coachDraft)
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
+  const savingMarkRef = useRef(false) // blocks a second save while one is running (double tap)
+  // Draft safety net (17 Nov): the open form's entries on this device under cb-draft-<clientId>-<YYYY-MM-DD>.
+  // draftRestoredAt = when the draft shown in the open form was saved (the "restored" banner), else null.
+  const sessionDraftKey = `cb-draft-${clientId}-${localToday()}`
+  const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
+  type SessionDraftSaved = { at: number; key: string; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
+  const readSessionDraft = (): SessionDraftSaved | null => {
+    try {
+      const v = JSON.parse(localStorage.getItem(sessionDraftKey) || 'null')
+      return v && typeof v === 'object' && typeof v.key === 'string' && v.form ? v as SessionDraftSaved : null
+    } catch { return null }
+  }
+  const clearSessionDraft = () => {
+    try { localStorage.removeItem(sessionDraftKey) } catch { /* ignore */ }
+    setDraftRestoredAt(null)
+  }
   // The session the coach just marked done ("planId:Mon" key), for "Send to <client> on WhatsApp"
   const [lastMarked, setLastMarked] = useState<{ key: string; session: Session } | null>(null)
   // Weight / reps per exercise (#80, db/2026-11-05-exercise-logs.md): on once the table answers.
@@ -695,13 +712,27 @@ export default function ClientDetailPage() {
     }
     return notes
   }
-  const openMarkForm = (key: string) => {
+  // Opening a form restores today's unsaved draft for it, if any (banner "Unsaved session from … restored").
+  // Returns the ticks in force for the form, so a tick that opened it is added on top of them.
+  const openMarkForm = (key: string): number[] => {
     setMarkError('')
     setMarkAgainKey(null)
-    setMarkForm(coachDraft())
     setMarkKey(key)
+    const draft = readSessionDraft()
+    const hasWork = !!draft && (draft.ticks?.length > 0 || !!(draft.weights && Object.keys(draft.weights).length) || !!draft.form.notes?.trim())
+    if (!draft || draft.key !== key || !hasWork) {
+      setMarkForm(coachDraft())
+      setDraftRestoredAt(null)
+      return coachTicks[key] || []
+    }
+    setMarkForm({ ...coachDraft(), ...draft.form })
+    const ticks = coachTicks[key]?.length ? coachTicks[key] : Array.isArray(draft.ticks) ? draft.ticks : []
+    if (!coachTicks[key]?.length && ticks.length) setDayTicks(key, ticks)
+    if (!logDrafts[key] && draft.weights && Object.keys(draft.weights).length) saveDayDrafts(key, draft.weights)
+    setDraftRestoredAt(draft.at || Date.now())
+    return ticks
   }
-  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError('') }
+  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null) }
 
   // ---- Weight / reps per exercise (#80) ----
   // Logs with their session's date (for "last time" and months); logs of sessions not loaded are left out
@@ -795,14 +826,33 @@ export default function ClientDetailPage() {
   // (app/client/page.tsx handleLogDay), plus logged_by = the staff member saving it.
   // day/label are null for a text-only plan (saved without plan_day, like the client's Log tab).
   // plan null = a dojo session with no plan (Sessions tab → Log session; weekly_plan_id stays empty)
-  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null) => {
+  // Returns true once the session is saved. One save at a time (savingMarkRef): a double tap on the
+  // Save bar or the form's button never creates two sessions.
+  const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null): Promise<boolean> => {
+    if (savingMarkRef.current) return false
+    savingMarkRef.current = true
+    try { return await saveCoachSession(plan, day, label) }
+    finally { savingMarkRef.current = false }
+  }
+  const saveCoachSession = async (plan: Plan | null, day: PlanDay | null, label: string | null): Promise<boolean> => {
     setMarkError('')
     const minutes = parseInt(markForm.duration_minutes)
-    if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return }
-    if (!markForm.session_date) { setMarkError('Pick the date'); return }
+    if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return false }
+    if (!markForm.session_date) { setMarkError('Pick the date'); return false }
     setSavingMark(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSavingMark(false); router.push('/login'); return }
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (!user) {
+      setSavingMark(false)
+      // Offline / network trouble: keep the form and everything entered, never go to the login page
+      if (userError && (userError.name === 'AuthRetryableFetchError' || (typeof navigator !== 'undefined' && !navigator.onLine))) {
+        const msg = 'Could not save: no connection. Your entries are kept, try again.'
+        setMarkError(msg)
+        showToast(msg, 'error')
+        return false
+      }
+      router.push('/login')
+      return false
+    }
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
@@ -827,11 +877,15 @@ export default function ClientDetailPage() {
     }
     if (error || !session) {
       setSavingMark(false)
-      setMarkError('Could not save: ' + (error?.message || 'please try again'))
-      return
+      const msg = 'Could not save: ' + (error?.message || 'please try again')
+      setMarkError(msg)
+      showToast(msg, 'error') // the form stays open with everything still filled in
+      return false
     }
+    let ratingErr = ''
     if (markForm.star_rating > 0 && !isCoach) {
-      await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
+      const { error: fbError } = await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
+      if (fbError) ratingErr = fbError.message || 'please try again'
     }
     // Weight / reps of the ticked exercises (#80), after the session. If this fails the session stays
     // saved and the weights can be retried on their own (weightsBanner).
@@ -844,15 +898,145 @@ export default function ClientDetailPage() {
       setWeightsRetry(weightsErr ? { key: tickKey, rows, error: weightsErr } : null)
     }
     if (tickKey) saveDayDrafts(tickKey, null) // saved with the session now (or kept in weightsRetry)
+    clearSessionDraft()
     setSavingMark(false)
     closeMarkForm()
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
     if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
+    // "✓ Session saved · 4 exercises" (a day of a plan), "✓ Session saved · 60 min" (text plan / dojo)
+    const savedCount = day ? ticked.filter(i => day.exercises[i]).length : 0
+    const savedWhat = day ? `${savedCount} exercise${savedCount === 1 ? '' : 's'}` : `${minutes} min`
     if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
-    else if (link.moved) showToast(`✓ Saved on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
-    else showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
+    else if (ratingErr) showToast(`Session saved, but "How did it feel" wasn't: ${ratingErr}`, 'error')
+    else if (link.moved) showToast(`✓ Session saved · ${savedWhat} · on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
+    else showToast(`✓ Session saved · ${savedWhat}`)
     loadData(['sessions'])
+    return true
+  }
+
+  // ---- Sticky Save bar (17 Nov, FitLoft: a coach typed reps, never scrolled to Save, the session was lost) ----
+  // The open logging form: which plan / day it is for (same arguments as the form's own Save button)
+  const markTarget = (() => {
+    if (!markKey) return null
+    if (markKey === DOJO_LOG_KEY) return { plan: null, day: null, label: null, tab: 'sessions' as const }
+    const cut = markKey.indexOf(':')
+    const plan = plans.find(p => p.id === markKey.slice(0, cut))
+    if (!plan) return null
+    const json = planJsonOf(plan)
+    const day = json ? json.days.find(d => d.day === markKey.slice(cut + 1)) ?? null : null
+    return { plan, day, label: day ? dayLabel(day) : null, tab: 'plans' as const }
+  })()
+  // Ticked exercises of the open form (only ones still in the day)
+  const markTicked = markTarget?.day && markKey ? (coachTicks[markKey] || []).filter(i => markTarget.day!.exercises[i]) : []
+  // "4 exercises · 11 sets entered" (sets of ticked strength exercises: what the coach typed, else the pre-fill)
+  const saveSummary = (() => {
+    if (!markTarget) return ''
+    if (!markTarget.day) {
+      const m = parseInt(markForm.duration_minutes)
+      return m > 0 ? `${m} min` : 'Nothing entered yet'
+    }
+    if (!markTicked.length) return 'Nothing entered yet'
+    const day = markTarget.day
+    const sets = markTicked.reduce((n, i) => n + (isTimedOrDistance(day.exercises[i]) ? 0 : draftFor(markKey!, i, day.exercises[i]).sets ?? 0), 0)
+    return `${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'} entered` : ''}`
+  })()
+  // Shown while the form is open on the tab it lives on; it replaces "Log today's session"
+  const saveBarOn = !!markTarget && activeTab === markTarget.tab
+  const saveFromBar = () => { if (markTarget) handleCoachLogDay(markTarget.plan, markTarget.day, markTarget.label) }
+
+  // ---- Warn before losing work (17 Nov) ----
+  // Dirty = the open form has a tick, a weight / reps entry or a note. False again after a save or discard.
+  const markDirty = !!markTarget && !!markKey && (
+    markTicked.length > 0 || Object.keys(logDrafts[markKey] || {}).length > 0 || markForm.notes.trim() !== '')
+  // "You have unsaved sets. Save now?": go = what the coach was doing (back, close, other tab, other day)
+  const [leaveAsk, setLeaveAsk] = useState<{ go: () => void } | null>(null)
+  const askBeforeLeaving = (go: () => void) => { if (markDirty) setLeaveAsk({ go }); else go() }
+  // Throws away the open form's ticks, weights and notes (they stay on this device until saved or discarded)
+  const discardMark = () => {
+    if (markKey && markTarget?.day) { setDayTicks(markKey, []); saveDayDrafts(markKey, null) }
+    setMarkForm(coachDraft())
+    clearSessionDraft()
+  }
+  // Writes the draft about 500 ms after the last change while the form is dirty
+  const draftJson = markDirty && markKey
+    ? JSON.stringify({ key: markKey, form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
+    : ''
+  useEffect(() => {
+    if (!draftJson) return
+    const t = setTimeout(() => {
+      try { localStorage.setItem(sessionDraftKey, JSON.stringify({ at: Date.now(), ...JSON.parse(draftJson) })) }
+      catch { /* storage full or blocked: the ticks / weights keys still keep most of it */ }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [draftJson, sessionDraftKey])
+  // "Unsaved session from 6:42 pm restored · Discard" above the open form
+  const draftBanner = () => {
+    if (draftRestoredAt == null) return null
+    const at = new Date(draftRestoredAt)
+    const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+    return (
+      <div className="bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 flex items-center justify-between gap-3" role="status">
+        <p className="text-xs text-amber-200">Unsaved session from {workoutTimeLabel(hhmm, country)} restored</p>
+        <button type="button" onClick={discardMark}
+          className="text-xs text-amber-300 hover:text-white underline underline-offset-2 shrink-0">Discard</button>
+      </div>
+    )
+  }
+
+  const requestCloseMark = () => askBeforeLeaving(closeMarkForm)
+  const goTab = (tab: typeof activeTab) => { if (tab !== activeTab) askBeforeLeaving(() => setActiveTab(tab)) }
+  // Phone / browser Back while dirty: an extra history entry (same address) catches it and asks first.
+  // A leftover entry after a save is skipped on the next Back (onPop below), so one Back still leaves.
+  const guardEntry = useRef(false)
+  const markDirtyRef = useRef(false)
+  useEffect(() => { markDirtyRef.current = markDirty }, [markDirty])
+  useEffect(() => {
+    if (!markDirty || guardEntry.current) return
+    window.history.pushState({ cbUnsaved: true }, '')
+    guardEntry.current = true
+  }, [markDirty])
+  useEffect(() => {
+    const onPop = () => {
+      if (!guardEntry.current) return
+      guardEntry.current = false // Back just left the extra entry
+      if (!markDirtyRef.current) { window.history.back(); return } // saved since: leave as usual
+      window.history.pushState({ cbUnsaved: true }, '')
+      guardEntry.current = true
+      setLeaveAsk({ go: () => { guardEntry.current = false; window.history.go(-2) } })
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  // Browser refresh / close while dirty: the browser's own "Leave site?" prompt
+  useEffect(() => {
+    if (!markDirty) return
+    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onUnload)
+    return () => window.removeEventListener('beforeunload', onUnload)
+  }, [markDirty])
+  // Leaving the page from a button: replace the extra entry instead of stacking another one
+  const leaveTo = (path: string) => {
+    if (guardEntry.current) { guardEntry.current = false; router.replace(path) }
+    else router.push(path)
+  }
+  const [leaveSaving, setLeaveSaving] = useState(false)
+  const leaveSave = async () => {
+    if (!leaveAsk || !markTarget) return
+    setLeaveSaving(true)
+    const ok = await handleCoachLogDay(markTarget.plan, markTarget.day, markTarget.label)
+    setLeaveSaving(false)
+    const { go } = leaveAsk
+    setLeaveAsk(null)
+    if (ok) go() // failed: the form stays open with the error and everything entered
+  }
+  const leaveDiscard = () => {
+    if (!leaveAsk) return
+    const { go } = leaveAsk
+    discardMark()
+    closeMarkForm()
+    setLeaveAsk(null)
+    go()
   }
 
   // Shared insert for both the manual form and the AI panel.
@@ -1879,7 +2063,32 @@ const handleResetPassword = async () => {
 
   return (
     <div data-testid="page-client" className="min-h-screen bg-gray-950 text-white">
-      <PageNav />
+      <PageNav onNavigate={askBeforeLeaving} />
+      {/* Unsaved sets: Save / Discard / Keep editing (17 Nov; in-app, never window.confirm) */}
+      {leaveAsk && (
+        <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+          role="dialog" aria-modal="true" aria-labelledby="unsaved-title" data-testid="unsaved-confirm"
+          onClick={e => { if (e.target === e.currentTarget && !leaveSaving) setLeaveAsk(null) }}>
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div>
+              <p id="unsaved-title" className="text-base font-semibold text-white">You have unsaved sets. Save now?</p>
+              {saveSummary && <p className="text-xs text-gray-400 mt-1">{saveSummary}</p>}
+            </div>
+            <div className="space-y-2">
+              <button type="button" onClick={leaveSave} disabled={leaveSaving || savingMark}
+                className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-white text-sm font-semibold rounded-xl">
+                {leaveSaving ? 'Saving…' : 'Save'}
+              </button>
+              <div className="flex gap-2">
+                <button type="button" onClick={leaveDiscard} disabled={leaveSaving}
+                  className="flex-1 min-h-[44px] bg-gray-800 hover:bg-gray-700 text-red-300 text-sm rounded-xl">Discard</button>
+                <button type="button" onClick={() => setLeaveAsk(null)} disabled={leaveSaving}
+                  className="flex-1 min-h-[44px] bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl">Keep editing</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* + New plan bottom sheet: AI, manual, or copy the latest plan to the chosen week */}
       {newPlanSheetOpen && client && (() => {
         const first = (client.full_name || '').trim().split(/\s+/)[0] || 'client'
@@ -2002,7 +2211,7 @@ const handleResetPassword = async () => {
           <div className="bg-gray-900 border-b border-gray-800">
             <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-4">
               <div className="flex items-start gap-2">
-                <button data-nav onClick={() => router.push(isCoach ? '/coach' : '/company')} aria-label="Back"
+                <button data-nav onClick={() => askBeforeLeaving(() => leaveTo(isCoach ? '/coach' : '/company'))} aria-label="Back"
                   className="shrink-0 w-11 h-11 -ml-2 flex items-center justify-center text-gray-400 hover:text-white rounded-xl transition text-xl">
                   ←
                 </button>
@@ -2423,7 +2632,7 @@ const handleResetPassword = async () => {
                     </ul>
                   )}
                   {b.totalSessions > 0 && (client as any)?.companies?.client_module_enabled && (
-                    <button type="button" onClick={() => setActiveTab('sessions')}
+                    <button type="button" onClick={() => goTab('sessions')}
                       className="text-xs text-orange-400 hover:text-orange-300">
                       See all {b.totalSessions} session{b.totalSessions === 1 ? '' : 's'} →
                     </button>
@@ -2443,7 +2652,7 @@ const handleResetPassword = async () => {
           <div role="tablist" className={`grid ${dojo ? 'grid-cols-3' : 'grid-cols-4'} gap-1 bg-gray-900 p-1 rounded-xl border border-gray-800`}>
             {/* Dojo: no Plans tab (attendance with batches replaces it later; saved plans are kept) */}
             {(dojo ? ['profile', 'sessions', 'progress'] as const : ['profile', 'plans', 'sessions', 'progress'] as const).map(tab => (
-              <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
+              <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => goTab(tab)}
                 className={`min-h-[44px] text-xs font-medium rounded-lg transition ${activeTab === tab
                   ? 'bg-orange-500 text-white'
                   : 'text-gray-400 hover:text-white'}`}>
@@ -2455,7 +2664,8 @@ const handleResetPassword = async () => {
         </div>
       )}
 
-      <div className={`max-w-2xl mx-auto px-6 ${todayLog ? 'pb-32' : 'pb-8'}`}>
+      {/* Bottom padding so a fixed bar (Save session / Log today's session) never covers the last exercise */}
+      <div className={`max-w-2xl mx-auto px-6 ${saveBarOn ? 'pb-48' : todayLog || (dojo && !attendanceMode && client?.client_type === 'pt' && trainModule) ? 'pb-32' : 'pb-8'}`}>
 
         {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
@@ -2476,7 +2686,7 @@ const handleResetPassword = async () => {
       <p className="text-xs text-yellow-300">
         Add {missing.join(', ').replace(/, ([^,]*)$/, ' and $1')} in Profile for a better AI plan.
       </p>
-      <button onClick={() => setActiveTab('profile')}
+      <button onClick={() => goTab('profile')}
         className="text-xs text-yellow-200 border border-yellow-700 hover:border-yellow-500 px-3 py-1 rounded-lg transition">
         Open Profile
       </button>
@@ -2772,12 +2982,13 @@ const handleResetPassword = async () => {
           if (markKey === key) return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
               {coveringBadge()}
+              {draftBanner()}
               <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
                 feelingEnabled={!isCoach}
                 country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
                 notesLabel="Notes (optional)"
                 error={markError} saving={savingMark} submitLabel={`Done ✓ for ${clientFirstName}`}
-                onSubmit={() => handleCoachLogDay(plan, day, label)} onCancel={closeMarkForm}
+                onSubmit={() => handleCoachLogDay(plan, day, label)} onCancel={requestCloseMark}
                 heading={
                   <p className="text-xs font-semibold text-green-400">
                     {day ? `${day.day} done for ${clientFirstName}` : `Session done for ${clientFirstName}`}
@@ -2840,11 +3051,11 @@ const handleResetPassword = async () => {
                   const fallback = todayIdx >= 0 ? days[todayIdx].day : (days.find(d => !d.rest) ?? days[0]).day
                   const chosen = variant === 'current' ? coachOpenDay : selDay[plan.id]
                   const selIdx = Math.max(0, days.findIndex(d => d.day === (chosen && days.some(x => x.day === chosen) ? chosen : fallback)))
-                  const select = (day: string) => {
+                  const select = (day: string) => askBeforeLeaving(() => {
                     if (variant === 'current') setCoachOpenDay(day)
                     else setSelDay(prev => ({ ...prev, [plan.id]: day }))
                     closeMarkForm()
-                  }
+                  })
                   const d = days[selIdx]
                   const dayDone = !d.rest && done.has(d.day)
                   const notes = dayDone ? doneNotesWithWho(plan.id)[d.day] : ''
@@ -3045,12 +3256,13 @@ const handleResetPassword = async () => {
             {dojo && !attendanceMode && (markKey === DOJO_LOG_KEY ? (
               <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
                 {coveringBadge()}
+                {draftBanner()}
                 <SessionForm mode="day" idPrefix="dojo-log" value={markForm} onChange={setMarkForm}
                   feelingEnabled={!isCoach}
                   country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
                   notesLabel="Notes (optional)"
                   error={markError} saving={savingMark} submitLabel={`Save session for ${clientFirstName}`}
-                  onSubmit={() => handleCoachLogDay(null, null, null)} onCancel={closeMarkForm}
+                  onSubmit={() => handleCoachLogDay(null, null, null)} onCancel={requestCloseMark}
                   heading={<p className="text-xs font-semibold text-green-400">Session for {clientFirstName}</p>} />
               </div>
             ) : (
@@ -3822,7 +4034,7 @@ const handleResetPassword = async () => {
 )}
       </div>
       {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
-      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && (
+      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && !saveBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
@@ -3832,8 +4044,22 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
-      {/* Log today's session: fixed at the bottom on every tab */}
-      {todayLog && (
+      {/* Save session: fixed at the bottom while a logging form is open (17 Nov). The form's own
+          button and this one call the same save (handleCoachLogDay). */}
+      {saveBarOn && (
+        <div data-testid="save-session-bar"
+          className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-2 pb-3">
+            <p className="text-xs text-gray-400 text-center mb-2 truncate" aria-live="polite">{saveSummary}</p>
+            <button type="button" onClick={saveFromBar} disabled={savingMark}
+              className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition truncate px-4">
+              {savingMark ? 'Saving…' : 'Save session'}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Log today's session: fixed at the bottom on every tab (the Save bar replaces it while logging) */}
+      {todayLog && !saveBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={openTodayLog}

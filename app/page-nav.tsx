@@ -7,8 +7,11 @@
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-export default function PageNav() {
+// onNavigate (optional): lets a page ask first before Home / Log out leave it, e.g. unsaved sets on the
+// client page; it gets the move to make and calls it when it's fine to go. Without it: as before.
+export default function PageNav({ onNavigate }: { onNavigate?: (go: () => void) => void } = {}) {
   const router = useRouter()
+  const go = (move: () => void) => (onNavigate ? onNavigate(move) : move())
   const logout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
@@ -16,11 +19,11 @@ export default function PageNav() {
   return (
     <nav aria-label="Home and log out" data-testid="page-nav"
       className="bg-gray-950 border-b border-gray-900 px-4 sm:px-8 py-1.5 flex items-center justify-between text-xs">
-      <button type="button" data-nav onClick={() => router.push('/dashboard')}
+      <button type="button" data-nav onClick={() => go(() => router.push('/dashboard'))}
         className="flex items-center gap-1.5 text-gray-400 hover:text-white px-2 py-1.5 -ml-2 rounded-lg">
         <span aria-hidden="true">⌂</span> Home
       </button>
-      <button type="button" onClick={logout} className="text-gray-500 hover:text-white px-2 py-1.5 -mr-2 rounded-lg">
+      <button type="button" onClick={() => go(logout)} className="text-gray-500 hover:text-white px-2 py-1.5 -mr-2 rounded-lg">
         Log out
       </button>
     </nav>
