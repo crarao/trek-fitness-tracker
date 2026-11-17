@@ -6,7 +6,8 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 // Next.js 16 "proxy" (formerly middleware): runs on the server before app pages load.
 // 1. Must be logged in (Supabase session cookie, verified with Supabase).
 // 2. Must have the right role for the section; otherwise sent to their own home screen.
-// 3. A coach whose login was turned off (archived_at set) is sent to /login.
+// 3. A coach whose login was turned off, or an archived client (archived_at set), is sent to /login
+//    (?off=coach / ?off=client), where the open session is signed out.
 // 4. Gym subdomains (syedfitness.getcoachboard.com, lib/tenant.ts): the whole app runs there.
 //    Unknown gym → main site. "/" → /dashboard (logged out → branded /login). A login from another
 //    gym is sent to /login?off=gym (signed out there). Super admin may use any gym's address.
@@ -143,6 +144,14 @@ async function checkLogin(request: NextRequest, tenantId: string | null) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.search = '?off=coach'
+    return NextResponse.redirect(url)
+  }
+
+  // Archived client with a session still open: same, with the client's message. Restore = in again.
+  if (role === 'client' && profile?.archived_at) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = '?off=client'
     return NextResponse.redirect(url)
   }
 

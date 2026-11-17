@@ -247,6 +247,35 @@ export function feesToCollect<S extends FeeStudent>(opts: {
   return { dueThisWeek, lapsed: lapsedRows, totals: { byCurrency, parents } }
 }
 
+// ---- 2b. Mark paid (Fees card, 15 Nov) ----
+// The same rules as the client page's Renew: a new memberships row (history is kept), plan and amount carried from the
+// latest one, starting when the current one ends (if it hasn't ended yet) else today, ending after the plan's length.
+
+export const PLAN_TYPES = ['1 Month', '3 Months', '6 Months', '1 Year'] as const
+const PLAN_MONTHS: Record<string, number> = { '1 Month': 1, '3 Months': 3, '6 Months': 6, '1 Year': 12 }
+
+// 'YYYY-MM-DD' + the plan's length (same result as Renew's setMonth / setFullYear); unknown plan = 1 month
+export function planEndDate(startIso: string, planType: string): string {
+  const [y, m, d] = startIso.slice(0, 10).split('-').map(Number)
+  const end = new Date(Date.UTC(y, m - 1 + (PLAN_MONTHS[planType] ?? 1), d))
+  return end.toISOString().slice(0, 10)
+}
+
+export type PaidDraft = { plan_type: string; amount: string; currency: string | null; start_date: string; end_date: string }
+
+export function renewalDraft(m: MembershipLike | null, today: Date = new Date()): PaidDraft {
+  const t = iso(today)
+  const start = m?.end_date && m.end_date.slice(0, 10) > t ? m.end_date.slice(0, 10) : t
+  const plan = m?.plan_type && PLAN_MONTHS[m.plan_type] ? m.plan_type : '1 Month'
+  return {
+    plan_type: plan,
+    amount: m && Number(m.amount_paid) ? String(m.amount_paid) : '',
+    currency: m?.currency ?? null,
+    start_date: start,
+    end_date: planEndDate(start, plan),
+  }
+}
+
 // tel: link in E.164 (+919876543210) for a stored phone; null when it isn't a readable number
 export function telHref(phone: string | null | undefined, country: Country | null): string | null {
   const parts = splitE164(phone, country)

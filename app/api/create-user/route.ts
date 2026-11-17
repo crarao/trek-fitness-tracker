@@ -5,6 +5,7 @@ import { isCoachCompany, COACH_COMPANY_NO_STAFF } from '@/lib/company-type'
 import { COUNTRIES } from '@/lib/locale'
 import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164, normalizeUsername, usernameEmail, usernameProblem } from '@/lib/phone'
 import { takenUsernames, freeSuggestions, isDuplicateLogin } from '@/lib/username-server'
+import { normalizeEmail, clientEmailProblem, clientEmailAllowed, passwordProblem, authErrorMessage } from '@/lib/login-rules'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
 import { isDojo } from '@/lib/labels'
 import { checkPlacement } from '@/lib/placement-server'
@@ -34,7 +35,9 @@ const hasGuardianFields = role === 'client' && ('guardian_phone' in body || 'gua
 const childNoPhone = noLogin && hasGuardianFields && !!body.guardian_phone && !phone
 // Username login (clients): the login email is built here from the username (lib/phone.ts usernameEmail), never sent
 const username = role === 'client' && !noLogin && typeof body.username === 'string' && body.username.trim() ? normalizeUsername(body.username) : null
-const email: string = childNoPhone ? generatedStudentLogin() : noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : username ? usernameEmail(username) : body.email
+// Typed email (trimmed, lowercased): a client email login (checked below: lib/login-rules.ts) or a staff login from staffLogin
+const emailLogin = !childNoPhone && !noLogin && !username
+const email: string = childNoPhone ? generatedStudentLogin() : noLogin ? `client-${randomUUID()}${NO_LOGIN_DOMAIN}` : username ? usernameEmail(username) : normalizeEmail(body.email)
 const password: string = childNoPhone ? randomBytes(12).toString('base64url') : noLogin ? randomBytes(24).toString('base64url') : body.password
 
   // Super admin can create any login. Gym staff can only add clients and coaches to their own gym.
@@ -53,6 +56,30 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     const { data: co } = await supabaseAdmin.from('companies').select('*').eq('id', company_id).maybeSingle()
     coachCompany = isCoachCompany(co)
     companyRow = co
+  }
+
+  // Login rules, checked here whatever the form sent (lib/login-rules.ts). Every login with a typed password: at least 6.
+  if (!noLogin) {
+    const badPassword = passwordProblem(password)
+    if (badPassword) return NextResponse.json({ error: badPassword }, { status: 400 })
+  }
+  // Client email login: only like the Add form allows it (no username, client's country not India), a real email,
+  // never one of our own domains (getcoachboard.in and its subdomains are built by the server only).
+  // Staff (owner / partner / coach) keep their logins from staffLogin, incl. phone logins on getcoachboard.in.
+  if (role === 'client' && emailLogin) {
+    if (!clientEmailAllowed(country, companyRow?.country)) {
+      return NextResponse.json({ error: 'Clients in India log in with a username. Give a username, or add them without a login' }, { status: 400 })
+    }
+    const badEmail = clientEmailProblem(email)
+    if (badEmail) return NextResponse.json({ error: badEmail }, { status: 400 })
+  }
+  if (role !== 'client' && !email) {
+    return NextResponse.json({ error: 'Enter a phone number or email to log in with' }, { status: 400 })
+  }
+  // Username: same rules as the form (usernameProblem), checked before anything else is looked at
+  if (username) {
+    const problem = usernameProblem(username)
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 })
   }
 
   // Client's own country / currency (multi-country gyms, db/2026-11-01-multi-country.md). Sent only once that SQL has run.
@@ -130,9 +157,6 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
   }
   // Username: same rules as the form, and free across every gym (Supabase Auth's unique email is the final check below)
   if (username) {
-    const problem = usernameProblem(username)
-    if (problem) return NextResponse.json({ error: problem }, { status: 400 })
-    if (typeof password !== 'string' || password.length < 6) return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
     if ((await takenUsernames(supabaseAdmin, [username])).has(username)) {
       return NextResponse.json({ error: `Username ${username} is taken`, suggestions: await freeSuggestions(supabaseAdmin, username, full_name || '') }, { status: 409 })
     }
@@ -185,7 +209,8 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     if (username && isDuplicateLogin(authError.message)) {
       return NextResponse.json({ error: `Username ${username} is taken`, suggestions: await freeSuggestions(supabaseAdmin, username, full_name || '') }, { status: 409 })
     }
-    return NextResponse.json({ error: authError.message }, { status: 400 })
+    console.error('create-user auth error:', authError.message)
+    return NextResponse.json({ error: authErrorMessage(authError.message) }, { status: 400 })
   }
 
 const { error: profileError } = await supabaseAdmin.from('profiles').insert({
@@ -209,7 +234,8 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
 
   if (profileError) {
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-    return NextResponse.json({ error: profileError.message }, { status: 400 })
+    console.error('create-user profile error:', profileError.message)
+    return NextResponse.json({ error: 'Couldn\'t save the profile. Check the details and try again' }, { status: 400 })
   }
 
   // Belt history: the first row ('joined'). The student is kept if this fails; the form says so
