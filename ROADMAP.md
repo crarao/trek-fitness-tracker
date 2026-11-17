@@ -3,12 +3,13 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 12 Nov 2026_
+_Last updated: 17 Nov 2026_
 
 ---
 
 ## ✅ Done
 
+- [x] **#105 Save session impossible to miss (FitLoft feedback 17 Nov)** — a coach entered reps, never scrolled to Save, and the session was lost. Coach / owner / partner logging on the client page now has a sticky **Save session** bar with a live summary, toasts on save / error, an "unsaved sets" confirm on Back / tab / day / Cancel / phone Back plus `beforeunload`, and a localStorage draft restored with a banner. Half-way saves: a day saved earlier today stays open and more exercises go into the same session ("In progress · 3 of 8 exercises saved"); any save counts the day. Unsaved ticks / weights follow their exercise by name when the plan is edited mid-workout. No SQL. On `dev` 17 Nov, not yet on `main` (#133, #134, #135, #136, #137, #138)
 - [x] **#2 Protect the AI plan route** — extended to all 7 API routes: every route checks who is calling (login, role, same gym). `lib/auth-server.ts` (#7)
 - [x] **#5 Assign Plan fix** — clear buttons, one panel at a time, saves that really save, errors shown, separate AI draft, US date fix (#3)
 - [x] **#6 Confirmation messages** — big centred messages after assign / update / delete, later extended to all coach and super admin actions (#4, #6, #9)
