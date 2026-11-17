@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   type Exercise, EXERCISE_COLUMNS, MUSCLE_GROUPS, EQUIPMENT, muscleLabel, equipmentLabel,
-  searchExercises, hasExactName, recentFromPlans, tidyName, normalizeName,
+  searchExercises, recentFromPlans, tidyName, normalizeName, findExercise, nameKey,
 } from '@/lib/exercises'
 
 export type PickedExercise = { name: string; exercise_id?: string; muscle_group?: string | null }
@@ -35,13 +35,15 @@ const chip = (on: boolean) =>
   `shrink-0 text-xs px-3 py-1.5 rounded-full border transition ${on ? 'bg-orange-500 border-orange-500 text-white font-semibold' : 'border-gray-700 text-gray-300'}`
 
 export default function ExercisePicker({
-  open, onClose, onPick, companyId, title,
+  open, onClose, onPick, companyId, title, single = false, initialQuery = '',
 }: {
   open: boolean
   onClose: () => void
   onPick: (e: PickedExercise) => void
   companyId: string | null
   title: string            // e.g. "Mon · Push"
+  single?: boolean         // pick one exercise and close (the plan builder's name box: change this exercise)
+  initialQuery?: string    // search box starts with this (the current name, so its matches show straight away)
 }) {
   const key = companyId || '-'
   const [lib, setLib] = useState<Library | null>(() => cache.get(key) ?? null)
@@ -54,13 +56,15 @@ export default function ExercisePicker({
   const [newName, setNewName] = useState<string | null>(null)     // asking the muscle group for this new exercise
   const [savingNew, setSavingNew] = useState(false)
   const [newError, setNewError] = useState('')
+  // "Did you mean Barbell Squat?" before adding a typed name that is close to an existing one (17 Nov)
+  const [suggest, setSuggest] = useState<{ typed: string; exercise: Exercise } | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fresh state and data each time it opens
   useEffect(() => {
     if (!open) return
-    setQuery(''); setMuscle(null); setEquipment(null); setAdded({}); setAddedTotal(0); setNewName(null); setNewError('')
+    setQuery(initialQuery); setMuscle(null); setEquipment(null); setAdded({}); setAddedTotal(0); setNewName(null); setNewError(''); setSuggest(null)
     let live = true
     loadLibrary(companyId).then(l => { if (!live) return; cache.set(key, l); setLib(l) })
     // Keep the page behind still while the sheet is open
@@ -87,7 +91,16 @@ export default function ExercisePicker({
   if (!open) return null
 
   const typed = tidyName(query)
-  const canAddNew = !!typed && !!lib && !hasExactName(lib.list, typed)
+  // Offered unless the typed name already is an exercise (same name or alias, ignoring case, spaces, dashes)
+  const sameAs = typed && lib ? findExercise(typed, lib.list) : null
+  const canAddNew = !!typed && !!lib && !(sameAs && (sameAs.kind === 'name' || sameAs.kind === 'alias'))
+  const shown = query.trim() ? 8 : 300 // top 8 matches while searching (17 Nov); the full list when browsing
+  // "+ Add": first ask about a close existing exercise, if there is one
+  const startAdd = () => {
+    setNewError('')
+    if (sameAs && (sameAs.kind === 'reordered' || sameAs.kind === 'close')) setSuggest({ typed, exercise: sameAs.exercise })
+    else setNewName(typed)
+  }
 
   const showFlash = (text: string) => {
     setFlash(text)
@@ -96,6 +109,7 @@ export default function ExercisePicker({
   }
   const pick = (e: PickedExercise, k: string) => {
     onPick(e)
+    if (single) { onClose(); return }
     setAdded(a => ({ ...a, [k]: (a[k] || 0) + 1 }))
     setAddedTotal(n => n + 1)
     showFlash(`✓ ${e.name} added`)
@@ -114,10 +128,16 @@ export default function ExercisePicker({
         .select(EXERCISE_COLUMNS).single()
       if (!error && data) saved = data as Exercise
       else if (error?.code === '23505') {
-        // Someone in the gym added it a moment ago: use theirs
-        const { data: existing } = await supabase.from('exercises').select(EXERCISE_COLUMNS)
-          .eq('company_id', companyId).ilike('name', newName.replace(/[%_\\]/g, '\\$&')).limit(1)
-        saved = (existing?.[0] as Exercise) ?? null
+        // Already in the gym's list under the same key ("Bar Bell Squat" = "Barbell Squat"), maybe added a
+        // moment ago by someone else: use that one
+        saved = lib?.list.find(e => e.company_id === companyId && nameKey(e.name) === nameKey(newName)) ?? null
+        if (!saved) {
+          const { data: byKey } = await supabase.from('exercises').select(EXERCISE_COLUMNS)
+            .eq('company_id', companyId).eq('name_key', nameKey(newName)).limit(1)
+          const { data: byName } = byKey?.length ? { data: byKey } : await supabase.from('exercises').select(EXERCISE_COLUMNS)
+            .eq('company_id', companyId).ilike('name', newName.replace(/[%_\\]/g, '\\$&')).limit(1)
+          saved = (byName?.[0] as Exercise) ?? null
+        }
       } else if (error) {
         setNewError(`Added to this plan only. Couldn't save to the gym's list: ${error.message}`)
       }
@@ -168,14 +188,14 @@ export default function ExercisePicker({
         <div className="px-4 pt-3 pb-2 border-b border-gray-800 space-y-2.5">
           <div className="mx-auto w-10 h-1 rounded-full bg-gray-700 sm:hidden" aria-hidden="true" />
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-white truncate">Add to {title}</p>
+            <p className="text-sm font-semibold text-white truncate">{single ? `Change exercise · ${title}` : `Add to ${title}`}</p>
             <button type="button" onClick={onClose}
               className="shrink-0 text-sm font-semibold text-white bg-orange-500 hover:bg-orange-400 px-4 py-1.5 rounded-lg">
-              Done{addedTotal ? ` (${addedTotal})` : ''}
+              {single ? 'Cancel' : `Done${addedTotal ? ` (${addedTotal})` : ''}`}
             </button>
           </div>
           <input ref={inputRef} autoFocus type="search" enterKeyHint="search" value={query}
-            onChange={e => { setQuery(e.target.value); setNewName(null) }}
+            onChange={e => { setQuery(e.target.value); setNewName(null); setSuggest(null) }}
             onKeyDown={e => { if (e.key === 'Enter' && results[0] && query.trim()) { e.preventDefault(); pickLibrary(results[0]); setQuery('') } }}
             placeholder="Search, e.g. squat, lat pulldown, dand"
             aria-label="Search exercises"
@@ -195,7 +215,18 @@ export default function ExercisePicker({
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain">
-          {newName !== null ? (
+          {suggest ? (
+            <div className="p-4 space-y-3" data-testid="exercise-did-you-mean">
+              <p className="text-sm text-white">Did you mean <span className="font-semibold">{suggest.exercise.name}</span>?</p>
+              <p className="text-xs text-gray-400">You typed &lsquo;{suggest.typed}&rsquo;. Using the same name keeps reports and progress on one line.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { const x = suggest.exercise; setSuggest(null); setQuery(''); pickLibrary(x) }}
+                  className="flex-1 min-h-[44px] bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold rounded-xl">Use that</button>
+                <button type="button" onClick={() => { setNewName(suggest.typed); setSuggest(null) }}
+                  className="flex-1 min-h-[44px] bg-gray-800 hover:bg-gray-700 text-white text-sm rounded-xl">Add as new</button>
+              </div>
+            </div>
+          ) : newName !== null ? (
             <div className="p-4 space-y-3">
               <p className="text-sm text-white">New exercise: <span className="font-semibold">{newName}</span></p>
               <p className="text-xs text-gray-400">Pick its muscle group. It&apos;s saved to your gym&apos;s list for every coach and added to this plan.</p>
@@ -211,12 +242,6 @@ export default function ExercisePicker({
           ) : (
             <>
               {newError && <p className="mx-4 mt-3 text-xs text-amber-300">{newError}</p>}
-              {canAddNew && (
-                <button type="button" onClick={() => { setNewError(''); setNewName(typed) }}
-                  className="w-full text-left px-4 py-3 border-b border-gray-800 text-sm text-orange-300 hover:bg-gray-800/60">
-                  + Add &lsquo;{typed}&rsquo; as new exercise
-                </button>
-              )}
               {!lib ? (
                 <p className="px-4 py-6 text-sm text-gray-500">Loading exercises…</p>
               ) : lib.missing && !lib.list.length ? (
@@ -226,21 +251,28 @@ export default function ExercisePicker({
                 </div>
               ) : results.length === 0 ? (
                 <p className="px-4 py-6 text-sm text-gray-500">
-                  No match{muscle || equipment ? ' with these filters' : ''}.{typed ? ' Add it as a new exercise above.' : ''}
+                  No match{muscle || equipment ? ' with these filters' : ''}.{typed ? ' Add it as a new exercise below.' : ''}
                 </p>
               ) : (
                 <>
                   {recentShown > 0 && <p className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wider text-gray-500">Recently used in your gym</p>}
                   <ul className="divide-y divide-gray-800/70">{results.slice(0, recentShown).map(row)}</ul>
                   {recentShown > 0 && <p className="px-4 pt-4 pb-1 text-[11px] uppercase tracking-wider text-gray-500">All exercises</p>}
-                  <ul className="divide-y divide-gray-800/70">{results.slice(recentShown, recentShown + 300).map(row)}</ul>
+                  <ul className="divide-y divide-gray-800/70">{results.slice(recentShown, recentShown + shown).map(row)}</ul>
                 </>
+              )}
+              {/* Last option when the typed name isn't an exercise yet (17 Nov) */}
+              {canAddNew && (
+                <button type="button" onClick={startAdd}
+                  className="w-full text-left px-4 py-3 border-t border-gray-800 text-sm text-orange-300 hover:bg-gray-800/60">
+                  + Add &lsquo;{typed}&rsquo;
+                </button>
               )}
             </>
           )}
         </div>
         <div aria-live="polite" className="h-9 shrink-0 border-t border-gray-800 px-4 flex items-center text-xs text-green-300">
-          {flash || <span className="text-gray-500">Tap to add. The sheet stays open so you can add several.</span>}
+          {flash || <span className="text-gray-500">{single ? 'Tap an exercise to use it.' : 'Tap to add. The sheet stays open so you can add several.'}</span>}
         </div>
       </div>
     </div>

@@ -3,12 +3,13 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 12 Nov 2026_
+_Last updated: 17 Nov 2026_
 
 ---
 
 ## ✅ Done
 
+- [x] **#105 Save session impossible to miss (FitLoft feedback 17 Nov)** — a coach entered reps, never scrolled to Save, and the session was lost. Coach / owner / partner logging on the client page now has a sticky **Save session** bar with a live summary, toasts on save / error, an "unsaved sets" confirm on Back / tab / day / Cancel / phone Back plus `beforeunload`, and a localStorage draft restored with a banner. Half-way saves: a day saved earlier today stays open and more exercises go into the same session ("In progress · 3 of 8 exercises saved"); any save counts the day. Unsaved ticks / weights follow their exercise by name when the plan is edited mid-workout. No SQL. On `dev` 17 Nov, not yet on `main` (#133, #134, #135, #136, #137, #138)
 - [x] **#2 Protect the AI plan route** — extended to all 7 API routes: every route checks who is calling (login, role, same gym). `lib/auth-server.ts` (#7)
 - [x] **#5 Assign Plan fix** — clear buttons, one panel at a time, saves that really save, errors shown, separate AI draft, US date fix (#3)
 - [x] **#6 Confirmation messages** — big centred messages after assign / update / delete, later extended to all coach and super admin actions (#4, #6, #9)
@@ -57,6 +58,8 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 - [x] **#32 Activity type on the Log tab** — "What did you do?" (Gym / Weights, Walk, Run, Cycling, Yoga, Pilates, Swim, Trek / Hike, Sport, Other; Sport / Other ask for a name) saved in `logged_sessions.activity` (`lib/activities.ts`); calories use the activity's effort level; shown in the client's Activity History and the coach's Sessions tab. The Log tab and Done ✓ on a plan day now share one form (`app/session-form.tsx`): same fields, order and buttons (#38)
 
 ## P4 — Next features
+
+- [ ] **#106 Add unplanned exercise while logging** — next after the per-set weights build (17 Nov): on the plan day, "+ Add exercise" (the shared picker) for an exercise that isn't in the plan; saved as `exercise_logs` rows after the plan's exercises (position after the plan's) and in `exercises_done`; the plan itself is unchanged.
 
 - [x] **#37 Cap AI plans at 5 per PT client per month** — asked by Anand 25 Oct to contain AI costs (5 planned; set to 6 by Anand 29 Oct to leave room for a redo; back to 5 by Anand 12 Nov). Counted per client per calendar month (company's local month: India time / US Eastern) from `ai_usage` rows with feature `plan` (`lib/ai-plan-limit.ts`); the server refuses one over the cap with a clear message ("more AI plans from 1 Nov"); the coach sees "3 of 5 AI plans used this month" under the plan buttons, and at the cap the AI button is disabled. A call counts even if the AI output was unusable (it was paid for). Super admin isn't capped. The plan route now checks the client against the database instead of trusting the request. Hand-written plans and edits stay unlimited. The 5 is `AI_PLANS_PER_CLIENT_PER_MONTH` in `lib/ai-pricing.ts`. No SQL (#51)
 

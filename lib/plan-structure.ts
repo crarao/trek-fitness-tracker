@@ -21,6 +21,68 @@ export type PlanExercise = {
   note: string   // optional cue, e.g. "keep back flat"
   weight?: string      // optional load, e.g. "20 kg", "bodyweight", "RPE 7" (free text)
   exercise_id?: string // optional link to the exercise library (exercises.id); `name` is always the copy shown
+  // Optional different weight / reps per set (17 Nov, e.g. a pyramid 20 kg × 10 · 25 kg × 8 · 30 kg × 6).
+  // When set, sets / reps / weight above are kept as a text copy of it (setTargetFields) for older readers.
+  set_targets?: SetTarget[]
+}
+
+export type SetTarget = { kg: number | null; reps: number | null }
+const MAX_SET_TARGETS = 20
+
+// "20 kg × 10 · 25 kg × 8 · 30 kg × 6" ("12 reps" / "20 kg" when one half is missing)
+export function setTargetsText(rows: SetTarget[]): string {
+  const kg = (n: number) => String(Math.round(n * 10) / 10)
+  return rows.map(r => (r.kg && r.reps ? `${kg(r.kg)} kg × ${r.reps}` : r.kg ? `${kg(r.kg)} kg` : r.reps ? `${r.reps} reps` : '–')).join(' · ')
+}
+
+// The exercise with these set targets, and sets / reps / weight rewritten from them: "3", "10/8/6", "20/25/30 kg"
+// (one value when every set has the same)
+export function withSetTargets(e: PlanExercise, rows: SetTarget[]): PlanExercise {
+  const list = rows.slice(0, MAX_SET_TARGETS)
+  const join = (xs: (number | null)[]) =>
+    xs.every(x => x === xs[0]) ? (xs[0] == null ? '' : String(xs[0])) : xs.map(x => (x == null ? '–' : String(x))).join('/')
+  const reps = join(list.map(r => r.reps))
+  const kgs = list.map(r => r.kg)
+  const weight = kgs.some(k => k != null) ? `${join(kgs)} kg` : ''
+  const next: PlanExercise = { ...e, sets: String(list.length), reps, set_targets: list }
+  if (weight) next.weight = weight
+  else delete next.weight
+  return next
+}
+
+// Back to one target for every set: the first set's numbers (the set rows are dropped from this exercise)
+export function withoutSetTargets(e: PlanExercise): PlanExercise {
+  const first = e.set_targets?.[0]
+  const { set_targets: rows, ...rest } = e
+  const next: PlanExercise = { ...rest, sets: rows?.length ? String(rows.length) : e.sets, reps: first?.reps != null ? String(first.reps) : '' }
+  if (first?.kg != null) next.weight = `${first.kg} kg`
+  else delete next.weight
+  return next
+}
+
+// Starting rows when "Different weight per set" is switched on: the exercise's sets (3 if none), each with
+// its reps / weight numbers
+export function startSetTargets(e: PlanExercise): SetTarget[] {
+  const n = Math.min(MAX_SET_TARGETS, Math.max(1, parseInt(e.sets, 10) || 3))
+  const reps = parseInt((e.reps || '').match(/\d+/)?.[0] || '', 10)
+  const kg = /body\s*weight|\bbw\b/i.test(e.weight || '') ? NaN : Number((e.weight || '').replace(',', '.').match(/\d+(?:\.\d+)?/)?.[0])
+  const row: SetTarget = { kg: kg > 0 ? kg : null, reps: reps > 0 && reps <= 200 ? reps : null }
+  return Array.from({ length: n }, () => ({ ...row }))
+}
+
+function readSetTargets(v: unknown): SetTarget[] | null {
+  if (!Array.isArray(v)) return null
+  const num = (x: unknown, max: number, whole: boolean) => {
+    const n = typeof x === 'string' ? Number(x) : x
+    if (typeof n !== 'number' || !isFinite(n) || n <= 0 || n > max) return null
+    return whole ? Math.round(n) : Math.round(n * 10) / 10
+  }
+  const rows = v.slice(0, MAX_SET_TARGETS).flatMap(x => {
+    if (!x || typeof x !== 'object') return []
+    const o = x as Record<string, unknown>
+    return [{ kg: num(o.kg, 1000, false), reps: num(o.reps, 200, true) }]
+  })
+  return rows.length ? rows : null
 }
 
 export type PlanDay = {
@@ -102,6 +164,8 @@ export function normalizePlan(raw: unknown): PlanJson | null {
         const id = str(x.exercise_id, 36)
         if (weight) ex.weight = weight
         if (UUID.test(id)) ex.exercise_id = id
+        const targets = readSetTargets(x.set_targets)
+        if (targets) ex.set_targets = targets
         return ex
       })
       .filter(e => e.name)
@@ -136,6 +200,7 @@ export function dayLabel(d: PlanDay): string {
 
 // "3 x 10 @ 20 kg, rest 60 s" from the parts that are filled in
 export function exerciseDetail(e: PlanExercise): string {
+  if (e.set_targets?.length) return [setTargetsText(e.set_targets), e.rest ? `rest ${e.rest}` : ''].filter(Boolean).join(', ')
   const vol = e.sets && e.reps ? `${e.sets} x ${e.reps}` : e.sets ? `${e.sets} sets` : e.reps
   const load = e.weight ? (vol ? `${vol} @ ${e.weight}` : `@ ${e.weight}`) : vol
   return [load, e.rest ? `rest ${e.rest}` : ''].filter(Boolean).join(', ')
@@ -256,6 +321,19 @@ export type ExercisesDone = { done: string[]; total: number }
 // Ticked positions -> names to save
 export function exercisesDoneFor(day: PlanDay, ticked: number[]): ExercisesDone {
   return { done: day.exercises.filter((_, i) => ticked.includes(i)).map(e => e.name), total: day.exercises.length }
+}
+
+// Positions on an older copy of a day -> positions on the edited day, matched by exercise name (the n-th
+// "Squat" goes to the n-th "Squat"). Exercises no longer in the day are left out of the map.
+// Used for the coach's unsaved ticks / weights when the plan is edited mid-workout (17 Nov).
+export function remapPositions(oldNames: string[], newNames: string[]): Map<number, number> {
+  const used = new Set<number>()
+  const map = new Map<number, number>()
+  oldNames.forEach((name, i) => {
+    const j = newNames.findIndex((n, k) => n === name && !used.has(k))
+    if (j >= 0) { used.add(j); map.set(i, j) }
+  })
+  return map
 }
 
 // Saved names -> positions to show as ticked (matched by name, so a later plan edit can't misplace them)

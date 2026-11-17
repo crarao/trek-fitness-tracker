@@ -68,7 +68,9 @@ export default function ExerciseProgressChart({
         <p className="text-sm text-gray-500 mt-4">No weights logged in the last {WEEKS} weeks. Tap Months to see earlier ones.</p>
       ) : (() => {
         const selChange = changeThisPeriod(sel, current)
-        const latestTop = [...sel.points].reverse().find(m => m.topWeight && periods.includes(m.period))?.topWeight ?? null
+        const latestPoint = [...sel.points].reverse().find(m => m.topWeight && periods.includes(m.period)) ?? null
+        const latestTop = latestPoint?.topWeight ?? null
+        const pointAt = (i: number) => sel.points.find(pt => pt.period === periods[i])
         return (
           <>
             <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 mt-3" role="tablist" aria-label="Exercise">
@@ -88,7 +90,8 @@ export default function ExerciseProgressChart({
             <div className="flex items-baseline justify-between gap-3 mt-3 mb-2">
               <p className="text-sm font-medium text-white truncate">{sel.name}</p>
               <p className="text-xs shrink-0">
-                {latestTop !== null && <span className="text-gray-300">{weightText(latestTop)} kg</span>}
+                {latestTop !== null && <span className="text-gray-300">{weightText(latestTop)} kg{latestPoint?.topReps ? ` × ${latestPoint.topReps}` : ''}</span>}
+                {latestPoint && latestPoint.volume > 0 && <span className="text-gray-500"> · volume {weightText(latestPoint.volume)} kg</span>}
                 {selChange !== null
                   ? <span className={changeCls(selChange)}> · {changeText(selChange)} this {word}</span>
                   : <span className="text-gray-500"> · no change to show yet</span>}
@@ -99,7 +102,7 @@ export default function ExerciseProgressChart({
               data={{
                 labels,
                 datasets: [{
-                  label: 'Top weight (kg)',
+                  label: 'Heaviest set (kg)',
                   data: topWeightSeries(sel, periods),
                   borderColor: 'rgba(249, 115, 22, 1)',
                   backgroundColor: 'rgba(249, 115, 22, 0.1)',
@@ -115,7 +118,12 @@ export default function ExerciseProgressChart({
                 responsive: true,
                 plugins: {
                   legend: { display: false },
-                  tooltip: { callbacks: { label: ctx => (ctx.parsed.y == null ? '' : `${weightText(ctx.parsed.y)} kg`) } },
+                  // Heaviest set "40 kg × 6" and the period's volume (Σ kg × reps) (17 Nov)
+                  tooltip: { callbacks: { label: ctx => {
+                    if (ctx.parsed.y == null) return ''
+                    const pt = pointAt(ctx.dataIndex)
+                    return [`${weightText(ctx.parsed.y)} kg${pt?.topReps ? ` × ${pt.topReps}` : ''}`, ...(pt?.volume ? [`Volume ${weightText(pt.volume)} kg`] : [])]
+                  } } },
                 },
                 scales: axis,
               }}

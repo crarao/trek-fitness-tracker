@@ -2,8 +2,8 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-exercises.ts --outDir /tmp/ce --module commonjs --target es2020 --skipLibCheck && node /tmp/ce/scripts/check-exercises.js
 
-import { searchExercises, hasExactName, recentFromPlans, tidyName, type Exercise } from '../lib/exercises'
-import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan } from '../lib/plan-structure'
+import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, linkPlanExercises, type Exercise } from '../lib/exercises'
+import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan, withSetTargets, withoutSetTargets, startSetTargets } from '../lib/plan-structure'
 
 const ex = (id: string, name: string, muscle_group: string, equipment: string, aliases: string[] = [], company_id: string | null = null): Exercise =>
   ({ id, company_id, name, aliases, muscle_group, equipment, is_archived: false })
@@ -72,6 +72,49 @@ check('round trip text → plan', textToPlan(planToText(plan))?.days[0].exercise
 console.log('\n4. Recently used in the gym (newest plan first)')
 check('ids, then names', recentFromPlans([{ plan_json: plan }, { plan_json: { days: [{ day: 'Tue', focus: 'Legs', exercises: [{ name: 'Goblet Squat' }] }] } }]).join(', '),
   '00000000-0000-0000-0000-000000000009, pushup, goblet squat')
+
+console.log('— name_key (same as the database) and findExercise (17 Nov)')
+check('nameKey strips and lowercases', nameKey('Bar-Bell  Squat (DB)'), 'barbellsquatdb')
+check('nameKey empty', nameKey('  -- '), '')
+const lib2: Exercise[] = [
+  ...list,
+  ex('00000000-0000-0000-0000-000000000010', 'Barbell Squat', 'legs', 'barbell'),
+  ex('00000000-0000-0000-0000-000000000011', 'Barbell Bench Press', 'chest', 'barbell', ['bench', 'flat bench']),
+  ex('00000000-0000-0000-0000-000000000012', 'Romanian Deadlift', 'legs', 'barbell', ['rdl']),
+]
+const find = (q: string) => { const m = findExercise(q, lib2); return m ? `${m.kind}: ${m.exercise.name}` : '(none)' }
+check('"Bar Bell Squat" = same key', find('Bar Bell Squat'), 'name: Barbell Squat')
+check('"bench" via alias', find('bench'), 'alias: Barbell Bench Press')
+check('"barbel squat" close', find('barbel squat'), 'close: Barbell Squat')
+check('"Squat Barbell" reordered', find('Squat Barbell'), 'reordered: Barbell Squat')
+check('"row" → TRX Row? no (short keys: exact only)', find('row'), '(none)')
+check('"rdl" alias', find('rdl'), 'alias: Romanian Deadlift')
+check('archived skipped', find('Old Machine Row'), '(none)')
+check('unknown', find('Battle Ropes'), '(none)')
+
+console.log('— AI plan save links exercise ids (17 Nov)')
+const aiPlan = normalizePlan({ days: [{ day: 'Mon', focus: 'Legs', exercises: [
+  { name: 'Bar Bell Squat', sets: '3', reps: '10' }, { name: 'Bench', sets: '3', reps: '8' },
+  { name: 'Barbel Squat', sets: '3', reps: '8' }, { name: 'Battle Ropes', sets: '3', reps: '30 s' },
+  { name: 'Push-Up', sets: '3', reps: '12', exercise_id: '00000000-0000-0000-0000-0000000000aa' },
+] }] })!
+const linked = linkPlanExercises(aiPlan, lib2).days.find(d => d.day === 'Mon')!.exercises.map(e => `${e.name}=${e.exercise_id ?? '-'}`)
+check('same key / alias linked; typo and unknown left; existing id kept', linked.join(', '),
+  'Bar Bell Squat=00000000-0000-0000-0000-000000000010, Bench=00000000-0000-0000-0000-000000000011, Barbel Squat=-, Battle Ropes=-, Push-Up=00000000-0000-0000-0000-0000000000aa')
+
+console.log('— Plan: a weight / reps per set (17 Nov)')
+const pyr = withSetTargets({ name: 'Squat', sets: '3', reps: '10', rest: '90 s', note: '', weight: '20 kg' },
+  [{ kg: 20, reps: 10 }, { kg: 25, reps: 8 }, { kg: 30, reps: 6 }])
+check('fields rewritten from the rows', JSON.stringify([pyr.sets, pyr.reps, pyr.weight]), '["3","10/8/6","20/25/30 kg"]')
+check('detail lists the sets', exerciseDetail(pyr), '20 kg × 10 · 25 kg × 8 · 30 kg × 6, rest 90 s')
+check('kept by normalizePlan', JSON.stringify(normalizePlan({ days: [{ day: 'Mon', focus: 'Legs', exercises: [pyr] }] })!.days[0].exercises[0].set_targets),
+  '[{"kg":20,"reps":10},{"kg":25,"reps":8},{"kg":30,"reps":6}]')
+const back = withoutSetTargets(pyr)
+check('back to one target: the first set', JSON.stringify([back.sets, back.reps, back.weight, 'set_targets' in back]), '["3","10","20 kg",false]')
+check('starting rows from the exercise', JSON.stringify(startSetTargets({ name: 'Row', sets: '4', reps: '8–12', rest: '', note: '', weight: '12.5 kg' })),
+  '[{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8}]')
+check('bodyweight: no kg', JSON.stringify(startSetTargets({ name: 'Push-Up', sets: '', reps: '12', rest: '', note: '', weight: 'bodyweight' })),
+  '[{"kg":null,"reps":12},{"kg":null,"reps":12},{"kg":null,"reps":12}]')
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed')
 if (fails) process.exit(1)
