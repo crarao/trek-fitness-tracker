@@ -1042,8 +1042,38 @@ export default function ClientDetailPage() {
   const markDirty = !!markTarget && !!markKey && (
     markTicked.length > 0 || Object.keys(logDrafts[markKey] || {}).length > 0 || markForm.notes.trim() !== (markAddTo?.notes || '').trim())
   // "You have unsaved sets. Save now?": go = what the coach was doing (back, close, other tab, other day)
-  const [leaveAsk, setLeaveAsk] = useState<{ go: () => void } | null>(null)
-  const askBeforeLeaving = (go: () => void) => { if (markDirty) setLeaveAsk({ go }); else go() }
+  // ---- Plan not assigned yet (17 Nov): the values the warnings below need; the rest is further down ----
+  // The open draft: the AI panel or the new manual plan (an edit of a saved plan isn't covered here)
+  const planDraftKind: 'ai' | 'manual' | null = showGeneratedPlan && generatedPlan ? 'ai' : showPlanForm ? 'manual' : null
+  const draftPlanJson = planDraftKind === 'ai' ? generatedJson : planDraftKind === 'manual' && !newPlanTextMode ? newPlanJson : null
+  const planDraftSummary = (() => {
+    if (!planDraftKind) return ''
+    if (!draftPlanJson) return (planDraftKind === 'ai' ? generatedPlan : newPlan.plan_details).trim() ? 'Text plan' : 'Nothing added yet'
+    const days = draftPlanJson.days.filter(d => !d.rest && d.exercises.some(e => e.name.trim())).length
+    const ex = draftPlanJson.days.reduce((n, d) => n + d.exercises.filter(e => e.name.trim()).length, 0)
+    return ex ? `${days} workout day${days === 1 ? '' : 's'} · ${ex} exercise${ex === 1 ? '' : 's'}` : 'Nothing added yet'
+  })()
+  const planDraftWeek = planDraftKind === 'ai' ? aiPlanMeta.week_start : planDraftKind === 'manual' ? newPlan.week_start : ''
+  // Dirty: an AI draft always (it used one of the client's AI plans); a manual plan once it has an exercise or text
+  const planDirty = planDraftKind === 'ai' || (planDraftKind === 'manual' && (newPlanTextMode
+    ? !!newPlan.plan_details.trim()
+    : !!newPlanJson?.days.some(d => d.exercises.some(e => e.name.trim()))))
+  const anyDirty = markDirty || planDirty
+  // Sticky "Assign plan" bar on the Plans tab while a draft is open (the Save session bar wins if both are)
+  const assignBarOn = !!planDraftKind && activeTab === 'plans' && !saveBarOn
+  const assignDisabled = saving || !planDraftWeek || (planDraftKind === 'ai'
+    ? (!generatedJson && !generatedPlan.trim())
+    : newPlanTextMode && !newPlan.plan_details.trim())
+  // kind: what is unsaved, the open session form ('mark') or a plan not yet assigned ('plan', 17 Nov)
+  const [leaveAsk, setLeaveAsk] = useState<{ go: () => void; kind: 'mark' | 'plan' } | null>(null)
+  // Closing the form / another day / another tab: only the session form's sets can be lost there
+  const askMark = (go: () => void) => { if (markDirty) setLeaveAsk({ go, kind: 'mark' }); else go() }
+  // Leaving the page (Back, Home, Log out, phone Back): unsaved sets first, then a plan not yet assigned
+  const askBeforeLeaving = (go: () => void) => {
+    if (markDirty) setLeaveAsk({ go, kind: 'mark' })
+    else if (planDirty) setLeaveAsk({ go, kind: 'plan' })
+    else go()
+  }
   // Throws away the open form's ticks, weights and notes (they stay on this device until saved or discarded)
   const discardMark = () => {
     if (markKey && markTarget?.day) { setDayTicks(markKey, []); saveDayDrafts(markKey, null) }
@@ -1076,26 +1106,29 @@ export default function ClientDetailPage() {
     )
   }
 
-  const requestCloseMark = () => askBeforeLeaving(closeMarkForm)
-  const goTab = (tab: typeof activeTab) => { if (tab !== activeTab) askBeforeLeaving(() => setActiveTab(tab)) }
+  const requestCloseMark = () => askMark(closeMarkForm)
+  // A plan draft isn't lost on another tab (it stays open on Plans, with its bar), so only sets are asked about
+  const goTab = (tab: typeof activeTab) => { if (tab !== activeTab) askMark(() => setActiveTab(tab)) }
   // Phone / browser Back while dirty: an extra history entry (same address) catches it and asks first.
   // A leftover entry after a save is skipped on the next Back (onPop below), so one Back still leaves.
   const guardEntry = useRef(false)
   const markDirtyRef = useRef(false)
+  const planDirtyRef = useRef(false)
   useEffect(() => { markDirtyRef.current = markDirty }, [markDirty])
+  useEffect(() => { planDirtyRef.current = planDirty }, [planDirty])
   useEffect(() => {
-    if (!markDirty || guardEntry.current) return
+    if (!anyDirty || guardEntry.current) return
     window.history.pushState({ cbUnsaved: true }, '')
     guardEntry.current = true
-  }, [markDirty])
+  }, [anyDirty])
   useEffect(() => {
     const onPop = () => {
       if (!guardEntry.current) return
       guardEntry.current = false // Back just left the extra entry
-      if (!markDirtyRef.current) { window.history.back(); return } // saved since: leave as usual
+      if (!markDirtyRef.current && !planDirtyRef.current) { window.history.back(); return } // saved since: leave as usual
       window.history.pushState({ cbUnsaved: true }, '')
       guardEntry.current = true
-      setLeaveAsk({ go: () => { guardEntry.current = false; window.history.go(-2) } })
+      setLeaveAsk({ go: () => { guardEntry.current = false; window.history.go(-2) }, kind: markDirtyRef.current ? 'mark' : 'plan' })
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -1120,11 +1153,11 @@ export default function ClientDetailPage() {
   }, [plans])
   // Browser refresh / close while dirty: the browser's own "Leave site?" prompt
   useEffect(() => {
-    if (!markDirty) return
+    if (!anyDirty) return
     const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', onUnload)
     return () => window.removeEventListener('beforeunload', onUnload)
-  }, [markDirty])
+  }, [anyDirty])
   // Leaving the page from a button: replace the extra entry instead of stacking another one
   const leaveTo = (path: string) => {
     if (guardEntry.current) { guardEntry.current = false; router.replace(path) }
@@ -1132,9 +1165,12 @@ export default function ClientDetailPage() {
   }
   const [leaveSaving, setLeaveSaving] = useState(false)
   const leaveSave = async () => {
-    if (!leaveAsk || !markTarget) return
+    if (!leaveAsk) return
+    if (leaveAsk.kind === 'mark' && !markTarget) return
     setLeaveSaving(true)
-    const ok = await handleCoachLogDay(markTarget.plan, markTarget.day, markTarget.label)
+    const ok = leaveAsk.kind === 'plan'
+      ? await assignPlanDraft() // failed: the plan stays open with its error
+      : await handleCoachLogDay(markTarget!.plan, markTarget!.day, markTarget!.label)
     setLeaveSaving(false)
     const { go } = leaveAsk
     setLeaveAsk(null)
@@ -1142,11 +1178,90 @@ export default function ClientDetailPage() {
   }
   const leaveDiscard = () => {
     if (!leaveAsk) return
-    const { go } = leaveAsk
-    discardMark()
-    closeMarkForm()
+    const { go, kind } = leaveAsk
+    if (kind === 'plan') discardPlanDraft()
+    else { discardMark(); closeMarkForm() }
     setLeaveAsk(null)
     go()
+  }
+
+  // ---- Plan not assigned yet (17 Nov, FitLoft: an AI plan was generated, its reps typed in and never assigned) ----
+  const assignPlanDraft = async (): Promise<boolean> =>
+    planDraftKind === 'ai' ? handleAssignGeneratedPlan() : planDraftKind === 'manual' ? handleAddPlan() : false
+  // Dismiss / Cancel on the draft: ask first when there is something to lose
+  const askPlan = (go: () => void) => { if (planDirty) setLeaveAsk({ go, kind: 'plan' }); else go() }
+  // Kept on this device until assigned or discarded, so a Back, refresh or closed app doesn't lose it
+  // (and a second AI plan isn't needed): cb-plan-draft-<clientId>
+  const planDraftKey = `cb-plan-draft-${clientId}`
+  const [planDraftAt, setPlanDraftAt] = useState<number | null>(null)
+  const clearPlanDraft = () => {
+    try { localStorage.removeItem(planDraftKey) } catch { /* ignore */ }
+    setPlanDraftAt(null)
+  }
+  const discardPlanDraft = () => {
+    if (planDraftKind === 'ai') {
+      setShowGeneratedPlan(false); setGeneratedPlan(''); setGeneratedJson(null); setAiPlanMeta({ week_start: '', workout_time: '' }); setScheduleNotes([])
+    } else {
+      setShowPlanForm(false); setNewPlan({ week_start: '', plan_details: '', workout_time: '' }); setNewPlanJson(null); setNewPlanTextMode(false)
+    }
+    setPlanError('')
+    clearPlanDraft()
+  }
+  const planDraftJson = planDirty
+    ? JSON.stringify(planDraftKind === 'ai'
+      ? { kind: 'ai', text: generatedPlan, json: generatedJson, meta: aiPlanMeta, notes: scheduleNotes }
+      : { kind: 'manual', plan: newPlan, json: newPlanJson, textMode: newPlanTextMode })
+    : ''
+  useEffect(() => {
+    if (!planDraftJson) return
+    const t = setTimeout(() => {
+      try { localStorage.setItem(planDraftKey, JSON.stringify({ at: Date.now(), ...JSON.parse(planDraftJson) })) }
+      catch { /* storage full or blocked: the draft just won't survive a reload */ }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [planDraftJson, planDraftKey])
+  // Opening the client page again brings an unassigned draft back (Plans tab, with a banner)
+  const planDraftChecked = useRef(false)
+  useEffect(() => {
+    if (planDraftChecked.current || loading || !client) return
+    planDraftChecked.current = true
+    let d: Record<string, unknown> | null = null
+    try { d = JSON.parse(localStorage.getItem(planDraftKey) || 'null') } catch { d = null }
+    if (!d || typeof d !== 'object') return
+    const asPlan = (v: unknown): PlanJson | null =>
+      v && typeof v === 'object' && Array.isArray((v as PlanJson).days) && (v as PlanJson).days.length === 7 ? v as PlanJson : null
+    const at = typeof d.at === 'number' ? d.at : Date.now()
+    if (d.kind === 'ai' && typeof d.text === 'string' && d.text.trim()) {
+      const meta = (d.meta && typeof d.meta === 'object' ? d.meta : {}) as { week_start?: string; workout_time?: string }
+      setGeneratedPlan(d.text)
+      setGeneratedJson(asPlan(d.json))
+      setAiPlanMeta({ week_start: meta.week_start || '', workout_time: meta.workout_time || '' })
+      setScheduleNotes(Array.isArray(d.notes) ? d.notes.filter((n): n is string => typeof n === 'string') : [])
+      setShowGeneratedPlan(true)
+    } else if (d.kind === 'manual' && d.plan && typeof d.plan === 'object') {
+      const pl = d.plan as { week_start?: string; plan_details?: string; workout_time?: string }
+      setNewPlan({ week_start: pl.week_start || '', plan_details: pl.plan_details || '', workout_time: pl.workout_time || '' })
+      setNewPlanJson(asPlan(d.json))
+      setNewPlanTextMode(!!d.textMode)
+      setShowPlanForm(true)
+    } else return
+    setPlanDraftAt(at)
+    if (!linkTab && client.client_type === 'pt') setActiveTab('plans')
+  // Once, when the client has loaded
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, client])
+  // "Plan not assigned yet, from 17 Nov 8:13 am. Restored. · Discard" at the top of the draft
+  const planDraftBanner = () => {
+    if (planDraftAt == null) return null
+    const at = new Date(planDraftAt)
+    const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+    return (
+      <div className="bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 flex items-center justify-between gap-3" role="status" data-testid="plan-draft-restored">
+        <p className="text-xs text-amber-200">Plan not assigned yet, from {formatDate(at.toISOString().slice(0, 10), country, 'dayMonth')} {workoutTimeLabel(hhmm, country)}. Restored.</p>
+        <button type="button" onClick={discardPlanDraft}
+          className="text-xs text-amber-300 hover:text-white underline underline-offset-2 shrink-0">Discard</button>
+      </div>
+    )
   }
 
   // Shared insert for both the manual form and the AI panel.
@@ -1229,12 +1344,12 @@ export default function ClientDetailPage() {
     return cleaned
   }
 
-  const handleAddPlan = async () => {
+  const handleAddPlan = async (): Promise<boolean> => {
     let ok = false
     if (!newPlanTextMode && newPlanJson) {
-      if (!newPlan.week_start) { setPlanError('Pick the week first.'); return }
+      if (!newPlan.week_start) { setPlanError('Pick the week first.'); return false }
       const cleaned = readyToSave(newPlanJson)
-      if (!cleaned) return
+      if (!cleaned) return false
       ok = await insertPlan({ ...newPlan, plan_details: planToText(cleaned), plan_json: cleaned })
     } else {
       ok = await insertPlan(newPlan)
@@ -1244,7 +1359,9 @@ export default function ClientDetailPage() {
       setNewPlanJson(null)
       setNewPlanTextMode(false)
       setShowPlanForm(false)
+      clearPlanDraft()
     }
+    return ok
   }
 
   // Pasted text → days for the editor (coach checks the result)
@@ -1260,11 +1377,11 @@ export default function ClientDetailPage() {
     return true
   }
 
-  const handleAssignGeneratedPlan = async () => {
+  const handleAssignGeneratedPlan = async (): Promise<boolean> => {
     let ok = false
     if (generatedJson) {
       const cleaned = readyToSave(generatedJson)
-      if (!cleaned) return
+      if (!cleaned) return false
       // AI names get their exercise_id where the library has them (17 Nov); unmatched names stay as they are
       const library = exLibrary.length ? exLibrary
         : ((await supabase.from('exercises').select(EXERCISE_COLUMNS).order('name').limit(1000)).data || []) as Exercise[]
@@ -1278,7 +1395,9 @@ export default function ClientDetailPage() {
       setGeneratedJson(null)
       setAiPlanMeta({ week_start: '', workout_time: '' })
       setShowGeneratedPlan(false)
+      clearPlanDraft()
     }
+    return ok
   }
 
   // Plan dates are stored as YYYY-MM-DD; formatDate parses them as local
@@ -2187,13 +2306,17 @@ const handleResetPassword = async () => {
           onClick={e => { if (e.target === e.currentTarget && !leaveSaving) setLeaveAsk(null) }}>
           <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-4 shadow-2xl">
             <div>
-              <p id="unsaved-title" className="text-base font-semibold text-white">You have unsaved sets. Save now?</p>
-              {saveSummary && <p className="text-xs text-gray-400 mt-1">{saveSummary}</p>}
+              <p id="unsaved-title" className="text-base font-semibold text-white">
+                {leaveAsk.kind === 'plan' ? 'This plan isn\'t assigned yet. Assign now?' : 'You have unsaved sets. Save now?'}
+              </p>
+              {leaveAsk.kind === 'plan'
+                ? <p className="text-xs text-gray-400 mt-1">{planDraftSummary}{planDraftWeek ? ` · week of ${formatDate(planDraftWeek, country, 'dayMonth')}` : ' · pick the week first'}</p>
+                : saveSummary && <p className="text-xs text-gray-400 mt-1">{saveSummary}</p>}
             </div>
             <div className="space-y-2">
-              <button type="button" onClick={leaveSave} disabled={leaveSaving || savingMark}
+              <button type="button" onClick={leaveSave} disabled={leaveSaving || savingMark || (leaveAsk.kind === 'plan' && assignDisabled)}
                 className="w-full min-h-[48px] bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-white text-sm font-semibold rounded-xl">
-                {leaveSaving ? 'Saving…' : 'Save'}
+                {leaveAsk.kind === 'plan' ? (leaveSaving ? 'Assigning…' : `Assign to ${clientFirstName}`) : leaveSaving ? 'Saving…' : 'Save'}
               </button>
               <div className="flex gap-2">
                 <button type="button" onClick={leaveDiscard} disabled={leaveSaving}
@@ -2781,7 +2904,7 @@ const handleResetPassword = async () => {
       )}
 
       {/* Bottom padding so a fixed bar (Save session / Log today's session) never covers the last exercise */}
-      <div className={`max-w-2xl mx-auto px-6 ${saveBarOn ? 'pb-48' : todayLog || (dojo && !attendanceMode && client?.client_type === 'pt' && trainModule) ? 'pb-32' : 'pb-8'}`}>
+      <div className={`max-w-2xl mx-auto px-6 ${saveBarOn || assignBarOn ? 'pb-48' : todayLog || (dojo && !attendanceMode && client?.client_type === 'pt' && trainModule) ? 'pb-32' : 'pb-8'}`}>
 
         {/* PLANS / SESSIONS / PROGRESS — PT members only, requires client module */}
         {client?.client_type === 'pt' && (client as any)?.companies?.client_module_enabled && (<>
@@ -2854,11 +2977,12 @@ const handleResetPassword = async () => {
     <div className="flex justify-between items-center">
       <p className="text-xs text-purple-400 uppercase tracking-wider font-medium">✨ AI Generated Plan</p>
       <button
-        onClick={() => { setShowGeneratedPlan(false); setPlanError('') }}
+        onClick={() => askPlan(() => { setShowGeneratedPlan(false); setPlanError('') })}
         className="text-xs text-gray-500 hover:text-white">
         Dismiss
       </button>
     </div>
+    {planDraftBanner()}
     {scheduleNotes.length > 0 && (
       <div className="bg-amber-950 border border-amber-800 rounded-xl px-4 py-3 space-y-1">
         {scheduleNotes.map(n => <p key={n} className="text-sm text-amber-200">{n}</p>)}
@@ -2896,6 +3020,7 @@ const handleResetPassword = async () => {
             {showPlanForm && (
               <div ref={manualFormRef} className="scroll-mt-4 bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 mb-4">
                 <h3 className="font-semibold text-sm">New Weekly Plan</h3>
+                {planDraftBanner()}
                 <div>
                   <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Week starting</label>
                   <input type="date" value={newPlan.week_start}
@@ -2945,7 +3070,7 @@ const handleResetPassword = async () => {
                     className="flex-1 bg-orange-500 hover:bg-orange-400 text-white font-semibold py-2.5 rounded-xl transition disabled:opacity-50 text-sm">
                     {saving ? 'Assigning...' : 'Assign plan to client'}
                   </button>
-                  <button onClick={() => { setShowPlanForm(false); setPlanError('') }}
+                  <button onClick={() => askPlan(() => { setShowPlanForm(false); setPlanError('') })}
                     className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition">
                     Cancel
                   </button>
@@ -3195,7 +3320,7 @@ const handleResetPassword = async () => {
                   const fallback = todayIdx >= 0 ? days[todayIdx].day : (days.find(d => !d.rest) ?? days[0]).day
                   const chosen = variant === 'current' ? coachOpenDay : selDay[plan.id]
                   const selIdx = Math.max(0, days.findIndex(d => d.day === (chosen && days.some(x => x.day === chosen) ? chosen : fallback)))
-                  const select = (day: string) => askBeforeLeaving(() => {
+                  const select = (day: string) => askMark(() => {
                     if (variant === 'current') setCoachOpenDay(day)
                     else setSelDay(prev => ({ ...prev, [plan.id]: day }))
                     closeMarkForm()
@@ -4195,7 +4320,7 @@ const handleResetPassword = async () => {
 )}
       </div>
       {/* Dojo: Log today's session (no plan) → Sessions tab with the form open */}
-      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && !saveBarOn && (
+      {dojo && !attendanceMode && client?.client_type === 'pt' && trainModule && markKey !== DOJO_LOG_KEY && !saveBarOn && !assignBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={() => { setActiveTab('sessions'); openMarkForm(DOJO_LOG_KEY) }}
@@ -4219,8 +4344,25 @@ const handleResetPassword = async () => {
           </div>
         </div>
       )}
-      {/* Log today's session: fixed at the bottom on every tab (the Save bar replaces it while logging) */}
-      {todayLog && !saveBarOn && (
+      {/* Assign plan: fixed at the bottom while a new plan (AI or by hand) is open and not assigned (17 Nov).
+          Same action as the panel's own "Assign plan to client" button. */}
+      {assignBarOn && (
+        <div data-testid="assign-plan-bar"
+          className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-2 pb-3">
+            <p className="text-xs text-gray-400 text-center mb-2 truncate" aria-live="polite">
+              <span className="text-amber-300">Not assigned yet</span> · {planDraftSummary}
+              {planDraftWeek ? ` · week of ${formatDate(planDraftWeek, country, 'dayMonth')}` : ' · pick the week first'}
+            </p>
+            <button type="button" onClick={() => { assignPlanDraft() }} disabled={assignDisabled}
+              className={`w-full min-h-[48px] ${planDraftKind === 'ai' ? 'bg-purple-600 hover:bg-purple-500' : 'bg-orange-500 hover:bg-orange-400'} disabled:opacity-60 text-white text-sm font-semibold rounded-xl transition truncate px-4`}>
+              {saving ? 'Assigning…' : `Assign plan to ${clientFirstName}`}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Log today's session: fixed at the bottom on every tab (the Save / Assign bars replace it) */}
+      {todayLog && !saveBarOn && !assignBarOn && (
         <div className="fixed inset-x-0 bottom-0 z-40 bg-gray-950/95 backdrop-blur border-t border-gray-800 pb-[env(safe-area-inset-bottom)]">
           <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3">
             <button type="button" onClick={openTodayLog}
