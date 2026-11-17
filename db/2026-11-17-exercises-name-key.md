@@ -57,4 +57,4 @@ Removes only what Step 2 added. Commented out on purpose (Rule #1).
 ## Run log
 
 - **Dev:** run 17 Nov 2026 by Anand. Step 1 returned 0 rows, Step 2 ran clean.
-- **Mumbai:** not yet. Run Step 1 first, after Anand signs off the per-set build on the dev link.
+- **Mumbai:** Step 2 run 17 Nov 2026 by Anand (coachboard-mumbai, production), after the release crarao/trek-fitness-tracker#142: "Success. No rows returned". The unique index was created, so there were no duplicate keys (what Step 1 checks).
