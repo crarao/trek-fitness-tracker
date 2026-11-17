@@ -55,3 +55,9 @@ Reference Files/
 /playwright-report-regression/
 /test-results-regression/
 /e2e-regression/.auth/
+
+# Exercise cleanup files (db/2026-11-17-exercise-cleanup.md): gym data, kept out of the repo
+exercise-cleanup*.csv
+exercise-aliases.sql
+unmatched.json
+exercises.json

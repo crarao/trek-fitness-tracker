@@ -9,7 +9,7 @@
 //  - on save, a typed or AI name is matched to the library so the row stores the exercise's id
 //  - monthly top weight and volume per exercise, and "+X% this month"
 
-import { type Exercise, normalizeName } from './exercises'
+import { type Exercise, normalizeName, findExercise, nameKey } from './exercises'
 import { type PlanExercise } from './plan-structure'
 
 export type ExerciseLog = {
@@ -22,13 +22,14 @@ export type ExerciseLog = {
   reps: number | null
   weight: number | null
   unit: string
+  set_details?: unknown  // [{kg, reps}] per set (17 Nov); read through setsOf()
   created_at: string
 }
 
-export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, created_at'
+export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, set_details, created_at'
 
-// What the coach sees and edits on a ticked exercise (numbers, null = empty)
-export type LogDraft = { sets: number | null; reps: number | null; weight: number | null }
+// What the coach sees and edits on a ticked exercise: one row per set (17 Nov; was one sets / reps / weight)
+export type LogDraft = { sets: SetEntry[] }
 
 // A log with the date of its session (from logged_sessions), so logs can be put in order and months
 export type DatedLog = ExerciseLog & { session_date: string }
@@ -36,6 +37,49 @@ export type DatedLog = ExerciseLog & { session_date: string }
 const MAX_SETS = 20
 const MAX_REPS = 200
 const MAX_WEIGHT = 1000
+
+// ---- Sets (17 Nov: a weight and reps per set) ----
+
+// One set: kg null = bodyweight / no weight; reps null = not entered
+export type SetEntry = { kg: number | null; reps: number | null }
+
+const posNum = (v: unknown): number | null => {
+  const n = typeof v === 'string' ? Number(v) : v
+  return typeof n === 'number' && isFinite(n) && n > 0 ? n : null
+}
+
+// The sets of any logged exercise, old or new. New rows keep them in set_details as [{kg, reps}]
+// ({weight, reps} is read too); old rows have one sets / reps / weight, which becomes that many equal sets
+// (no sets count = one set). Every reader goes through this.
+export function setsOf(entry: { set_details?: unknown; sets?: number | null; reps?: number | null; weight?: number | null }): SetEntry[] {
+  if (Array.isArray(entry.set_details)) {
+    const out = entry.set_details.flatMap(x => {
+      if (!x || typeof x !== 'object') return []
+      const o = x as Record<string, unknown>
+      const kg = posNum(o.kg ?? o.weight)
+      const reps = posNum(o.reps)
+      return kg == null && reps == null ? [] : [{ kg, reps: reps == null ? null : Math.round(reps) }]
+    })
+    if (out.length) return out.slice(0, MAX_SETS)
+  }
+  const kg = posNum(entry.weight)
+  const reps = posNum(entry.reps)
+  if (kg == null && reps == null && !entry.sets) return []
+  const n = Math.max(1, Math.min(MAX_SETS, Math.round(entry.sets || 1)))
+  return Array.from({ length: n }, () => ({ kg, reps }))
+}
+
+// The heaviest set (ties: more reps); with no weights, the set with the most reps. null for no sets.
+export function heaviestSet(sets: SetEntry[]): SetEntry | null {
+  let best: SetEntry | null = null
+  for (const s of sets) {
+    if (!best || (s.kg ?? 0) > (best.kg ?? 0) || ((s.kg ?? 0) === (best.kg ?? 0) && (s.reps ?? 0) > (best.reps ?? 0))) best = s
+  }
+  return best
+}
+
+// Σ kg × reps over the sets that have both
+export const setsVolume = (sets: SetEntry[]) => Math.round(sets.reduce((n, s) => n + (s.kg && s.reps ? s.kg * s.reps : 0), 0) * 10) / 10
 
 // ---- Reading the plan's text ----
 
@@ -134,12 +178,47 @@ export function lastLogFor(e: Pick<PlanExercise, 'name' | 'exercise_id'>, logs: 
   return null
 }
 
-// Starting numbers for a ticked exercise: the last log, else the plan's numbers. Timed / distance: no weight.
-export function prefill(e: PlanExercise, last: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'> | null): LogDraft {
-  const timed = isTimedOrDistance(e)
-  if (last) return { sets: last.sets, reps: timed ? null : last.reps, weight: timed ? null : last.weight }
-  return { sets: parseSets(e.sets), reps: timed ? null : parseReps(e.reps), weight: timed ? null : parseWeight(e.weight) }
+// Starting set rows for a ticked exercise: as many rows as the plan's sets (3 when it doesn't say), each
+// from the same set of the last log (its last set repeated when it had fewer), else the plan's reps / weight.
+// Timed / distance exercises: empty rows (they get no weight row on screen).
+export function prefill(e: PlanExercise, last: Pick<ExerciseLog, 'sets' | 'reps' | 'weight' | 'set_details'> | null): LogDraft {
+  const count = Math.min(MAX_SETS, parseSets(e.sets) ?? 3)
+  if (isTimedOrDistance(e)) return { sets: Array.from({ length: count }, () => ({ kg: null, reps: null })) }
+  const lastSets = last ? setsOf(last) : []
+  const plan: SetEntry = { kg: parseWeight(e.weight), reps: parseReps(e.reps) }
+  return {
+    sets: Array.from({ length: count }, (_, i) => ({ ...(lastSets.length ? lastSets[Math.min(i, lastSets.length - 1)] : plan) })),
+  }
 }
+
+// A draft kept on the phone, old or new: { sets: [{kg, reps}] }, or the old { sets, reps, weight } (17 Nov)
+// turned into set rows. null when there is nothing in it.
+export function asLogDraft(raw: unknown): LogDraft | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as { sets?: unknown; reps?: number | null; weight?: number | null }
+  if (Array.isArray(r.sets)) {
+    const sets = r.sets.flatMap(x => {
+      if (!x || typeof x !== 'object') return []
+      const o = x as Record<string, unknown>
+      return [{ kg: posNum(o.kg ?? o.weight), reps: posNum(o.reps) }]
+    }).slice(0, MAX_SETS)
+    return sets.length ? { sets } : null
+  }
+  const sets = setsOf({ sets: typeof r.sets === 'number' ? r.sets : null, reps: r.reps ?? null, weight: r.weight ?? null })
+  return sets.length ? { sets } : null
+}
+
+// Every exercise's draft of one day, read from the phone (old drafts converted)
+export function asDayDrafts(raw: unknown): Record<number, LogDraft> {
+  if (!raw || typeof raw !== 'object') return {}
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([k, v]) => {
+    const d = asLogDraft(v)
+    return d && /^\d+$/.test(k) ? [[Number(k), d]] : []
+  }))
+}
+
+// Sets counted in the Save bar and saved: rows with reps (kg is optional, for bodyweight)
+export const filledSets = (d: LogDraft | null | undefined) => (d?.sets || []).filter(s => s.reps != null)
 
 // −/+ on weight: 1 kg steps below 10 kg, 2.5 kg from 10 kg. Never below 0 (0 = bodyweight / empty).
 export function stepWeight(w: number | null, dir: 1 | -1): number | null {
@@ -178,6 +257,7 @@ export type LogInsert = {
   reps: number | null
   weight: number | null
   unit: 'kg'
+  set_details: SetEntry[]
   logged_by: string
 }
 
@@ -198,14 +278,18 @@ export function rowsToSave(args: {
   for (const i of [...ticked].sort((a, b) => a - b)) {
     const e = exercises[i]
     if (!e || isTimedOrDistance(e)) continue
-    const d = drafts[i]
-    if (!d || (d.sets == null && d.reps == null && d.weight == null)) continue
+    // Rows without reps are left out; kg is optional (bodyweight). Max 20 sets.
+    const sets = filledSets(drafts[i]).slice(0, MAX_SETS).map(s => ({ kg: s.kg, reps: s.reps }))
+    if (!sets.length) continue
+    // The fixed columns keep a summary (17 Nov): sets = how many, reps / weight = the heaviest set
+    const top = heaviestSet(sets)
     out.push({
       session_id: sessionId, client_id: clientId, company_id: companyId,
       exercise_id: resolveExerciseId(e, library),
       exercise_name: e.name.trim().slice(0, 120),
       position: i,
-      sets: d.sets, reps: d.reps, weight: d.weight,
+      sets: sets.length, reps: top?.reps ?? null, weight: top?.kg ?? null,
+      set_details: sets,
       unit: 'kg', logged_by: loggedBy,
     })
   }
@@ -217,22 +301,33 @@ export function rowsToSave(args: {
 // 12 → "12", 12.5 → "12.5"
 export const weightText = (w: number) => (Number.isInteger(w) ? String(w) : String(round1(w)))
 
-// "3×10 @ 12 kg", "3×10", "3 sets @ 12 kg", "10 reps", "@ 12 kg", ""
-export function logDetail(l: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'>): string {
-  const vol = l.sets && l.reps ? `${l.sets}×${l.reps}` : l.sets ? `${l.sets} sets` : l.reps ? `${l.reps} reps` : ''
-  const load = l.weight ? `@ ${weightText(l.weight)} kg` : ''
-  return [vol, load].filter(Boolean).join(' ')
+// Same sets throughout: "3×10 @ 12 kg", "3×10", "3 sets @ 12 kg", "10 reps", "@ 12 kg".
+// Different sets (17 Nov): "5 kg × 3 · 7 kg × 4 · 12 reps". "" for nothing.
+export function setsText(sets: SetEntry[]): string {
+  if (!sets.length) return ''
+  const same = sets.every(s => s.kg === sets[0].kg && s.reps === sets[0].reps)
+  if (same) {
+    const n = sets.length, { kg, reps } = sets[0]
+    const vol = n > 1 && reps ? `${n}×${reps}` : n > 1 ? `${n} sets` : reps ? `${reps} reps` : ''
+    return [vol, kg ? `@ ${weightText(kg)} kg` : ''].filter(Boolean).join(' ')
+  }
+  return sets.map(s => (s.kg && s.reps ? `${weightText(s.kg)} kg × ${s.reps}` : s.kg ? `${weightText(s.kg)} kg` : `${s.reps} reps`)).join(' · ')
+}
+
+export function logDetail(l: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'> & { set_details?: unknown }): string {
+  return setsText(setsOf(l))
 }
 
 // "Squat 3×10 @ 12 kg"
-export const logLine = (l: Pick<ExerciseLog, 'exercise_name' | 'sets' | 'reps' | 'weight'>) =>
+export const logLine = (l: Pick<ExerciseLog, 'exercise_name' | 'sets' | 'reps' | 'weight'> & { set_details?: unknown }) =>
   [l.exercise_name, logDetail(l)].filter(Boolean).join(' ')
 
 // ---- Progress by month or by week ----
 
 // A period is a month ("2026-11") or a Monday week ("2026-11-02", like lib/weekly-totals.ts)
 export type Period = 'month' | 'week'
-export type PeriodPoint = { period: string; topWeight: number | null; volume: number; logs: number }
+// topWeight = the heaviest set's kg, topReps = its reps ("40 kg × 6"); volume = Σ kg × reps over every set (17 Nov)
+export type PeriodPoint = { period: string; topWeight: number | null; topReps: number | null; volume: number; logs: number }
 export type ExerciseProgress = {
   key: string          // "id:<uuid>" or "name:<normalised name>"
   name: string         // the latest name used
@@ -240,10 +335,12 @@ export type ExerciseProgress = {
   points: PeriodPoint[] // oldest first, only periods with logs
 }
 
-// One key per exercise: the library id (from the log, else by name), else the normalised name
+// One key per exercise: the library id from the log, else the exercise its name means (findExercise:
+// same key as a name or alias, or the same words reordered; a typo is never guessed), else nameKey(name).
+// "Barbel" joins "Barbell" once "barbel" is one of its aliases (db/2026-11-17-exercise-cleanup.md).
 export function progressKey(l: Pick<ExerciseLog, 'exercise_id' | 'exercise_name'>, library: Exercise[]): string {
-  const id = l.exercise_id || matchExercise(l.exercise_name, library)?.id
-  return id ? `id:${id}` : `name:${squash(l.exercise_name)}`
+  const id = l.exercise_id || findExercise(l.exercise_name, library, { close: false })?.exercise.id
+  return id ? `id:${id}` : `name:${nameKey(l.exercise_name)}`
 }
 
 // Monday of the week a date falls in. Plain date arithmetic in UTC on the YYYY-MM-DD string, so the
@@ -261,22 +358,35 @@ export const periodOf = (date: string, by: Period) => (by === 'month' ? date.sli
 // with all three). Exercises with the most logs first.
 export function progressBy(logs: DatedLog[], library: Exercise[], by: Period): ExerciseProgress[] {
   const groups = new Map<string, { name: string; latest: string; logs: number; points: Map<string, PeriodPoint> }>()
+  const keys = new Map<string, string>() // name → key, so each name is matched once
   for (const l of logs) {
-    const key = progressKey(l, library)
+    const memo = `${l.exercise_id ?? ''}|${l.exercise_name}`
+    const key = keys.get(memo) ?? progressKey(l, library)
+    keys.set(memo, key)
     const period = periodOf(l.session_date, by)
     const g = groups.get(key) ?? { name: l.exercise_name, latest: '', logs: 0, points: new Map() }
     const stamp = `${l.session_date} ${l.created_at}`
     if (stamp > g.latest) { g.latest = stamp; g.name = l.exercise_name }
     g.logs++
-    const p = g.points.get(period) ?? { period, topWeight: null, volume: 0, logs: 0 }
+    const p = g.points.get(period) ?? { period, topWeight: null, topReps: null, volume: 0, logs: 0 }
     p.logs++
-    if (l.weight != null && l.weight > 0) p.topWeight = Math.max(p.topWeight ?? 0, l.weight)
-    if (l.sets && l.reps && l.weight) p.volume = round1(p.volume + l.sets * l.reps * l.weight)
+    // Every set counts (old rows through setsOf: equal sets)
+    const sets = setsOf(l)
+    const top = heaviestSet(sets.filter(s => s.kg))
+    if (top?.kg && (p.topWeight == null || top.kg > p.topWeight || (top.kg === p.topWeight && (top.reps ?? 0) > (p.topReps ?? 0)))) {
+      p.topWeight = top.kg
+      p.topReps = top.reps
+    }
+    p.volume = round1(p.volume + setsVolume(sets))
     g.points.set(period, p)
     groups.set(key, g)
   }
   return [...groups.entries()]
-    .map(([key, g]) => ({ key, name: g.name, logs: g.logs, points: [...g.points.values()].sort((a, b) => a.period.localeCompare(b.period)) }))
+    // The clean name from the library when the exercise is in it, else the latest name typed
+    .map(([key, g]) => ({
+      key, name: (key.startsWith('id:') && library.find(e => e.id === key.slice(3))?.name) || g.name, logs: g.logs,
+      points: [...g.points.values()].sort((a, b) => a.period.localeCompare(b.period)),
+    }))
     .sort((a, b) => b.logs - a.logs || a.name.localeCompare(b.name))
 }
 
@@ -335,6 +445,7 @@ export function withWeightIn(progress: ExerciseProgress[], periods: string[]): E
 export type StrengthRow = {
   name: string
   values: (number | null)[] // top weight per table month (null = "—")
+  reps: (number | null)[]   // reps of that heaviest set ("40 × 6"), per table month
   start: string             // first month with a weight in the chart window ("2026-09")
   sinceStart: number | null // latest month with a weight vs `start`, whole % (null when `first`)
   first: boolean            // only one month with a weight in the chart window: "New"
@@ -385,6 +496,7 @@ export function strengthReport(
     const points = trend.filter(v => v != null).length
     return {
       name: p.name, values: topWeightSeries(p, months), start: own[0],
+      reps: months.map(m => p.points.find(x => x.period === m)?.topReps ?? null),
       sinceStart: changeSinceStart(p, chartMonths), first: points === 1, trend: points >= 2 ? trend : null,
     }
   })

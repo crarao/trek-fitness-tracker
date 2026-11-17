@@ -286,7 +286,7 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
     ctx.fillStyle = GRAY
     ctx.font = font(20)
     ctx.textAlign = 'right'
-    ctx.fillText('heaviest weight each month (kg)', W - M, y - 28)
+    ctx.fillText('heaviest set each month (kg × reps)', W - M, y - 28)
     // Header row
     ctx.font = font(21, 600)
     ctx.textAlign = 'left'
@@ -307,8 +307,11 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
       ctx.font = font(25)
       r.values.forEach((v, i) => {
         ctx.fillStyle = v == null ? GRAY : DARK
-        ctx.fillText(v == null ? '—' : weightText(v), M + nameW + colW * (i + 1) - 10, y + 28)
+        const reps = r.reps?.[i]
+        ctx.font = font(reps ? 22 : 25)
+        ctx.fillText(v == null ? '—' : reps ? `${weightText(v)} × ${reps}` : weightText(v), M + nameW + colW * (i + 1) - 10, y + 28, colW - 14)
       })
+      ctx.font = font(25)
       const [txt, color] = r.sinceStart != null
         ? [changeText(r.sinceStart), r.sinceStart > 0 ? GREEN : r.sinceStart < 0 ? RED : GRAY]
         : [r.first ? 'New' : '—', GRAY]

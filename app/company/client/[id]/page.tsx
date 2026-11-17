@@ -32,8 +32,8 @@ import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
 import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
-import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
-import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, stepWeight, numberFromInput, rowsToSave, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
+import { type Exercise, EXERCISE_COLUMNS, linkPlanExercises } from '@/lib/exercises'
+import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, numberFromInput, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -136,6 +136,36 @@ function elapsedPct(startDate: string, endDate: string): number {
 const formatIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 // A date-only value plus n days, as YYYY-MM-DD
 const isoAdd = (iso: string, n: number) => { const d = parseDate(iso.slice(0, 10)); d.setDate(d.getDate() + n); return formatIso(d) }
+
+// A number box for a set's kg / reps (17 Nov). Keeps what is typed ("12." on the way to "12.5") and
+// reports the number on every key, so the Save bar summary follows live; shows the saved value again
+// whenever it changes from outside (prefill loaded, a row removed above) while the box isn't being typed in.
+function NumBox({ value, kind, label, onValue, className, placeholder }: {
+  value: number | null
+  kind: 'reps' | 'weight'
+  label: string
+  onValue: (n: number | null) => void
+  className: string
+  placeholder?: string
+}) {
+  const fmt = (v: number | null) => (v == null ? '' : String(v))
+  const [text, setText] = useState(fmt(value))
+  const [shown, setShown] = useState(value)
+  const [typing, setTyping] = useState(false)
+  if (!typing && value !== shown) { setShown(value); setText(fmt(value)) }
+  return (
+    <input type="text" inputMode={kind === 'weight' ? 'decimal' : 'numeric'} aria-label={label} placeholder={placeholder}
+      className={className} value={text}
+      onFocus={() => setTyping(true)}
+      onBlur={() => { setTyping(false); setText(fmt(value)); setShown(value) }}
+      onChange={ev => {
+        const n = numberFromInput(ev.target.value, kind)
+        setText(ev.target.value)
+        setShown(n)
+        onValue(n)
+      }} />
+  )
+}
 
 export default function ClientDetailPage() {
   const router = useRouter()
@@ -369,7 +399,9 @@ export default function ClientDetailPage() {
         const k = localStorage.key(i)
         if (!k?.startsWith(COACH_WEIGHTS)) continue
         const v = JSON.parse(localStorage.getItem(k) || '{}')
-        if (v && typeof v === 'object') out[k.slice(COACH_WEIGHTS.length)] = v
+        // Old drafts ({sets, reps, weight}) become set rows (17 Nov)
+        const day = asDayDrafts(v)
+        if (Object.keys(day).length) out[k.slice(COACH_WEIGHTS.length)] = day
       }
     } catch { /* storage unavailable: numbers just won't survive a reload */ }
     return out
@@ -772,9 +804,10 @@ export default function ClientDetailPage() {
     }
     setMarkForm({ ...base, ...draft.form })
     // The draft's ticks / weights follow their exercises if the plan was edited since (by name)
+    const draftWeights = asDayDrafts(draft.weights) // old drafts become set rows
     const fromDraft = Array.isArray(draft.names)
-      ? followPlanEdit(key, draft.names, Array.isArray(draft.ticks) ? draft.ticks : [], draft.weights || {})
-      : { ticks: Array.isArray(draft.ticks) ? draft.ticks : [], weights: draft.weights || {}, dropped: 0 }
+      ? followPlanEdit(key, draft.names, Array.isArray(draft.ticks) ? draft.ticks : [], draftWeights)
+      : { ticks: Array.isArray(draft.ticks) ? draft.ticks : [], weights: draftWeights, dropped: 0 }
     const ticks = coachTicks[key]?.length ? coachTicks[key] : fromDraft.ticks
     if (!coachTicks[key]?.length && ticks.length) setDayTicks(key, ticks)
     if (!logDrafts[key] && Object.keys(fromDraft.weights).length) saveDayDrafts(key, fromDraft.weights)
@@ -804,8 +837,8 @@ export default function ClientDetailPage() {
   // The numbers shown on a ticked exercise: what the coach changed, else the last log, else the plan
   const draftFor = (key: string, i: number, e: PlanDay['exercises'][number]): LogDraft =>
     logDrafts[key]?.[i] ?? prefill(e, lastLogFor(e, datedLogs, exLibrary))
-  const setDraft = (key: string, i: number, e: PlanDay['exercises'][number], patch: Partial<LogDraft>) =>
-    saveDayDrafts(key, { ...(logDrafts[key] || {}), [i]: { ...draftFor(key, i, e), ...patch } })
+  const setDraftSets = (key: string, i: number, sets: SetEntry[]) =>
+    saveDayDrafts(key, { ...(logDrafts[key] || {}), [i]: { sets } })
   // Saves the weight rows for a session already saved. Returns an error message, or '' when saved.
   const insertWeights = async (rows: LogInsert[]): Promise<string> => {
     if (!rows.length) return ''
@@ -836,47 +869,38 @@ export default function ClientDetailPage() {
       </div>
     </div>
   ) : null
-  // The sets × reps @ kg row under a ticked exercise (not for timed / distance exercises).
-  // Boxes keep what is typed and save on leaving the box (so "12.5" can be typed); −/+ redraw them.
+  // Set rows under a ticked exercise (17 Nov; not for timed / distance exercises): "Set 1 [kg] × [reps] ✕",
+  // + Set copies the row above, ✕ removes one (always at least one). kg is optional (bodyweight);
+  // a row without reps isn't saved. "Last: …" = the client's last log of this exercise.
   const renderWeightRow = (key: string, i: number, e: PlanDay['exercises'][number]) => {
     if (!exerciseLogsOn || isTimedOrDistance(e)) return null
-    const d = draftFor(key, i, e)
+    const rows: SetEntry[] = draftFor(key, i, e).sets.length ? draftFor(key, i, e).sets : [{ kg: null, reps: null }]
     const last = lastLogFor(e, datedLogs, exLibrary)
-    const box = 'min-w-0 bg-gray-800 text-white text-center rounded-lg px-1 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
-    const step = 'w-9 h-9 shrink-0 rounded-lg bg-gray-800 border border-gray-700 text-white text-base leading-none hover:bg-gray-700'
-    const num = (v: number | null) => (v == null ? '' : String(v))
+    const box = 'min-w-0 h-11 bg-gray-800 text-white text-center rounded-lg px-1 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
+    const change = (j: number, patch: Partial<SetEntry>) => setDraftSets(key, i, rows.map((r, k) => (k === j ? { ...r, ...patch } : r)))
     return (
-      <div className="pl-11 pr-3 pb-2.5 -mt-1">
-        {/* Two groups that each stay on one line; on a narrow phone the weight group moves under the first */}
-        <div className="flex items-end gap-x-4 gap-y-2 flex-wrap">
-          <div className="shrink-0">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Sets × reps</p>
-            <div className="flex items-center gap-1.5">
-              <input type="text" inputMode="numeric" aria-label={`${e.name} sets`} className={`${box} w-12`}
-                key={`sets:${key}:${i}:${d.sets}`} defaultValue={num(d.sets)}
-                onBlur={ev => setDraft(key, i, e, { sets: numberFromInput(ev.target.value, 'sets') })} />
-              <span className="text-gray-500 text-sm">×</span>
-              <input type="text" inputMode="numeric" aria-label={`${e.name} reps`} className={`${box} w-12`}
-                key={`reps:${key}:${i}:${d.reps}`} defaultValue={num(d.reps)}
-                onBlur={ev => setDraft(key, i, e, { reps: numberFromInput(ev.target.value, 'reps') })} />
-            </div>
-          </div>
-          <div className="shrink-0">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Weight (kg)</p>
-            <div className="flex items-center gap-1.5">
-              <button type="button" aria-label={`${e.name}: less weight`} className={step}
-                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, -1) })}>−</button>
-              <input type="text" inputMode="decimal" aria-label={`${e.name} weight in kg`} className={`${box} w-16`} placeholder="–"
-                key={`weight:${key}:${i}:${d.weight}`} defaultValue={num(d.weight)}
-                onBlur={ev => setDraft(key, i, e, { weight: numberFromInput(ev.target.value, 'weight') })} />
-              <button type="button" aria-label={`${e.name}: more weight`} className={step}
-                onClick={() => setDraft(key, i, e, { weight: stepWeight(d.weight, 1) })}>+</button>
-            </div>
-          </div>
-        </div>
-        <p className="text-[11px] text-gray-500 mt-1">
-          {last ? <>Last time: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
+      <div className="pl-11 pr-3 pb-2.5 -mt-1 space-y-1.5">
+        <p className="text-[11px] text-gray-500">
+          {last ? <>Last: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
         </p>
+        {rows.map((r, j) => (
+          <div key={j} className="flex items-center gap-1.5">
+            <span className="w-11 shrink-0 text-[11px] text-gray-500">Set {j + 1}</span>
+            <NumBox kind="weight" label={`${e.name} set ${j + 1} kg`} placeholder="kg" className={`${box} w-16`}
+              value={r.kg} onValue={kg => change(j, { kg })} />
+            <span className="text-gray-500 text-xs">kg ×</span>
+            <NumBox kind="reps" label={`${e.name} set ${j + 1} reps`} placeholder="reps" className={`${box} w-14`}
+              value={r.reps} onValue={reps => change(j, { reps })} />
+            <button type="button" aria-label={`Remove set ${j + 1} of ${e.name}`} disabled={rows.length <= 1}
+              onClick={() => setDraftSets(key, i, rows.filter((_, k) => k !== j))}
+              className="w-11 h-11 shrink-0 rounded-lg text-gray-500 hover:text-white disabled:opacity-30">✕</button>
+          </div>
+        ))}
+        <button type="button" disabled={rows.length >= 20}
+          onClick={() => setDraftSets(key, i, [...rows, { ...rows[rows.length - 1] }])}
+          className="h-11 px-4 rounded-lg border border-gray-700 text-sm text-orange-300 hover:border-orange-500 disabled:opacity-40">
+          + Set
+        </button>
       </div>
     )
   }
@@ -1034,8 +1058,9 @@ export default function ClientDetailPage() {
     }
     if (!markTicked.length) return markAddTo ? 'Tick the next exercises to add them' : 'Nothing entered yet'
     const day = markTarget.day
-    const sets = markTicked.reduce((n, i) => n + (isTimedOrDistance(day.exercises[i]) ? 0 : draftFor(markKey!, i, day.exercises[i]).sets ?? 0), 0)
-    return `${markAddTo ? 'Adding ' : ''}${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'} entered` : ''}`
+    // Sets with reps entered (17 Nov): "4 exercises · 11 sets"
+    const sets = markTicked.reduce((n, i) => n + (isTimedOrDistance(day.exercises[i]) ? 0 : filledSets(draftFor(markKey!, i, day.exercises[i])).length), 0)
+    return `${markAddTo ? 'Adding ' : ''}${markTicked.length} exercise${markTicked.length === 1 ? '' : 's'}${sets ? ` · ${sets} set${sets === 1 ? '' : 's'}` : ''}`
   })()
   // Shown while the form is open on the tab it lives on; it replaces "Log today's session"
   const saveBarOn = !!markTarget && activeTab === markTarget.tab
@@ -1269,7 +1294,11 @@ export default function ClientDetailPage() {
     if (generatedJson) {
       const cleaned = readyToSave(generatedJson)
       if (!cleaned) return
-      ok = await insertPlan({ ...aiPlanMeta, plan_details: planToText(cleaned), plan_json: cleaned })
+      // AI names get their exercise_id where the library has them (17 Nov); unmatched names stay as they are
+      const library = exLibrary.length ? exLibrary
+        : ((await supabase.from('exercises').select(EXERCISE_COLUMNS).order('name').limit(1000)).data || []) as Exercise[]
+      const linked = linkPlanExercises(cleaned, library)
+      ok = await insertPlan({ ...aiPlanMeta, plan_details: planToText(linked), plan_json: linked })
     } else {
       ok = await insertPlan({ ...aiPlanMeta, plan_details: generatedPlan })
     }
