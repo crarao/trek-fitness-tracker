@@ -159,7 +159,7 @@ check('same sets from set_details = old format', logDetail({ sets: 3, reps: 10, 
 
 console.log('— Monthly progress')
 const prog = monthlyProgress(logs, library)
-check('exercises (most logs first; id and id-less squat grouped)', prog.map(p => [p.name, p.logs]), [['Back squat', 3], ['Sled Push', 2], ['Plank', 1]])
+check('exercises (most logs first; id and id-less squat grouped, clean library name)', prog.map(p => [p.name, p.logs]), [['Barbell Back Squat', 3], ['Sled Push', 2], ['Plank', 1]])
 const squat = prog[0]
 check('squat months', squat.points.map(m => [m.period, m.topWeight, m.volume]), [['2026-10', 45, 2550], ['2026-11', 50, 1200]])
 check('squat change Nov', changeThisMonth(squat, '2026-11'), 11)
@@ -177,18 +177,18 @@ check('week of Mon 2 Nov', weekOf('2026-11-02'), '2026-11-02')
 check('week across a month: Sun 1 Nov → Mon 26 Oct', weekOf('2026-11-01'), '2026-10-26')
 check('last 3 weeks', lastWeeks('2026-11-05', 3), ['2026-10-19', '2026-10-26', '2026-11-02'])
 const weekly = weeklyProgress(logs, library)
-const wSquat = weekly.find(p => p.name === 'Back squat')!
+const wSquat = weekly.find(p => p.name === 'Barbell Back Squat')!
 check('squat by week', wSquat.points.map(p => [p.period, p.topWeight]), [['2026-09-28', 40], ['2026-10-19', 45], ['2026-11-02', 50]])
 check('squat +% this week', changeThisPeriod(wSquat, '2026-11-02'), 11)
 check('series by week with gaps', topWeightSeries(wSquat, lastWeeks('2026-11-05', 3)), [45, null, 50])
-check('with weight in last 3 weeks (plank has none)', withWeightIn(weekly, lastWeeks('2026-11-05', 3)).map(p => p.name), ['Back squat', 'Sled Push'])
+check('with weight in last 3 weeks (plank has none)', withWeightIn(weekly, lastWeeks('2026-11-05', 3)).map(p => p.name), ['Barbell Back Squat', 'Sled Push'])
 
 console.log('— PDF: Strength by exercise')
 const rep = strengthReport(logs, library, '2026-11-08')!
 check('table months', rep.months, ['2026-09', '2026-10', '2026-11'])
 check('rows (plank left out: no weight)', rep.rows.map(r => [r.name, r.values, r.sinceStart, r.first]),
-  [['Back squat', [null, 45, 50], 11, false], ['Sled Push', [null, 50, 60], 20, false]])
-check('chart = most logged, from its first month', [rep.chart?.name, rep.chart?.months, rep.chart?.data], ['Back squat', ['2026-10', '2026-11'], [45, 50]])
+  [['Barbell Back Squat', [null, 45, 50], 11, false], ['Sled Push', [null, 50, 60], 20, false]])
+check('chart = most logged, from its first month', [rep.chart?.name, rep.chart?.months, rep.chart?.data], ['Barbell Back Squat', ['2026-10', '2026-11'], [45, 50]])
 check('both start in Oct: header since Oct', rep.since, '2026-10')
 const firstOnly = strengthReport([log({ exercise_name: 'Goblet Squat', session_date: '2026-11-03', weight: 12 })], library, '2026-11-08')!
 check('first month: New, no trend line', firstOnly.rows.map(r => [r.name, r.values, r.sinceStart, r.first, r.trend]), [['Goblet Squat', [null, null, 12], null, true, null]])
@@ -266,6 +266,22 @@ check('empty set_details falls back', setsOf({ set_details: [], sets: 2, reps: 5
 check('heaviest set (ties: more reps)', heaviestSet([{ kg: 5, reps: 3 }, { kg: 9, reps: 4 }, { kg: 9, reps: 6 }]), { kg: 9, reps: 6 })
 check('bodyweight: most reps', heaviestSet([{ kg: null, reps: 12 }, { kg: null, reps: 15 }]), { kg: null, reps: 15 })
 check('volume Σ kg × reps', setsVolume([{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }, { kg: null, reps: 10 }]), 43)
+
+console.log('— Reports read every set (17 Nov)')
+const setLogs: DatedLog[] = [
+  { id: 'a', session_id: 's1', exercise_id: null, exercise_name: 'Squat', position: 0, sets: 3, reps: 4, weight: 9, unit: 'kg',
+    set_details: [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }, { kg: 9, reps: 4 }], created_at: '2026-11-03T10:00:00Z', session_date: '2026-11-03' },
+  { id: 'b', session_id: 's2', exercise_id: null, exercise_name: 'Barbell Back Squat', position: 0, sets: 2, reps: 6, weight: 9, unit: 'kg',
+    set_details: [{ kg: 9, reps: 6 }, { kg: 8, reps: 8 }], created_at: '2026-11-05T10:00:00Z', session_date: '2026-11-05' },
+  { id: 'c', session_id: 's0', exercise_id: null, exercise_name: 'squat', position: 0, sets: 3, reps: 10, weight: 6, unit: 'kg',
+    created_at: '2026-10-20T10:00:00Z', session_date: '2026-10-20' }, // old row: 3 equal sets
+]
+const setProg = monthlyProgress(setLogs, library)
+check('one line (alias + name), clean name', setProg.map(p => p.name), ['Barbell Back Squat'])
+check('Nov: heaviest set 9 kg × 6, volume Σ kg × reps', setProg[0].points.map(p => [p.period, p.topWeight, p.topReps, p.volume]),
+  [['2026-10', 6, 10, 180], ['2026-11', 9, 6, 15 + 28 + 36 + 54 + 64]])
+check('PDF row has the reps of the heaviest set', strengthReport(setLogs, library, '2026-11-06')?.rows.map(r => [r.values, r.reps]),
+  [[[null, 6, 9], [null, 10, 6]]])
 
 console.log('— Plan edited mid-workout: unsaved ticks follow the exercise by name')
 const remap = (o: string[], n: string[]) => [...remapPositions(o, n).entries()]

@@ -70,7 +70,7 @@ export type ExerciseMatch = {
 // The exercise a typed or AI name means: same key as the name, else as an alias, else the same words
 // in a different order, else a close spelling (edit distance on the key). Archived exercises are skipped;
 // the gym's own exercise wins over the starter list. null = nothing like it.
-export function findExercise(name: string, list: Exercise[]): ExerciseMatch | null {
+export function findExercise(name: string, list: Exercise[], opts: { close?: boolean } = {}): ExerciseMatch | null {
   const key = nameKey(name)
   if (!key) return null
   const pool = list.filter(e => !e.is_archived)
@@ -85,6 +85,7 @@ export function findExercise(name: string, list: Exercise[]): ExerciseMatch | nu
     const reordered = pool.filter(e => [e.name, ...(e.aliases || [])].some(n => words(n) === w))
     if (reordered.length) return { exercise: first(reordered), kind: 'reordered' }
   }
+  if (opts.close === false) return null // callers that never use a typo match skip the slow part
   let best: { e: Exercise; d: number } | null = null
   for (const e of pool) {
     for (const n of [e.name, ...(e.aliases || [])]) {

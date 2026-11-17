@@ -9,7 +9,7 @@
 //  - on save, a typed or AI name is matched to the library so the row stores the exercise's id
 //  - monthly top weight and volume per exercise, and "+X% this month"
 
-import { type Exercise, normalizeName } from './exercises'
+import { type Exercise, normalizeName, findExercise, nameKey } from './exercises'
 import { type PlanExercise } from './plan-structure'
 
 export type ExerciseLog = {
@@ -326,7 +326,8 @@ export const logLine = (l: Pick<ExerciseLog, 'exercise_name' | 'sets' | 'reps' |
 
 // A period is a month ("2026-11") or a Monday week ("2026-11-02", like lib/weekly-totals.ts)
 export type Period = 'month' | 'week'
-export type PeriodPoint = { period: string; topWeight: number | null; volume: number; logs: number }
+// topWeight = the heaviest set's kg, topReps = its reps ("40 kg × 6"); volume = Σ kg × reps over every set (17 Nov)
+export type PeriodPoint = { period: string; topWeight: number | null; topReps: number | null; volume: number; logs: number }
 export type ExerciseProgress = {
   key: string          // "id:<uuid>" or "name:<normalised name>"
   name: string         // the latest name used
@@ -334,10 +335,12 @@ export type ExerciseProgress = {
   points: PeriodPoint[] // oldest first, only periods with logs
 }
 
-// One key per exercise: the library id (from the log, else by name), else the normalised name
+// One key per exercise: the library id from the log, else the exercise its name means (findExercise:
+// same key as a name or alias, or the same words reordered; a typo is never guessed), else nameKey(name).
+// "Barbel" joins "Barbell" once "barbel" is one of its aliases (db/2026-11-17-exercise-cleanup.md).
 export function progressKey(l: Pick<ExerciseLog, 'exercise_id' | 'exercise_name'>, library: Exercise[]): string {
-  const id = l.exercise_id || matchExercise(l.exercise_name, library)?.id
-  return id ? `id:${id}` : `name:${squash(l.exercise_name)}`
+  const id = l.exercise_id || findExercise(l.exercise_name, library, { close: false })?.exercise.id
+  return id ? `id:${id}` : `name:${nameKey(l.exercise_name)}`
 }
 
 // Monday of the week a date falls in. Plain date arithmetic in UTC on the YYYY-MM-DD string, so the
@@ -355,22 +358,35 @@ export const periodOf = (date: string, by: Period) => (by === 'month' ? date.sli
 // with all three). Exercises with the most logs first.
 export function progressBy(logs: DatedLog[], library: Exercise[], by: Period): ExerciseProgress[] {
   const groups = new Map<string, { name: string; latest: string; logs: number; points: Map<string, PeriodPoint> }>()
+  const keys = new Map<string, string>() // name → key, so each name is matched once
   for (const l of logs) {
-    const key = progressKey(l, library)
+    const memo = `${l.exercise_id ?? ''}|${l.exercise_name}`
+    const key = keys.get(memo) ?? progressKey(l, library)
+    keys.set(memo, key)
     const period = periodOf(l.session_date, by)
     const g = groups.get(key) ?? { name: l.exercise_name, latest: '', logs: 0, points: new Map() }
     const stamp = `${l.session_date} ${l.created_at}`
     if (stamp > g.latest) { g.latest = stamp; g.name = l.exercise_name }
     g.logs++
-    const p = g.points.get(period) ?? { period, topWeight: null, volume: 0, logs: 0 }
+    const p = g.points.get(period) ?? { period, topWeight: null, topReps: null, volume: 0, logs: 0 }
     p.logs++
-    if (l.weight != null && l.weight > 0) p.topWeight = Math.max(p.topWeight ?? 0, l.weight)
-    if (l.sets && l.reps && l.weight) p.volume = round1(p.volume + l.sets * l.reps * l.weight)
+    // Every set counts (old rows through setsOf: equal sets)
+    const sets = setsOf(l)
+    const top = heaviestSet(sets.filter(s => s.kg))
+    if (top?.kg && (p.topWeight == null || top.kg > p.topWeight || (top.kg === p.topWeight && (top.reps ?? 0) > (p.topReps ?? 0)))) {
+      p.topWeight = top.kg
+      p.topReps = top.reps
+    }
+    p.volume = round1(p.volume + setsVolume(sets))
     g.points.set(period, p)
     groups.set(key, g)
   }
   return [...groups.entries()]
-    .map(([key, g]) => ({ key, name: g.name, logs: g.logs, points: [...g.points.values()].sort((a, b) => a.period.localeCompare(b.period)) }))
+    // The clean name from the library when the exercise is in it, else the latest name typed
+    .map(([key, g]) => ({
+      key, name: (key.startsWith('id:') && library.find(e => e.id === key.slice(3))?.name) || g.name, logs: g.logs,
+      points: [...g.points.values()].sort((a, b) => a.period.localeCompare(b.period)),
+    }))
     .sort((a, b) => b.logs - a.logs || a.name.localeCompare(b.name))
 }
 
@@ -429,6 +445,7 @@ export function withWeightIn(progress: ExerciseProgress[], periods: string[]): E
 export type StrengthRow = {
   name: string
   values: (number | null)[] // top weight per table month (null = "—")
+  reps: (number | null)[]   // reps of that heaviest set ("40 × 6"), per table month
   start: string             // first month with a weight in the chart window ("2026-09")
   sinceStart: number | null // latest month with a weight vs `start`, whole % (null when `first`)
   first: boolean            // only one month with a weight in the chart window: "New"
@@ -479,6 +496,7 @@ export function strengthReport(
     const points = trend.filter(v => v != null).length
     return {
       name: p.name, values: topWeightSeries(p, months), start: own[0],
+      reps: months.map(m => p.points.find(x => x.period === m)?.topReps ?? null),
       sinceStart: changeSinceStart(p, chartMonths), first: points === 1, trend: points >= 2 ? trend : null,
     }
   })
