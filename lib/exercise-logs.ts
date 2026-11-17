@@ -22,13 +22,14 @@ export type ExerciseLog = {
   reps: number | null
   weight: number | null
   unit: string
+  set_details?: unknown  // [{kg, reps}] per set (17 Nov); read through setsOf()
   created_at: string
 }
 
-export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, created_at'
+export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, set_details, created_at'
 
-// What the coach sees and edits on a ticked exercise (numbers, null = empty)
-export type LogDraft = { sets: number | null; reps: number | null; weight: number | null }
+// What the coach sees and edits on a ticked exercise: one row per set (17 Nov; was one sets / reps / weight)
+export type LogDraft = { sets: SetEntry[] }
 
 // A log with the date of its session (from logged_sessions), so logs can be put in order and months
 export type DatedLog = ExerciseLog & { session_date: string }
@@ -177,12 +178,47 @@ export function lastLogFor(e: Pick<PlanExercise, 'name' | 'exercise_id'>, logs: 
   return null
 }
 
-// Starting numbers for a ticked exercise: the last log, else the plan's numbers. Timed / distance: no weight.
-export function prefill(e: PlanExercise, last: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'> | null): LogDraft {
-  const timed = isTimedOrDistance(e)
-  if (last) return { sets: last.sets, reps: timed ? null : last.reps, weight: timed ? null : last.weight }
-  return { sets: parseSets(e.sets), reps: timed ? null : parseReps(e.reps), weight: timed ? null : parseWeight(e.weight) }
+// Starting set rows for a ticked exercise: as many rows as the plan's sets (3 when it doesn't say), each
+// from the same set of the last log (its last set repeated when it had fewer), else the plan's reps / weight.
+// Timed / distance exercises: empty rows (they get no weight row on screen).
+export function prefill(e: PlanExercise, last: Pick<ExerciseLog, 'sets' | 'reps' | 'weight' | 'set_details'> | null): LogDraft {
+  const count = Math.min(MAX_SETS, parseSets(e.sets) ?? 3)
+  if (isTimedOrDistance(e)) return { sets: Array.from({ length: count }, () => ({ kg: null, reps: null })) }
+  const lastSets = last ? setsOf(last) : []
+  const plan: SetEntry = { kg: parseWeight(e.weight), reps: parseReps(e.reps) }
+  return {
+    sets: Array.from({ length: count }, (_, i) => ({ ...(lastSets.length ? lastSets[Math.min(i, lastSets.length - 1)] : plan) })),
+  }
 }
+
+// A draft kept on the phone, old or new: { sets: [{kg, reps}] }, or the old { sets, reps, weight } (17 Nov)
+// turned into set rows. null when there is nothing in it.
+export function asLogDraft(raw: unknown): LogDraft | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as { sets?: unknown; reps?: number | null; weight?: number | null }
+  if (Array.isArray(r.sets)) {
+    const sets = r.sets.flatMap(x => {
+      if (!x || typeof x !== 'object') return []
+      const o = x as Record<string, unknown>
+      return [{ kg: posNum(o.kg ?? o.weight), reps: posNum(o.reps) }]
+    }).slice(0, MAX_SETS)
+    return sets.length ? { sets } : null
+  }
+  const sets = setsOf({ sets: typeof r.sets === 'number' ? r.sets : null, reps: r.reps ?? null, weight: r.weight ?? null })
+  return sets.length ? { sets } : null
+}
+
+// Every exercise's draft of one day, read from the phone (old drafts converted)
+export function asDayDrafts(raw: unknown): Record<number, LogDraft> {
+  if (!raw || typeof raw !== 'object') return {}
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([k, v]) => {
+    const d = asLogDraft(v)
+    return d && /^\d+$/.test(k) ? [[Number(k), d]] : []
+  }))
+}
+
+// Sets counted in the Save bar and saved: rows with reps (kg is optional, for bodyweight)
+export const filledSets = (d: LogDraft | null | undefined) => (d?.sets || []).filter(s => s.reps != null)
 
 // −/+ on weight: 1 kg steps below 10 kg, 2.5 kg from 10 kg. Never below 0 (0 = bodyweight / empty).
 export function stepWeight(w: number | null, dir: 1 | -1): number | null {
@@ -221,6 +257,7 @@ export type LogInsert = {
   reps: number | null
   weight: number | null
   unit: 'kg'
+  set_details: SetEntry[]
   logged_by: string
 }
 
@@ -241,14 +278,18 @@ export function rowsToSave(args: {
   for (const i of [...ticked].sort((a, b) => a - b)) {
     const e = exercises[i]
     if (!e || isTimedOrDistance(e)) continue
-    const d = drafts[i]
-    if (!d || (d.sets == null && d.reps == null && d.weight == null)) continue
+    // Rows without reps are left out; kg is optional (bodyweight). Max 20 sets.
+    const sets = filledSets(drafts[i]).slice(0, MAX_SETS).map(s => ({ kg: s.kg, reps: s.reps }))
+    if (!sets.length) continue
+    // The fixed columns keep a summary (17 Nov): sets = how many, reps / weight = the heaviest set
+    const top = heaviestSet(sets)
     out.push({
       session_id: sessionId, client_id: clientId, company_id: companyId,
       exercise_id: resolveExerciseId(e, library),
       exercise_name: e.name.trim().slice(0, 120),
       position: i,
-      sets: d.sets, reps: d.reps, weight: d.weight,
+      sets: sets.length, reps: top?.reps ?? null, weight: top?.kg ?? null,
+      set_details: sets,
       unit: 'kg', logged_by: loggedBy,
     })
   }
@@ -260,15 +301,25 @@ export function rowsToSave(args: {
 // 12 → "12", 12.5 → "12.5"
 export const weightText = (w: number) => (Number.isInteger(w) ? String(w) : String(round1(w)))
 
-// "3×10 @ 12 kg", "3×10", "3 sets @ 12 kg", "10 reps", "@ 12 kg", ""
-export function logDetail(l: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'>): string {
-  const vol = l.sets && l.reps ? `${l.sets}×${l.reps}` : l.sets ? `${l.sets} sets` : l.reps ? `${l.reps} reps` : ''
-  const load = l.weight ? `@ ${weightText(l.weight)} kg` : ''
-  return [vol, load].filter(Boolean).join(' ')
+// Same sets throughout: "3×10 @ 12 kg", "3×10", "3 sets @ 12 kg", "10 reps", "@ 12 kg".
+// Different sets (17 Nov): "5 kg × 3 · 7 kg × 4 · 12 reps". "" for nothing.
+export function setsText(sets: SetEntry[]): string {
+  if (!sets.length) return ''
+  const same = sets.every(s => s.kg === sets[0].kg && s.reps === sets[0].reps)
+  if (same) {
+    const n = sets.length, { kg, reps } = sets[0]
+    const vol = n > 1 && reps ? `${n}×${reps}` : n > 1 ? `${n} sets` : reps ? `${reps} reps` : ''
+    return [vol, kg ? `@ ${weightText(kg)} kg` : ''].filter(Boolean).join(' ')
+  }
+  return sets.map(s => (s.kg && s.reps ? `${weightText(s.kg)} kg × ${s.reps}` : s.kg ? `${weightText(s.kg)} kg` : `${s.reps} reps`)).join(' · ')
+}
+
+export function logDetail(l: Pick<ExerciseLog, 'sets' | 'reps' | 'weight'> & { set_details?: unknown }): string {
+  return setsText(setsOf(l))
 }
 
 // "Squat 3×10 @ 12 kg"
-export const logLine = (l: Pick<ExerciseLog, 'exercise_name' | 'sets' | 'reps' | 'weight'>) =>
+export const logLine = (l: Pick<ExerciseLog, 'exercise_name' | 'sets' | 'reps' | 'weight'> & { set_details?: unknown }) =>
   [l.exercise_name, logDetail(l)].filter(Boolean).join(' ')
 
 // ---- Progress by month or by week ----

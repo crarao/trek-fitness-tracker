@@ -11,7 +11,7 @@ import {
 } from '../lib/exercise-logs'
 import { withoutCalories } from '../lib/progress-share'
 import { remapPositions } from '../lib/plan-structure'
-import { setsOf, heaviestSet, setsVolume } from '../lib/exercise-logs'
+import { setsOf, heaviestSet, setsVolume, asLogDraft } from '../lib/exercise-logs'
 
 const ID_SQUAT = '00000000-0000-0000-0000-000000000002'
 const ID_LAT = '00000000-0000-0000-0000-000000000001'
@@ -99,10 +99,19 @@ check('AI name "Squat" → alias of the library exercise', lastLogFor({ name: 'S
 check('free-text name, different case', lastLogFor({ name: 'SLED PUSH' }, logs, library)?.weight, 60)
 check('never logged', lastLogFor({ name: 'Lat Pulldown', exercise_id: ID_LAT }, logs, library), null)
 const squatPlan = { name: 'Squat', sets: '4', reps: '6–8', rest: '90 s', note: '', weight: '30 kg' }
-check('prefill from last log', prefill(squatPlan, { sets: 3, reps: 8, weight: 50 }), { sets: 3, reps: 8, weight: 50 })
-check('prefill from plan text', prefill(squatPlan, null), { sets: 4, reps: 6, weight: 30 })
-check('prefill timed: no reps / weight', prefill({ name: 'Plank', sets: '3', reps: '30 s', rest: '', note: '' }, null), { sets: 3, reps: null, weight: null })
-check('prefill bodyweight', prefill({ name: 'Push-Up', sets: '3', reps: '12', rest: '', note: '', weight: 'bodyweight' }, null), { sets: 3, reps: 12, weight: null })
+// 17 Nov: one row per set; as many rows as the plan's sets (3 when it doesn't say)
+const S = (kg: number | null, reps: number | null) => ({ kg, reps })
+check('prefill from last log (old row: equal sets, 4 rows from the plan)', prefill(squatPlan, { sets: 3, reps: 8, weight: 50 }),
+  { sets: [S(50, 8), S(50, 8), S(50, 8), S(50, 8)] })
+check('prefill set by set, last set repeated', prefill(squatPlan, { sets: 2, reps: 4, weight: 7, set_details: [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }] }),
+  { sets: [S(5, 3), S(7, 4), S(7, 4), S(7, 4)] })
+check('prefill from plan text', prefill(squatPlan, null), { sets: [S(30, 6), S(30, 6), S(30, 6), S(30, 6)] })
+check('prefill no sets in plan → 3 rows', prefill({ name: 'Row', sets: '', reps: '10', rest: '', note: '' }, null), { sets: [S(null, 10), S(null, 10), S(null, 10)] })
+check('prefill timed: empty rows', prefill({ name: 'Plank', sets: '3', reps: '30 s', rest: '', note: '' }, null), { sets: [S(null, null), S(null, null), S(null, null)] })
+check('prefill bodyweight', prefill({ name: 'Push-Up', sets: '2', reps: '12', rest: '', note: '', weight: 'bodyweight' }, null), { sets: [S(null, 12), S(null, 12)] })
+check('old phone draft → set rows', asLogDraft({ sets: 2, reps: 10, weight: 20 }), { sets: [S(20, 10), S(20, 10)] })
+check('new phone draft kept', asLogDraft({ sets: [{ kg: 5, reps: 3 }, { kg: null, reps: null }] }), { sets: [S(5, 3), S(null, null)] })
+check('empty draft', asLogDraft({ sets: null, reps: null, weight: null }), null)
 
 console.log('— −/+ on weight')
 check('12 +', stepWeight(12, 1), 14.5)
@@ -127,10 +136,16 @@ const day = [
 ]
 const rows = rowsToSave({
   exercises: day, ticked: [4, 2, 1, 0], sessionId: 'sess', clientId: 'cli', companyId: 'gym-a', loggedBy: 'coach', library,
-  drafts: { 0: { sets: 3, reps: 10, weight: 12 }, 1: { sets: 3, reps: null, weight: null }, 2: { sets: 4, reps: null, weight: 60 }, 4: { sets: null, reps: null, weight: null } },
+  drafts: {
+    0: { sets: [S(5, 3), S(7, 4), S(9, 4)] },
+    1: { sets: [S(null, null)] },
+    2: { sets: [S(60, 8), S(60, null), S(null, 10)] },  // the row without reps is left out; bodyweight set kept
+    4: { sets: [S(20, null)] },                         // no reps anywhere → skipped
+  },
 })
-check('rows (in plan order, timed and empty left out)', rows.map(r => [r.position, r.exercise_name, r.exercise_id, r.sets, r.reps, r.weight]),
-  [[0, 'Squat', ID_SQUAT, 3, 10, 12], [2, 'Sled Push', null, 4, null, 60]])
+check('rows (in plan order, timed and no-reps left out; summary = count + heaviest set)', rows.map(r => [r.position, r.exercise_name, r.exercise_id, r.sets, r.reps, r.weight]),
+  [[0, 'Squat', ID_SQUAT, 3, 4, 9], [2, 'Sled Push', null, 2, 8, 60]])
+check('set_details saved as [{kg, reps}]', rows.map(r => r.set_details), [[S(5, 3), S(7, 4), S(9, 4)], [S(60, 8), S(null, 10)]])
 check('row has session, client, gym, kg, logged_by', [rows[0].session_id, rows[0].client_id, rows[0].company_id, rows[0].unit, rows[0].logged_by], ['sess', 'cli', 'gym-a', 'kg', 'coach'])
 
 console.log('— Showing')
@@ -139,6 +154,8 @@ check('no weight', logDetail({ sets: 3, reps: 10, weight: null }), '3×10')
 check('sets + weight', logDetail({ sets: 4, reps: null, weight: 60 }), '4 sets @ 60 kg')
 check('decimal', logDetail({ sets: 3, reps: 8, weight: 12.5 }), '3×8 @ 12.5 kg')
 check('only weight', logDetail({ sets: null, reps: null, weight: 20 }), '@ 20 kg')
+check('different sets listed', logDetail({ sets: 3, reps: 4, weight: 9, set_details: [{ kg: 5, reps: 3 }, { kg: 7, reps: 4 }, { kg: null, reps: 12 }] }), '5 kg × 3 · 7 kg × 4 · 12 reps')
+check('same sets from set_details = old format', logDetail({ sets: 3, reps: 10, weight: 12, set_details: [{ kg: 12, reps: 10 }, { kg: 12, reps: 10 }, { kg: 12, reps: 10 }] }), '3×10 @ 12 kg')
 
 console.log('— Monthly progress')
 const prog = monthlyProgress(logs, library)
