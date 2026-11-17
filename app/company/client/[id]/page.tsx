@@ -294,10 +294,9 @@ export default function ClientDetailPage() {
   }
   const toggleCoachTick = (planId: string, day: string, i: number) => {
     const key = `${planId}:${day}`
-    const cur = coachTicks[key] || []
-    setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
     // Ticking starts logging this day: open its form so the sticky Save bar shows (17 Nov, FitLoft)
-    if (!markKey) openMarkForm(key)
+    const cur = markKey ? coachTicks[key] || [] : openMarkForm(key)
+    setDayTicks(key, cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i])
   }
   // Open day row on this week's plan ("Mon"), the open "Mark done" form ("planId:Mon", or "planId:" for a
   // text plan), and a day already done that the coach asked to log again (confirm step)
@@ -309,6 +308,21 @@ export default function ClientDetailPage() {
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
   const savingMarkRef = useRef(false) // blocks a second save while one is running (double tap)
+  // Draft safety net (17 Nov): the open form's entries on this device under cb-draft-<clientId>-<YYYY-MM-DD>.
+  // draftRestoredAt = when the draft shown in the open form was saved (the "restored" banner), else null.
+  const sessionDraftKey = `cb-draft-${clientId}-${localToday()}`
+  const [draftRestoredAt, setDraftRestoredAt] = useState<number | null>(null)
+  type SessionDraftSaved = { at: number; key: string; form: SessionDraft; ticks: number[]; weights: Record<number, LogDraft> | null }
+  const readSessionDraft = (): SessionDraftSaved | null => {
+    try {
+      const v = JSON.parse(localStorage.getItem(sessionDraftKey) || 'null')
+      return v && typeof v === 'object' && typeof v.key === 'string' && v.form ? v as SessionDraftSaved : null
+    } catch { return null }
+  }
+  const clearSessionDraft = () => {
+    try { localStorage.removeItem(sessionDraftKey) } catch { /* ignore */ }
+    setDraftRestoredAt(null)
+  }
   // The session the coach just marked done ("planId:Mon" key), for "Send to <client> on WhatsApp"
   const [lastMarked, setLastMarked] = useState<{ key: string; session: Session } | null>(null)
   // Weight / reps per exercise (#80, db/2026-11-05-exercise-logs.md): on once the table answers.
@@ -698,13 +712,27 @@ export default function ClientDetailPage() {
     }
     return notes
   }
-  const openMarkForm = (key: string) => {
+  // Opening a form restores today's unsaved draft for it, if any (banner "Unsaved session from … restored").
+  // Returns the ticks in force for the form, so a tick that opened it is added on top of them.
+  const openMarkForm = (key: string): number[] => {
     setMarkError('')
     setMarkAgainKey(null)
-    setMarkForm(coachDraft())
     setMarkKey(key)
+    const draft = readSessionDraft()
+    const hasWork = !!draft && (draft.ticks?.length > 0 || !!(draft.weights && Object.keys(draft.weights).length) || !!draft.form.notes?.trim())
+    if (!draft || draft.key !== key || !hasWork) {
+      setMarkForm(coachDraft())
+      setDraftRestoredAt(null)
+      return coachTicks[key] || []
+    }
+    setMarkForm({ ...coachDraft(), ...draft.form })
+    const ticks = coachTicks[key]?.length ? coachTicks[key] : Array.isArray(draft.ticks) ? draft.ticks : []
+    if (!coachTicks[key]?.length && ticks.length) setDayTicks(key, ticks)
+    if (!logDrafts[key] && draft.weights && Object.keys(draft.weights).length) saveDayDrafts(key, draft.weights)
+    setDraftRestoredAt(draft.at || Date.now())
+    return ticks
   }
-  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError('') }
+  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null) }
 
   // ---- Weight / reps per exercise (#80) ----
   // Logs with their session's date (for "last time" and months); logs of sessions not loaded are left out
@@ -870,6 +898,7 @@ export default function ClientDetailPage() {
       setWeightsRetry(weightsErr ? { key: tickKey, rows, error: weightsErr } : null)
     }
     if (tickKey) saveDayDrafts(tickKey, null) // saved with the session now (or kept in weightsRetry)
+    clearSessionDraft()
     setSavingMark(false)
     closeMarkForm()
     setMarkForm(coachDraft())
@@ -927,7 +956,34 @@ export default function ClientDetailPage() {
   const discardMark = () => {
     if (markKey && markTarget?.day) { setDayTicks(markKey, []); saveDayDrafts(markKey, null) }
     setMarkForm(coachDraft())
+    clearSessionDraft()
   }
+  // Writes the draft about 500 ms after the last change while the form is dirty
+  const draftJson = markDirty && markKey
+    ? JSON.stringify({ key: markKey, form: markForm, ticks: markTicked, weights: logDrafts[markKey] || null })
+    : ''
+  useEffect(() => {
+    if (!draftJson) return
+    const t = setTimeout(() => {
+      try { localStorage.setItem(sessionDraftKey, JSON.stringify({ at: Date.now(), ...JSON.parse(draftJson) })) }
+      catch { /* storage full or blocked: the ticks / weights keys still keep most of it */ }
+    }, 500)
+    return () => clearTimeout(t)
+  }, [draftJson, sessionDraftKey])
+  // "Unsaved session from 6:42 pm restored · Discard" above the open form
+  const draftBanner = () => {
+    if (draftRestoredAt == null) return null
+    const at = new Date(draftRestoredAt)
+    const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+    return (
+      <div className="bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 flex items-center justify-between gap-3" role="status">
+        <p className="text-xs text-amber-200">Unsaved session from {workoutTimeLabel(hhmm, country)} restored</p>
+        <button type="button" onClick={discardMark}
+          className="text-xs text-amber-300 hover:text-white underline underline-offset-2 shrink-0">Discard</button>
+      </div>
+    )
+  }
+
   const requestCloseMark = () => askBeforeLeaving(closeMarkForm)
   const goTab = (tab: typeof activeTab) => { if (tab !== activeTab) askBeforeLeaving(() => setActiveTab(tab)) }
   // Phone / browser Back while dirty: an extra history entry (same address) catches it and asks first.
@@ -2926,6 +2982,7 @@ const handleResetPassword = async () => {
           if (markKey === key) return (
             <div className={day ? 'border-t border-gray-800 pt-3' : ''}>
               {coveringBadge()}
+              {draftBanner()}
               <SessionForm mode="day" idPrefix={`mark-${plan.id}`} value={markForm} onChange={setMarkForm}
                 feelingEnabled={!isCoach}
                 country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
@@ -3199,6 +3256,7 @@ const handleResetPassword = async () => {
             {dojo && !attendanceMode && (markKey === DOJO_LOG_KEY ? (
               <div className="bg-gray-900 rounded-2xl px-5 py-4 border border-gray-800">
                 {coveringBadge()}
+                {draftBanner()}
                 <SessionForm mode="day" idPrefix="dojo-log" value={markForm} onChange={setMarkForm}
                   feelingEnabled={!isCoach}
                   country={country} notesEnabled={(client as { companies?: { session_notes_enabled?: boolean | null } } | null)?.companies?.session_notes_enabled !== false}
