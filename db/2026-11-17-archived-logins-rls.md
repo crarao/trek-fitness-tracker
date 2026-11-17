@@ -179,4 +179,4 @@ commit;
 ## Run log
 
 - Dev (`nnxrmaiinbmxfwzefbwx`): run 17 Nov 2026. Archived E2E member check passed (role / company null, active false, 0 companies / sessions / memberships / exercises, 1 own profile row); the "table without active rule" check returned no rows; owner / partner / coach / member screens checked on the dev link
-- Mumbai (`nptxjfvkqjuekgkspemu`): not yet
+- Mumbai (`nptxjfvkqjuekgkspemu`): main block run 17 Nov 2026 ("Success. No rows returned"); shipped with dev → main the same day
