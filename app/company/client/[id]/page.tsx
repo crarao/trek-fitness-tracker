@@ -3002,7 +3002,14 @@ const handleResetPassword = async () => {
                 const status = weekStatus(plan.week_start)
                 const done = doneDayKeys(plan.id, countSessions)
                 const workoutLabels = summary.days.filter(d => !isRestDay(d))
-                const doneCount = workoutLabels.filter(d => done.has(dayKey(d))).length
+                // A day saved part-way today isn't counted as done until every exercise is saved (like its circle)
+                const partToday = (label: string) => {
+                  if (status !== 'current' || !planJson) return false
+                  const pd = planJson.days.find(x => x.day === dayKey(label))
+                  const c = pd ? todaysDaySession(plan.id, pd.day) : null
+                  return !!(pd && c && savedProgress(pd, c))
+                }
+                const doneCount = workoutLabels.filter(d => done.has(dayKey(d)) && !partToday(d)).length
                 const isCurrent = status === 'current'
                 const open = variant === 'current' || expandedPlanId === plan.id
                 const start = plan.week_start.slice(0, 10)
