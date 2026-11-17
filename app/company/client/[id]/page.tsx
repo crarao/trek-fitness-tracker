@@ -812,8 +812,19 @@ export default function ClientDetailPage() {
     if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return false }
     if (!markForm.session_date) { setMarkError('Pick the date'); return false }
     setSavingMark(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSavingMark(false); router.push('/login'); return false }
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (!user) {
+      setSavingMark(false)
+      // Offline / network trouble: keep the form and everything entered, never go to the login page
+      if (userError && (userError.name === 'AuthRetryableFetchError' || (typeof navigator !== 'undefined' && !navigator.onLine))) {
+        const msg = 'Could not save: no connection. Your entries are kept, try again.'
+        setMarkError(msg)
+        showToast(msg, 'error')
+        return false
+      }
+      router.push('/login')
+      return false
+    }
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
@@ -838,11 +849,15 @@ export default function ClientDetailPage() {
     }
     if (error || !session) {
       setSavingMark(false)
-      setMarkError('Could not save: ' + (error?.message || 'please try again'))
+      const msg = 'Could not save: ' + (error?.message || 'please try again')
+      setMarkError(msg)
+      showToast(msg, 'error') // the form stays open with everything still filled in
       return false
     }
+    let ratingErr = ''
     if (markForm.star_rating > 0 && !isCoach) {
-      await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
+      const { error: fbError } = await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
+      if (fbError) ratingErr = fbError.message || 'please try again'
     }
     // Weight / reps of the ticked exercises (#80), after the session. If this fails the session stays
     // saved and the weights can be retried on their own (weightsBanner).
@@ -860,9 +875,13 @@ export default function ClientDetailPage() {
     setMarkForm(coachDraft())
     if (tickKey) setDayTicks(tickKey, []) // saved with the session now
     if (plan) setLastMarked({ key: `${plan.id}:${day?.day ?? ''}`, session: session as Session })
+    // "✓ Session saved · 4 exercises" (a day of a plan), "✓ Session saved · 60 min" (text plan / dojo)
+    const savedCount = day ? ticked.filter(i => day.exercises[i]).length : 0
+    const savedWhat = day ? `${savedCount} exercise${savedCount === 1 ? '' : 's'}` : `${minutes} min`
     if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
-    else if (link.moved) showToast(`✓ Saved on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
-    else showToast(`✓ ${day ? day.day : 'Session'} ${plan ? 'done' : 'logged'} for ${clientFirstName}`)
+    else if (ratingErr) showToast(`Session saved, but "How did it feel" wasn't: ${ratingErr}`, 'error')
+    else if (link.moved) showToast(`✓ Session saved · ${savedWhat} · on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
+    else showToast(`✓ Session saved · ${savedWhat}`)
     loadData(['sessions'])
     return true
   }
