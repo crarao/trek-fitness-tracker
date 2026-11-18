@@ -17,6 +17,7 @@ import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from 
 import { type PlanJson, type PlanDay, type ExercisesDone, planJsonOf, summarizeAny, planToText, cleanPlan, workoutDays, emptyPlan, textToPlan, tickedFromSaved, exercisesDoneFor, todayWeekday, daysInWeekOrder, exerciseDetail, dayLabel, remapPositions } from '@/lib/plan-structure'
 import PlanEditor from '@/app/plan-editor'
 import PlanCopySheet from '@/app/plan-copy-sheet'
+import { startSaveTimer, type SaveTimer } from '@/lib/save-timing'
 import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calories'
 import { activityText } from '@/lib/activities'
 import { planAdherence, currentPlan, recentAdherence, pct, pctColor, withoutEarlyLinks, linkForDate } from '@/lib/adherence'
@@ -894,7 +895,9 @@ export default function ClientDetailPage() {
     if (!minutes || minutes <= 0) { setMarkError('Enter how many minutes they trained'); return false }
     if (!markForm.session_date) { setMarkError('Pick the date'); return false }
     setSavingMark(true)
+    const timer = startSaveTimer() // DEBUG_SAVE (lib/save-timing.ts): off by default
     const { data: { user }, error: userError } = await supabase.auth.getUser()
+    timer.step('auth.getUser (network)')
     if (!user) {
       setSavingMark(false)
       // Offline / network trouble: keep the form and everything entered, never go to the login page
@@ -907,7 +910,7 @@ export default function ClientDetailPage() {
       router.push('/login')
       return false
     }
-    if (markAddTo && plan && day) return await addToCoachSession(markAddTo, plan, day, user.id, minutes)
+    if (markAddTo && plan && day) return await addToCoachSession(markAddTo, plan, day, user.id, minutes, timer)
     const tickKey = day && plan ? `${plan.id}:${day.day}` : ''
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
@@ -930,6 +933,7 @@ export default function ClientDetailPage() {
         ;({ data: session, error } = await supabase.from('logged_sessions').insert(row).select().single())
       }
     }
+    timer.step('logged_sessions insert')
     if (error || !session) {
       setSavingMark(false)
       const msg = 'Could not save: ' + (error?.message || 'please try again')
@@ -941,6 +945,7 @@ export default function ClientDetailPage() {
     if (markForm.star_rating > 0 && !isCoach) {
       const { error: fbError } = await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
       if (fbError) ratingErr = fbError.message || 'please try again'
+      timer.step('session_feedback insert (waits for the session)')
     }
     // Weight / reps of the ticked exercises (#80), after the session. If this fails the session stays
     // saved and the weights can be retried on their own (weightsBanner).
@@ -951,6 +956,7 @@ export default function ClientDetailPage() {
       const rows = rowsToSave({ exercises: day.exercises, ticked: shown, drafts, sessionId: session.id, clientId, companyId, loggedBy: user.id, library: exLibrary })
       weightsErr = await insertWeights(rows)
       setWeightsRetry(weightsErr ? { key: tickKey, rows, error: weightsErr } : null)
+      timer.step(`exercise_logs insert (${rows.length} rows, one call)`)
     }
     if (tickKey) saveDayDrafts(tickKey, null) // saved with the session now (or kept in weightsRetry)
     clearSessionDraft()
@@ -965,20 +971,23 @@ export default function ClientDetailPage() {
     if (weightsErr) showToast(`${day ? day.day : 'Session'} saved, but the weights weren't. Tap Retry under the day.`, 'error')
     else if (ratingErr) showToast(`Session saved, but "How did it feel" wasn't: ${ratingErr}`, 'error')
     else if (link.moved) showToast(`✓ Session saved · ${savedWhat} · on ${formatDate(markForm.session_date, country, 'weekday')}, ${link.weekStart ? `in the plan for the week of ${formatDate(link.weekStart, country, 'dayMonth')}` : 'a week with no plan'}`)
-    else showToast(`✓ Session saved · ${savedWhat}`)
-    loadData(['sessions'])
+    else showToast(`✓ Session saved · ${savedWhat}${timer.suffix()}`)
+    timer.step('toast shown')
+    const reload = loadData(['sessions'])
+    if (timer.on) reload.then(() => timer.step('reload after save (sessions + logs + names, background)'))
     return true
   }
 
   // Half-way save, then more exercises: update the same session (minutes, notes, exercises ticked) and add
   // weight rows for the newly ticked exercises only. Exercises already saved stay as they were.
-  const addToCoachSession = async (sess: Session, plan: Plan, day: PlanDay, userId: string, minutes: number): Promise<boolean> => {
+  const addToCoachSession = async (sess: Session, plan: Plan, day: PlanDay, userId: string, minutes: number, timer: SaveTimer): Promise<boolean> => {
     const key = `${plan.id}:${day.day}`
     const already = tickedFromSaved(day, sess.exercises_done)
     const added = (coachTicks[key] || []).filter(i => day.exercises[i] && !already.includes(i))
     const all = [...already, ...added].sort((a, b) => a - b)
     const patch = { duration_minutes: minutes, notes: markForm.notes, exercises_done: exercisesDoneFor(day, all) }
     const { data, error } = await supabase.from('logged_sessions').update(patch).eq('id', sess.id).select('id')
+    timer.step('logged_sessions update (add to today\'s session)')
     if (error || !data?.length) {
       setSavingMark(false)
       const msg = 'Could not save: ' + (error?.message || 'not allowed for this login')
@@ -992,6 +1001,7 @@ export default function ClientDetailPage() {
       const rows = rowsToSave({ exercises: day.exercises, ticked: added, drafts, sessionId: sess.id, clientId, companyId, loggedBy: userId, library: exLibrary })
       weightsErr = await insertWeights(rows)
       setWeightsRetry(weightsErr ? { key, rows, error: weightsErr } : null)
+      timer.step(`exercise_logs insert (${rows.length} rows, one call, waits for the update)`)
     }
     saveDayDrafts(key, null)
     clearSessionDraft()
@@ -1001,8 +1011,10 @@ export default function ClientDetailPage() {
     setDayTicks(key, [])
     setLastMarked({ key, session: { ...sess, ...patch } })
     if (weightsErr) showToast(`${day.day} saved, but the weights weren't. Tap Retry under the day.`, 'error')
-    else showToast(`✓ Session saved · ${all.length} of ${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'}`)
-    loadData(['sessions'])
+    else showToast(`✓ Session saved · ${all.length} of ${day.exercises.length} exercise${day.exercises.length === 1 ? '' : 's'}${timer.suffix()}`)
+    timer.step('toast shown')
+    const reload = loadData(['sessions'])
+    if (timer.on) reload.then(() => timer.step('reload after save (sessions + logs + names, background)'))
     return true
   }
 
