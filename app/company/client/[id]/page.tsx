@@ -404,6 +404,9 @@ export default function ClientDetailPage() {
   // Session saved but its weights weren't: kept here to retry the weights only (never the session)
   const [weightsRetry, setWeightsRetry] = useState<{ key: string; rows: LogInsert[]; error: string } | null>(null)
   const [retryingWeights, setRetryingWeights] = useState(false)
+  // Adding to today's session: positions whose weight rows went in while the session update failed
+  // (they run at the same time), per session id, so the next try doesn't save them twice
+  const addedLogsSaved = useRef<Record<string, number[]>>({})
   const exLibraryLoaded = useRef(false)
   // "Share progress" on WhatsApp (Sessions / Progress tabs). Last week by default on Mon and Tue.
   const [shareOpen, setShareOpen] = useState(false)
@@ -896,8 +899,12 @@ export default function ClientDetailPage() {
     if (!markForm.session_date) { setMarkError('Pick the date'); return false }
     setSavingMark(true)
     const timer = startSaveTimer() // DEBUG_SAVE (lib/save-timing.ts): off by default
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    timer.step('auth.getUser (network)')
+    // getSession reads the saved login on this phone (no network call unless the token needs a refresh,
+    // which the insert below would need anyway). getUser() asked Supabase Auth on every save (18 Nov).
+    // The proxy checked the login when the page opened, and RLS checks every write.
+    const { data: { session: authSession }, error: userError } = await supabase.auth.getSession()
+    const user = authSession?.user ?? null
+    timer.step('auth.getSession (on the phone)')
     if (!user) {
       setSavingMark(false)
       // Offline / network trouble: keep the form and everything entered, never go to the login page
@@ -941,23 +948,26 @@ export default function ClientDetailPage() {
       showToast(msg, 'error') // the form stays open with everything still filled in
       return false
     }
-    let ratingErr = ''
-    if (markForm.star_rating > 0 && !isCoach) {
-      const { error: fbError } = await supabase.from('session_feedback').insert({ session_id: session.id, star_rating: markForm.star_rating, admin_feedback: null })
-      if (fbError) ratingErr = fbError.message || 'please try again'
-      timer.step('session_feedback insert (waits for the session)')
-    }
-    // Weight / reps of the ticked exercises (#80), after the session. If this fails the session stays
-    // saved and the weights can be retried on their own (weightsBanner).
-    let weightsErr = ''
-    if (exerciseLogsOn && day && tickKey && ticked.length && companyId) {
-      const shown = ticked.filter(i => day.exercises[i])
-      const drafts: Record<number, LogDraft> = Object.fromEntries(shown.map(i => [i, draftFor(tickKey, i, day.exercises[i])]))
-      const rows = rowsToSave({ exercises: day.exercises, ticked: shown, drafts, sessionId: session.id, clientId, companyId, loggedBy: user.id, library: exLibrary })
-      weightsErr = await insertWeights(rows)
-      setWeightsRetry(weightsErr ? { key: tickKey, rows, error: weightsErr } : null)
-      timer.step(`exercise_logs insert (${rows.length} rows, one call)`)
-    }
+    // After the session (both need its id), at the same time (18 Nov: they used to wait for each other):
+    // "How did it feel" and the weight / reps of the ticked exercises (#80), all exercises in one insert.
+    // If the weights fail the session stays saved and they can be retried on their own (weightsBanner).
+    const savedId = session.id as string
+    const logRows = exerciseLogsOn && day && tickKey && ticked.length && companyId
+      ? rowsToSave({
+          exercises: day.exercises, ticked: ticked.filter(i => day.exercises[i]),
+          drafts: Object.fromEntries(ticked.filter(i => day.exercises[i]).map(i => [i, draftFor(tickKey, i, day.exercises[i])])),
+          sessionId: savedId, clientId, companyId, loggedBy: user.id, library: exLibrary,
+        })
+      : null
+    const [ratingErr, weightsErr] = await Promise.all([
+      markForm.star_rating > 0 && !isCoach
+        ? supabase.from('session_feedback').insert({ session_id: savedId, star_rating: markForm.star_rating, admin_feedback: null })
+            .then(({ error: fbError }) => (fbError ? fbError.message || 'please try again' : ''))
+        : Promise.resolve(''),
+      logRows ? insertWeights(logRows) : Promise.resolve(''),
+    ])
+    if (logRows) setWeightsRetry(weightsErr ? { key: tickKey, rows: logRows, error: weightsErr } : null)
+    timer.step(`feedback + exercise_logs (${logRows?.length ?? 0} rows, one call) in parallel`)
     if (tickKey) saveDayDrafts(tickKey, null) // saved with the session now (or kept in weightsRetry)
     clearSessionDraft()
     setSavingMark(false)
@@ -986,8 +996,19 @@ export default function ClientDetailPage() {
     const added = (coachTicks[key] || []).filter(i => day.exercises[i] && !already.includes(i))
     const all = [...already, ...added].sort((a, b) => a - b)
     const patch = { duration_minutes: minutes, notes: markForm.notes, exercises_done: exercisesDoneFor(day, all) }
-    const { data, error } = await supabase.from('logged_sessions').update(patch).eq('id', sess.id).select('id')
-    timer.step('logged_sessions update (add to today\'s session)')
+    // The session already exists, so its update and the new weight rows go at the same time (18 Nov).
+    // Weights already saved by an earlier try whose update failed are not sent again (addedLogsSaved).
+    const doneBefore = addedLogsSaved.current[sess.id] || []
+    const toLog = added.filter(i => !doneBefore.includes(i))
+    const rows = exerciseLogsOn && toLog.length && companyId
+      ? rowsToSave({ exercises: day.exercises, ticked: toLog, drafts: Object.fromEntries(toLog.map(i => [i, draftFor(key, i, day.exercises[i])])), sessionId: sess.id, clientId, companyId, loggedBy: userId, library: exLibrary })
+      : null
+    const [{ data, error }, weightsErr] = await Promise.all([
+      supabase.from('logged_sessions').update(patch).eq('id', sess.id).select('id'),
+      rows ? insertWeights(rows) : Promise.resolve(''),
+    ])
+    timer.step(`logged_sessions update + exercise_logs (${rows?.length ?? 0} rows) in parallel`)
+    if (rows && !weightsErr) addedLogsSaved.current[sess.id] = [...doneBefore, ...toLog]
     if (error || !data?.length) {
       setSavingMark(false)
       const msg = 'Could not save: ' + (error?.message || 'not allowed for this login')
@@ -995,14 +1016,8 @@ export default function ClientDetailPage() {
       showToast(msg, 'error') // the form stays open with everything still filled in
       return false
     }
-    let weightsErr = ''
-    if (exerciseLogsOn && added.length && companyId) {
-      const drafts: Record<number, LogDraft> = Object.fromEntries(added.map(i => [i, draftFor(key, i, day.exercises[i])]))
-      const rows = rowsToSave({ exercises: day.exercises, ticked: added, drafts, sessionId: sess.id, clientId, companyId, loggedBy: userId, library: exLibrary })
-      weightsErr = await insertWeights(rows)
-      setWeightsRetry(weightsErr ? { key, rows, error: weightsErr } : null)
-      timer.step(`exercise_logs insert (${rows.length} rows, one call, waits for the update)`)
-    }
+    delete addedLogsSaved.current[sess.id]
+    if (rows) setWeightsRetry(weightsErr ? { key, rows, error: weightsErr } : null)
     saveDayDrafts(key, null)
     clearSessionDraft()
     setSavingMark(false)
