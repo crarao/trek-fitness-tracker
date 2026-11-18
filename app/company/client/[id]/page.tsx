@@ -336,6 +336,10 @@ export default function ClientDetailPage() {
   const [markError, setMarkError] = useState('')
   const [savingMark, setSavingMark] = useState(false)
   const savingMarkRef = useRef(false) // blocks a second save while one is running (double tap)
+  // The new session's id, made on this phone at the first try and kept for every retry of the same form
+  // (18 Nov): if a save reached Supabase but the answer was lost (bad signal), Save again finds that row
+  // (duplicate id) and updates it instead of creating a second session. Cleared when the form closes.
+  const pendingSessionId = useRef<{ key: string; id: string } | null>(null)
   // The open form adds to a session already saved today for that day (half-way save, 17 Nov), else null = new session
   const [markAddTo, setMarkAddTo] = useState<Session | null>(null)
   // Draft safety net (17 Nov): the open form's entries on this device under cb-draft-<clientId>-<YYYY-MM-DD>.
@@ -789,7 +793,7 @@ export default function ClientDetailPage() {
     setDraftRestoredAt(draft.at || Date.now())
     return ticks
   }
-  const closeMarkForm = () => { setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null); setMarkAddTo(null) }
+  const closeMarkForm = () => { pendingSessionId.current = null; setMarkKey(null); setMarkAgainKey(null); setMarkError(''); setDraftRestoredAt(null); setMarkAddTo(null) }
   // A session saved part-way through the day's exercises: { n saved, total }; null = whole day (or no ticks saved)
   const savedProgress = (day: PlanDay, sess: { exercises_done?: unknown } | null | undefined) => {
     const ed = sess?.exercises_done as ExercisesDone | null | undefined
@@ -902,6 +906,11 @@ export default function ClientDetailPage() {
   // plan null = a dojo session with no plan (Sessions tab → Log session; weekly_plan_id stays empty)
   // Returns true once the session is saved. One save at a time (savingMarkRef): a double tap on the
   // Save bar or the form's button never creates two sessions.
+  // "Could not save: …"; no signal (airplane mode, lost connection) reads as such, and says the entries are kept
+  const saveErrorText = (message: string) =>
+    (typeof navigator !== 'undefined' && !navigator.onLine) || /failed to fetch|load failed|network/i.test(message)
+      ? 'Could not save: no connection. Your entries are kept, try again.'
+      : 'Could not save: ' + message
   const handleCoachLogDay = async (plan: Plan | null, day: PlanDay | null, label: string | null): Promise<boolean> => {
     if (savingMarkRef.current) return false
     savingMarkRef.current = true
@@ -938,7 +947,13 @@ export default function ClientDetailPage() {
     const ticked = day ? coachTicks[tickKey] || [] : []
     // A backdated session goes to the plan covering its date (lib/adherence.ts linkForDate, 14 Nov)
     const link = linkForDate(plans, plan?.id ?? null, markForm.session_date, label)
+    const formKey = markKey ?? tickKey
+    if (pendingSessionId.current?.key !== formKey) {
+      const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : null
+      pendingSessionId.current = id ? { key: formKey, id } : null
+    }
     const row: Record<string, unknown> = {
+      ...(pendingSessionId.current ? { id: pendingSessionId.current.id } : {}),
       client_id: clientId,
       weekly_plan_id: link.weekly_plan_id,
       session_date: markForm.session_date,
@@ -956,10 +971,15 @@ export default function ClientDetailPage() {
         ;({ data: session, error } = await supabase.from('logged_sessions').insert(row).select().single())
       }
     }
+    // Same id already saved = an earlier try of this form got through: bring that row up to date, no second session
+    if (error?.code === '23505' && row.id) {
+      const { id: sameId, ...rest } = row
+      ;({ data: session, error } = await supabase.from('logged_sessions').update(rest).eq('id', sameId as string).select().single())
+    }
     timer.step('logged_sessions insert')
     if (error || !session) {
       setSavingMark(false)
-      const msg = 'Could not save: ' + (error?.message || 'please try again')
+      const msg = saveErrorText(error?.message || 'please try again')
       setMarkError(msg)
       showToast(msg, 'error') // the form stays open with everything still filled in
       return false
@@ -1030,7 +1050,7 @@ export default function ClientDetailPage() {
     if (rows && !weightsErr) addedLogsSaved.current[sess.id] = [...doneBefore, ...toLog]
     if (error || !data?.length) {
       setSavingMark(false)
-      const msg = 'Could not save: ' + (error?.message || 'not allowed for this login')
+      const msg = saveErrorText(error?.message || 'not allowed for this login')
       setMarkError(msg)
       showToast(msg, 'error') // the form stays open with everything still filled in
       return false
