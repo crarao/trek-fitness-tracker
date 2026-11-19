@@ -15,7 +15,8 @@ import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calo
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 import { workoutTimeLabel } from '@/lib/today-schedule'
-import { getClientSettings, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
+import { getClientSettings, isSelfTraining, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
+import { ownPlanOn } from '@/lib/self-training'
 import { staffWord } from '@/lib/labels'
 import { type ExerciseLog, EXERCISE_LOG_COLUMNS } from '@/lib/exercise-logs'
 import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
@@ -28,6 +29,8 @@ const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
 })
 // Strength per exercise (19 Nov, Part B): shown when the gym's client_sees_detailed_progress switch is on
 const ExerciseProgress = dynamic(() => import('@/components/progress/ExerciseProgress'), { ssr: false })
+// A self-training member's own plan + day logging (19 Nov, Part C)
+const MyPlan = dynamic(() => import('@/components/self-training/MyPlan'), { ssr: false })
 
 type WeeklyPlan = {
   id: string
@@ -35,6 +38,7 @@ type WeeklyPlan = {
   plan_details: string
   workout_time: string | null
   plan_json?: unknown   // structured days (newer plans); null for text-only plans
+  created_by?: string | null // who made it (db/2026-11-19-client-view.md Step 2): the member = their own plan (self-training)
 }
 
 type Session = {
@@ -222,14 +226,16 @@ if (prof) {
       if (!lgError) setLoggers(Object.fromEntries(((lg || []) as { id: string; full_name: string | null; role: string }[]).map(x => [x.id, { full_name: x.full_name || '', role: x.role }])))
     }
 
-    // Strength per exercise, when the gym shows it (an error = table not there: the list stays hidden)
-    if (settings.client_sees_detailed_progress && sessionsData?.length) {
+    // Strength per exercise, when the gym shows it (an error = table not there: the list stays hidden).
+    // Self-training members always: their own day pre-fills from their last sets.
+    const self = isSelfTraining(prof?.client_type, settings)
+    if ((settings.client_sees_detailed_progress && sessionsData?.length) || self) {
       const [lg, lib] = await Promise.all([
         supabase.from('exercise_logs').select(EXERCISE_LOG_COLUMNS).eq('client_id', user.id),
         supabase.from('exercises').select(EXERCISE_COLUMNS),
       ])
       if (!lg.error) {
-        const dates = Object.fromEntries(sessionsData.map(s => [s.id, String(s.session_date).slice(0, 10)]))
+        const dates = Object.fromEntries((sessionsData || []).map(s => [s.id, String(s.session_date).slice(0, 10)]))
         setExLogs(((lg.data || []) as ExerciseLog[]).flatMap(l => (dates[l.session_id] ? [{ ...l, session_date: dates[l.session_id] }] : [])))
         setExLibrary((lib.data || []) as Exercise[])
       }
@@ -489,7 +495,12 @@ const handleChangePassword = async () => {
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
   const byCoach = (s: Session) => !!s.logged_by && s.logged_by !== profile?.id
   // The gym's client app switches (Super Admin → Client app setup, lib/clientSettings.ts)
-  const cs = getClientSettings(profile?.companies)
+  const gymSettings = getClientSettings(profile?.companies)
+  // Self-training member (Part C): plans, logs and sees their own progress, whatever the PT switches say
+  const selfTraining = isSelfTraining(profile?.client_type, gymSettings)
+  const cs = selfTraining
+    ? { ...gymSettings, client_sees_plan: true, client_can_log_sessions: true, client_can_log_activities: true, client_sees_detailed_progress: true, client_can_edit_profile: true }
+    : gymSettings
   // "Coach Ravi" / "Anand" (owner or partner) / "your coach" (name not readable yet); "you" for the client
   const loggerShort = (loggedBy: string | null | undefined) => {
     if (!loggedBy || loggedBy === profile?.id) return 'you'
@@ -741,7 +752,11 @@ const handleChangePassword = async () => {
               )}
             </div>
 
-            {plans.length === 0 ? (
+            {selfTraining && profile && country ? (
+              <MyPlan memberId={profile.id} companyId={profile.company_id} availableDays={profile.available_days} country={country}
+                plans={plans} sessions={sessions} logs={exLogs} library={exLibrary}
+                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast} />
+            ) : plans.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 <p className="text-lg mb-1">No plan yet</p>
                 <p className="text-sm">Your coach will assign a plan soon!</p>
@@ -1024,8 +1039,11 @@ const handleChangePassword = async () => {
 
             {/* Strength per exercise (client_sees_detailed_progress): read-only, no "logged by" filter */}
             {cs.client_sees_detailed_progress && exLogs.length > 0 && country && (
-              <ExerciseProgress mode="client" logs={exLogs} library={exLibrary} today={localDateIso()} country={country}
-                plan={(() => { const cur = plans.find(p => weekStatus(p.week_start) === 'current'); return cur ? planJsonOf(cur) : null })()}
+              <ExerciseProgress mode={selfTraining ? 'self' : 'client'} logs={exLogs} library={exLibrary} today={localDateIso()} country={country}
+                plan={(() => {
+                  const cur = selfTraining && profile ? ownPlanOn(plans, profile.id, localDateIso()) : plans.find(p => weekStatus(p.week_start) === 'current')
+                  return cur ? planJsonOf(cur) : null
+                })()}
                 loggerName={id => { const t = loggerShort(id); return t.charAt(0).toUpperCase() + t.slice(1) }} />
             )}
 
