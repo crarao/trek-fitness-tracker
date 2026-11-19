@@ -19,6 +19,7 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 //   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS)
 //   /company/activities company_admin, partner         (dojo class activities; senseis tick them on the roll call)
 //   /company/holidays  company_admin, partner          (dojo holiday calendar)
+//   /company/absentees company_admin, partner          (today's absentees, WhatsApp to parents)
 //   /company           company_admin, partner          (incl. /company/leads, /company/exercises, /company/today)
 //   /client            client
 //   /dashboard         any logged-in user (routes by role)
@@ -53,6 +54,8 @@ const SECTIONS: { prefix: string; roles: Role[] }[] = [
   { prefix: '/company/activities', roles: ['company_admin', 'partner'] },
   // Dojo holidays calendar (19 Nov): owner / partner; senseis see "No classes" on the roll call and their home
   { prefix: '/company/holidays', roles: ['company_admin', 'partner'] },
+  // Today's absentees + the absence WhatsApp (19 Nov): owner / partner only (they send the messages)
+  { prefix: '/company/absentees', roles: ['company_admin', 'partner'] },
   { prefix: '/company', roles: ['company_admin', 'partner'] },
   { prefix: '/client', roles: ['client'] },
 ]

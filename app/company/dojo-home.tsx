@@ -397,6 +397,12 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
                   </ul>
                 </>
               )}
+              {/* End of the day: who didn't come (holidays, leave and off days left out; lib/absences.ts) */}
+              <button type="button" data-nav data-testid="absentees-link" onClick={() => router.push('/company/absentees')}
+                className="mt-3 w-full min-h-[44px] flex items-center justify-between gap-3 bg-gray-800/60 hover:bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-left">
+                <span className="text-sm text-white">Today&apos;s absentees</span>
+                <span className="text-xs text-green-400">Message parents →</span>
+              </button>
             </div>
           </div>
 
