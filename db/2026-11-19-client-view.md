@@ -314,6 +314,15 @@ alter policy "iso weekly_plans update" on public.weekly_plans
                     and p.company_id = (select public.get_my_company_id()) and p.role = 'client' and p.client_type = 'pt'))
   );
 
+-- 3. Weights per set from the client app: self-training members only (PT clients' weights are logged by
+--    their coach). Restrictive, so it only narrows the existing iso exercise_logs insert rule.
+create policy "iso exercise_logs self training" on public.exercise_logs
+  as restrictive for insert to authenticated
+  with check (
+    (select public.get_my_role()) is distinct from 'client'
+    or (select public.is_self_training_client())
+  );
+
 commit;
 ```
 
@@ -385,6 +394,7 @@ rollback;
 | T13 | `iso weekly_plans update` (self) | a plan for `<CLIENT>` made by staff | `update weekly_plans set plan_details = 'x' where id = '<ID>' returning id` | 0 rows (own plans only) |
 | T14 | no client delete | — | `delete from weekly_plans where client_id = '<CLIENT>' returning id` (same for `logged_sessions`, `exercise_logs`) | 0 rows each |
 | T16 | `my_loggers()` | a session for `<CLIENT>` logged by `<COACH>` | `select * from my_loggers()` | one row: the coach's id and name; another client of the gym gets 0 rows for it |
+| T17 | `iso exercise_logs self training` | a PT client's own session | insert an `exercise_logs` row for it as that client | error; the same as a self-training member: 1 row |
 | T15 | cross-company read | as `<CLIENT>` | `select count(*) from logged_sessions where client_id = '<OTHER_CLIENT>'` (also plans, exercise logs) | 0 |
 
 Also re-run the cross-company script (kept outside the repo) after Step 1 and after Step 2.

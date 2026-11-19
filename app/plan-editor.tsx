@@ -30,7 +30,7 @@ const isBlank = (e: PlanExercise) => !e.name.trim() && !e.sets && !e.reps && !e.
 // "+ Add exercise" (library picker), duplicate to another day. "Copy from a client" fills the
 // whole plan (hidden with allowCopy={false}, e.g. on an AI plan: copying would replace it). Days stay Mon…Sun because client Done ✓ / ticks are saved per weekday.
 export default function PlanEditor({
-  value, onChange, weekStart, companyId = null, clientId, country = 'IN', allowCopy = true,
+  value, onChange, weekStart, companyId = null, clientId, country = 'IN', allowCopy = true, libraryOnly = false,
 }: {
   value: PlanJson
   onChange: (plan: PlanJson) => void
@@ -39,6 +39,7 @@ export default function PlanEditor({
   clientId?: string         // marks "this client" in Copy a plan
   country?: Country
   allowCopy?: boolean       // false = no "Copy from a client" button (AI plan panel)
+  libraryOnly?: boolean     // exercises only from the gym's list, no new names (self-training members' own plans)
 }) {
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
   const [open, setOpen] = useState<Weekday>(() => ordered.find(d => !d.rest)?.day ?? ordered[0].day)
@@ -363,10 +364,10 @@ export default function PlanEditor({
           onChange={e => onChange({ ...value, note: e.target.value })} className={inputCls} />
       </div>
 
-      <ExercisePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={addPicked}
+      <ExercisePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={addPicked} libraryOnly={libraryOnly}
         companyId={companyId} title={`${d.day}${!d.rest && d.focus ? ' · ' + d.focus : ''}`} />
       {/* Change one exercise: same picker, one pick, keeps its sets / reps / weight / rest / note */}
-      <ExercisePicker open={renaming !== null} single onClose={() => setRenaming(null)}
+      <ExercisePicker open={renaming !== null} single libraryOnly={libraryOnly} onClose={() => setRenaming(null)}
         initialQuery={renaming !== null ? d.exercises[renaming]?.name || '' : ''}
         onPick={p => { if (renaming !== null) updateExercise(d.day, renaming, { name: p.name, exercise_id: p.exercise_id }) }}
         companyId={companyId} title={`${d.day} exercise ${renaming !== null ? renaming + 1 : ''}`} />
