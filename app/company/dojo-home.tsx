@@ -363,6 +363,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
                 <span className="flex gap-3">
                   <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className={linkBtn}>All of today →</button>
                   <button type="button" data-nav onClick={() => router.push('/company/attendance')} className={linkBtn}>This month →</button>
+                  <button type="button" data-nav data-testid="class-reports-link" onClick={() => router.push('/company/attendance/reports')} className={linkBtn}>Reports →</button>
                 </span>
               </div>
               {batchRows.length === 0 ? (
@@ -613,6 +614,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
               {sheetItem('Attendance this month', () => go('/company/attendance'))}
               {sheetItem('Class activities', () => go('/company/activities'))}
               {sheetItem('Holidays', () => go('/company/holidays'))}
+              {sheetItem('Class reports', () => go('/company/attendance/reports'))}
               {p.beltsOn && sheetItem('Grading exams', () => go('/company/grading'))}
               {sheetItem('Enquiries', () => go('/company/leads'))}
               {sheetItem('Revenue & fee plans', () => openManage('revenue'))}

@@ -115,6 +115,8 @@ test.describe('@smoke', () => {
     await expect(page.getByTestId('page-activities').or(page.getByText("Class activities aren't set up yet"))).toBeVisible()
     await page.goto(gymUrl('qadojo', '/company/absentees'))
     await expect(page.getByTestId('page-absentees').or(page.getByText("Absentee messages aren't set up yet"))).toBeVisible()
+    await page.goto(gymUrl('qadojo', '/company/attendance/reports'))
+    await expect(page.getByTestId('page-class-reports').or(page.getByText("Class reports aren't set up yet"))).toBeVisible()
     await page.goto(gymUrl('qadojo', '/company/holidays'))
     await expect(page.getByTestId('page-holidays').or(page.getByText("Holidays aren't set up yet"))).toBeVisible()
     // Belt grading: the exams page loads (prod QA Dojo has grading off, so it may show the "not switched on" note)

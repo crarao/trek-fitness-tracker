@@ -293,6 +293,7 @@ export default function CoachHomePage() {
               <span className="flex gap-3">
                 <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className="text-xs text-orange-400 hover:text-orange-300">All of today →</button>
                 <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+                <button type="button" data-nav onClick={() => router.push('/company/attendance/reports')} className="text-xs text-orange-400 hover:text-orange-300">Reports →</button>
               </span>
             </div>
             {todaysBatches.length === 0 ? (

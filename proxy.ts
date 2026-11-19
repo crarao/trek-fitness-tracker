@@ -16,7 +16,8 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 //   /admin             super_admin
 //   /coach             coach
 //   /company/client    company_admin, partner, coach   (coaches open PT clients; RLS limits them to PT)
-//   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS)
+//   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS;
+//                      incl. /company/attendance/reports, the dojo class reports)
 //   /company/activities company_admin, partner         (dojo class activities; senseis tick them on the roll call)
 //   /company/holidays  company_admin, partner          (dojo holiday calendar)
 //   /company/absentees company_admin, partner          (today's absentees, WhatsApp to parents)
