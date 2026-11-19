@@ -45,6 +45,8 @@ const SECTIONS: { prefix: string; roles: Role[] }[] = [
   { prefix: '/company/attendance', roles: ['company_admin', 'partner', 'coach'] },
   // Belt grading exams: senseis read them (results), only owner / partner change anything (RLS)
   { prefix: '/company/grading', roles: ['company_admin', 'partner', 'coach'] },
+  // Monthly reports (19 Nov): owner / partner for their gym, super admin for any (?company=<id>). Before /company.
+  { prefix: '/company/reports', roles: ['company_admin', 'partner', 'super_admin'] },
   { prefix: '/company', roles: ['company_admin', 'partner'] },
   { prefix: '/client', roles: ['client'] },
 ]

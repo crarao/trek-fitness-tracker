@@ -3,6 +3,10 @@
 
 import { expandOwnPlans, ownPlanOn, realPlanId, mondayOf, isPlanCopy } from '../lib/self-training'
 import { planAdherence } from '../lib/adherence'
+import { summarizeMonth } from '../lib/monthly-report'
+import { monthReview, plateauLine, listText } from '../lib/review-report'
+import type { ProgressLog } from '../lib/progress'
+import type { PlanJson } from '../lib/plan-structure'
 
 let failed = 0
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -64,6 +68,31 @@ eq('two saves in a week: the later one wins', same.plans.map(p => p.id), ['b'])
 // A member with no own plans: nothing changes
 const none = expandOwnPlans([gym], sessions, ME, '2026-11-19')
 eq('no own plans: same arrays', [none.plans === undefined, none.plans.length, none.sessions === sessions], [false, 1, true])
+
+// ---- Monthly review (lib/review-report.ts) ----
+let n = 0
+const log = (date: string, name: string, kg: number, reps = 10, sets = 3): ProgressLog => ({
+  id: `l${++n}`, session_id: `s-${date}`, exercise_id: null, exercise_name: name, position: n, sets, reps, weight: kg, unit: 'kg',
+  set_details: Array.from({ length: sets }, () => ({ kg, reps })), created_at: `${date}T10:00:00Z`, session_date: date, logged_by: ME,
+})
+const logs = [
+  log('2026-10-20', 'Squat', 50),                                                      // before November
+  log('2026-11-02', 'Squat', 52.5), log('2026-11-09', 'Squat', 55),                    // new best
+  log('2026-11-03', 'Curl', 8), log('2026-11-10', 'Curl', 8), log('2026-11-17', 'Curl', 8), // stalled
+]
+const novSessions = ['2026-11-02', '2026-11-03', '2026-11-09', '2026-11-10', '2026-11-17']
+  .map(d => ({ session_date: d, weekly_plan_id: null, plan_day: null, duration_minutes: 40, client_id: ME }))
+const summary = summarizeMonth({ plans: [], sessions: novSessions, month: '2026-11', today: '2026-11-19' })
+const json = p1.plan_json as unknown as PlanJson
+json.days[4].exercises = [{ name: 'Deadlift', sets: '3', reps: '5', rest: '', note: '' }]
+const rv = monthReview({ logs, library: [], plan: json, summary })
+eq('review: weeks of November so far', rv.weeks.map(w => [w.from, w.sessions, w.volume]),
+  [['2026-11-01', 0, 0], ['2026-11-02', 2, 1815], ['2026-11-09', 2, 1890], ['2026-11-16', 1, 240]])
+eq('review: new bests', rv.newBests, ['Squat'])
+eq('review: stalled', rv.stalled, ['Curl'])
+eq('review: in the plan, not done 2+ weeks', rv.notDone, ['Deadlift'])
+eq('list text', [listText(['A']), listText(['A', 'B']), listText(['A', 'B', 'C'])], ['A', 'A and B', 'A, B and C'])
+eq('plateau line', plateauLine('FitLoft', ['Curl']), 'Want help breaking your plateau on Curl? Talk to the FitLoft team on your next visit.')
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1) }
 console.log('\nall passed')
