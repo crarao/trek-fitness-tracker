@@ -2,7 +2,7 @@
 
 import PageNav from '@/app/page-nav'
 import NumBox from '@/app/num-box'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
@@ -34,7 +34,8 @@ import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS, linkPlanExercises } from '@/lib/exercises'
-import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
+import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine } from '@/lib/exercise-logs'
+import { strengthReport } from '@/lib/progress'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -42,7 +43,9 @@ const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
   loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
 })
 // Per-exercise top weight per month (#80); Chart.js, loaded only when the Progress tab shows it
-const ExerciseProgressChart = dynamic(() => import('@/app/exercise-progress'), { ssr: false })
+// Per-exercise progress list (19 Nov, components/progress/ExerciseProgress.tsx). The older chart,
+// app/exercise-progress.tsx, is kept but no longer shown here.
+const ExerciseProgress = dynamic(() => import('@/components/progress/ExerciseProgress'), { ssr: false })
 
 type ClientProfile = {
   full_name: string
@@ -711,6 +714,14 @@ export default function ClientDetailPage() {
   const initialize = () => loadData()
 
   const clientFirstName = (client?.full_name || '').trim().split(/\s+/)[0] || 'client'
+  // Who logged an exercise, for the progress list's history and filter: the client's first name, or
+  // the same staff label as session cards without "by" ("Coach Ravi", "Anand (covering)" → "Anand")
+  const progressLoggerName = useCallback((loggedBy: string | null) => {
+    if (!loggedBy || loggedBy === clientId) return clientFirstName === 'client' ? 'Client' : clientFirstName
+    const t = loggedByText({ logged_by: loggedBy } as Session).replace(/^by\s+/, '').replace(/\s*\(covering\)$/, '')
+    return t.charAt(0).toUpperCase() + t.slice(1)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, clientFirstName, staff, staffNames])
   // "by Coach Priya" when staff logged it for the client, "by client" when the client logged it
   // " (covering)" when the coach who logged it isn't the client's primary coach
   const loggedByText = (s: Session) => {
@@ -3724,8 +3735,12 @@ const handleResetPassword = async () => {
             ) : chartData && (
 <ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
-            {/* Weight per exercise (#80): top weight per week (last 8) or month (last 6); hidden with nothing to show */}
-            {exerciseLogsOn && <ExerciseProgressChart logs={datedLogs} library={exLibrary} today={localDateIso()} country={country ?? 'IN'} />}
+            {/* Weight per exercise (#80; list since 19 Nov): summary, one row per exercise, detail sheet; hidden with nothing to show */}
+            {exerciseLogsOn && (
+              <ExerciseProgress mode="coach" logs={datedLogs} library={exLibrary} today={localDateIso()} country={country ?? 'IN'}
+                plan={(() => { const cur = currentPlan(plans); return cur ? planJsonOf(cur) : null })()}
+                loggerName={progressLoggerName} />
+            )}
           </div>
         )}
         </>)}

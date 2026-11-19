@@ -7,7 +7,8 @@ import { type Country, formatDate } from './locale'
 import { imagesToPdf, type PdfPage } from './pdf'
 import type { WeekSummary } from './progress-share'
 import { type PlanJson, daysInWeekOrder, exerciseDetail } from './plan-structure'
-import { type StrengthReport, changeText, weightText } from './exercise-logs'
+// Same grouping / numbers as the progress list (lib/progress.ts re-exports the exercise-log helpers)
+import { type StrengthReport, changeText, weightText } from './progress'
 import { withoutCalories } from './progress-share'
 
 // The line chart of one exercise under the Strength table (off since 14 Nov, see the strength section)

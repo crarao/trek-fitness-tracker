@@ -198,7 +198,9 @@ exercises (exercise library, #74; never deleted: archived)
 | Leads rules (sources, follow-up state, WhatsApp wording, summary) | `lib/leads.ts` |
 | Exercise library rules (search, labels, recent) | `lib/exercises.ts` (check: `scripts/check-exercises.ts`) |
 | Weight / reps logs: parse plan text, match names to the library, pre-fill from last log, monthly top weight / volume (check: `scripts/check-exercise-logs.ts`) | `lib/exercise-logs.ts` |
-| Per-exercise progress chart (coach Progress tab) | `app/exercise-progress.tsx` |
+| Per-exercise progress chart (old, kept, no longer shown since 19 Nov) | `app/exercise-progress.tsx` |
+| Per-exercise progress list (summary strip, one row per exercise, filters, detail sheet; `mode` coach / client / self) | `components/progress/ExerciseProgress.tsx` |
+| Progress list numbers: rows per exercise, range, new bests / stalled / not done, chart axis (re-exports the exercise-log helpers; the PDF imports from here; check: `scripts/check-progress.ts`) | `lib/progress.ts` |
 | Plan builder: editor, exercise picker sheet, copy-plan sheet | `app/plan-editor.tsx`, `app/exercise-picker.tsx`, `app/plan-copy-sheet.tsx` |
 | Manage the gym's exercises (owner / partner) | `app/company/exercises/page.tsx` |
 | Client app | `app/client/page.tsx` |
