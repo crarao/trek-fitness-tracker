@@ -1,8 +1,8 @@
 'use client'
 
 import PageNav from '@/app/page-nav'
-import NumBox from '@/app/num-box'
-import { useEffect, useRef, useState } from 'react'
+import SetRows from '@/app/set-rows'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { formatMoney, currencySymbol, normalizeCurrency, CURRENCIES } from '@/lib/currency'
@@ -34,7 +34,8 @@ import BeltChip from '@/app/belt-chip'
 import dynamic from 'next/dynamic'
 import { loadGymStaff } from '@/lib/gym-staff'
 import { type Exercise, EXERCISE_COLUMNS, linkPlanExercises } from '@/lib/exercises'
-import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine, strengthReport } from '@/lib/exercise-logs'
+import { type ExerciseLog, type DatedLog, type LogDraft, type LogInsert, EXERCISE_LOG_COLUMNS, lastLogFor, prefill, rowsToSave, asDayDrafts, filledSets, type SetEntry, isTimedOrDistance, logDetail, logLine } from '@/lib/exercise-logs'
+import { strengthReport } from '@/lib/progress'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
@@ -42,7 +43,9 @@ const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
   loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
 })
 // Per-exercise top weight per month (#80); Chart.js, loaded only when the Progress tab shows it
-const ExerciseProgressChart = dynamic(() => import('@/app/exercise-progress'), { ssr: false })
+// Per-exercise progress list (19 Nov, components/progress/ExerciseProgress.tsx). The older chart,
+// app/exercise-progress.tsx, is kept but no longer shown here.
+const ExerciseProgress = dynamic(() => import('@/components/progress/ExerciseProgress'), { ssr: false })
 
 type ClientProfile = {
   full_name: string
@@ -111,7 +114,8 @@ type Session = {
   plan_day?: string | null   // set when the client logged it from a day of the plan
   exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
   activity?: string | null   // what was done, from the client's Log tab ("run", "sport:Badminton")
-  logged_by?: string | null  // staff member who logged it for the client; null = the client logged it
+  logged_by?: string | null  // staff member who logged it for the client; null (or the client's id, since 19 Nov) = the client logged it
+  client_note?: string | null // the client's note on a session staff logged ("Add a note" in the client app, 19 Nov)
 }
 
 type Feedback = {
@@ -711,6 +715,14 @@ export default function ClientDetailPage() {
   const initialize = () => loadData()
 
   const clientFirstName = (client?.full_name || '').trim().split(/\s+/)[0] || 'client'
+  // Who logged an exercise, for the progress list's history and filter: the client's first name, or
+  // the same staff label as session cards without "by" ("Coach Ravi", "Anand (covering)" → "Anand")
+  const progressLoggerName = useCallback((loggedBy: string | null) => {
+    if (!loggedBy || loggedBy === clientId) return clientFirstName === 'client' ? 'Client' : clientFirstName
+    const t = loggedByText({ logged_by: loggedBy } as Session).replace(/^by\s+/, '').replace(/\s*\(covering\)$/, '')
+    return t.charAt(0).toUpperCase() + t.slice(1)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, clientFirstName, staff, staffNames])
   // "by Coach Priya" when staff logged it for the client, "by client" when the client logged it
   // " (covering)" when the coach who logged it isn't the client's primary coach
   const loggedByText = (s: Session) => {
@@ -845,34 +857,11 @@ export default function ClientDetailPage() {
   // a row without reps isn't saved. "Last: …" = the client's last log of this exercise.
   const renderWeightRow = (key: string, i: number, e: PlanDay['exercises'][number]) => {
     if (!exerciseLogsOn || isTimedOrDistance(e)) return null
-    const rows: SetEntry[] = draftFor(key, i, e).sets.length ? draftFor(key, i, e).sets : [{ kg: null, reps: null }]
     const last = lastLogFor(e, datedLogs, exLibrary)
-    const box = 'min-w-0 h-11 bg-gray-800 text-white text-center rounded-lg px-1 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
-    const change = (j: number, patch: Partial<SetEntry>) => setDraftSets(key, i, rows.map((r, k) => (k === j ? { ...r, ...patch } : r)))
+    // The rows themselves are app/set-rows.tsx (shared with a self-training member's own day, 19 Nov)
     return (
-      <div className="pl-11 pr-3 pb-2.5 -mt-1 space-y-1.5">
-        <p className="text-[11px] text-gray-500">
-          {last ? <>Last: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
-        </p>
-        {rows.map((r, j) => (
-          <div key={j} className="flex items-center gap-1.5">
-            <span className="w-11 shrink-0 text-[11px] text-gray-500">Set {j + 1}</span>
-            <NumBox kind="weight" label={`${e.name} set ${j + 1} kg`} placeholder="kg" className={`${box} w-16`}
-              value={r.kg} onValue={kg => change(j, { kg })} />
-            <span className="text-gray-500 text-xs">kg ×</span>
-            <NumBox kind="reps" label={`${e.name} set ${j + 1} reps`} placeholder="reps" className={`${box} w-14`}
-              value={r.reps} onValue={reps => change(j, { reps })} />
-            <button type="button" aria-label={`Remove set ${j + 1} of ${e.name}`} disabled={rows.length <= 1}
-              onClick={() => setDraftSets(key, i, rows.filter((_, k) => k !== j))}
-              className="w-11 h-11 shrink-0 rounded-lg text-gray-500 hover:text-white disabled:opacity-30">✕</button>
-          </div>
-        ))}
-        <button type="button" disabled={rows.length >= 20}
-          onClick={() => setDraftSets(key, i, [...rows, { ...rows[rows.length - 1] }])}
-          className="h-11 px-4 rounded-lg border border-gray-700 text-sm text-orange-300 hover:border-orange-500 disabled:opacity-40">
-          + Set
-        </button>
-      </div>
+      <SetRows name={e.name} rows={draftFor(key, i, e).sets} onChange={rows => setDraftSets(key, i, rows)}
+        last={last ? <>Last: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'} />
     )
   }
 
@@ -3618,6 +3607,9 @@ const handleResetPassword = async () => {
                             ))}
                           </ul>
                         ) : null}
+                        {session.client_note && (
+                          <p className="text-xs text-gray-300 bg-gray-800 rounded-lg px-3 py-2 mt-2">📝 {clientFirstName}&apos;s note: {session.client_note}</p>
+                        )}
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
@@ -3724,8 +3716,12 @@ const handleResetPassword = async () => {
             ) : chartData && (
 <ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
-            {/* Weight per exercise (#80): top weight per week (last 8) or month (last 6); hidden with nothing to show */}
-            {exerciseLogsOn && <ExerciseProgressChart logs={datedLogs} library={exLibrary} today={localDateIso()} country={country ?? 'IN'} />}
+            {/* Weight per exercise (#80; list since 19 Nov): summary, one row per exercise, detail sheet; hidden with nothing to show */}
+            {exerciseLogsOn && (
+              <ExerciseProgress mode="coach" logs={datedLogs} library={exLibrary} today={localDateIso()} country={country ?? 'IN'}
+                plan={(() => { const cur = currentPlan(plans); return cur ? planJsonOf(cur) : null })()}
+                loggerName={progressLoggerName} />
+            )}
           </div>
         )}
         </>)}

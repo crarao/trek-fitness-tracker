@@ -7,7 +7,8 @@ import { type Country, formatDate } from './locale'
 import { imagesToPdf, type PdfPage } from './pdf'
 import type { WeekSummary } from './progress-share'
 import { type PlanJson, daysInWeekOrder, exerciseDetail } from './plan-structure'
-import { type StrengthReport, changeText, weightText } from './exercise-logs'
+// Same grouping / numbers as the progress list (lib/progress.ts re-exports the exercise-log helpers)
+import { type StrengthReport, changeText, weightText } from './progress'
 import { withoutCalories } from './progress-share'
 
 // The line chart of one exercise under the Strength table (off since 14 Nov, see the strength section)
@@ -32,6 +33,16 @@ export type ProgressPdfInput = {
   plan?: { weekStart: string; json: PlanJson } | null // the week's day-by-day plan, if it has one
   strength?: StrengthReport | null                    // weight per exercise per month (#80), from lib/exercise-logs.ts
   showCalories?: boolean                              // calorie tile and the message's calorie part; off unless true (5 Nov)
+  // The gym's reviewed monthly report (19 Nov, app/company/reports, lib/review-report.ts): sessions and
+  // volume per week, new bests / stalled / not done, the coach's note and (self-training) the plateau line
+  review?: {
+    weeks: { label: string; sessions: number; volume: number }[]
+    newBests: string[]
+    stalled: string[]
+    notDone: string[]
+    coachNote: string
+    closing: string | null
+  } | null
 }
 
 // 150 dpi A4
@@ -336,6 +347,74 @@ export async function buildProgressPdf(input: ProgressPdfInput): Promise<Blob> {
       const chartLabels = st.chart.months.map(m => formatDate(`${m}-01`, input.country, 'month'))
       ctx.drawImage(await chartImage('line', chartLabels, st.chart.data, W - 2 * M, h, false), M, y + 50)
       y += 50 + h + 40
+    }
+  }
+
+  // Coach review (reviewed monthly report only)
+  const rv = input.review
+  if (rv) {
+    const textBlock = (text: string, size: number, color: string, lineH: number) => {
+      ctx.font = font(size)
+      for (const line of wrap(ctx, text, W - 2 * M - 40)) {
+        ensure(lineH)
+        ctx.fillStyle = color
+        ctx.font = font(size)
+        if (line) ctx.fillText(line, M + 20, y + size)
+        y += lineH
+      }
+    }
+    if (rv.weeks.length) {
+      const chartW = (W - 2 * M - 40) / 2, chartH = 280
+      ensure(50 + chartH + 40)
+      heading('Week by week')
+      const wl = rv.weeks.map(w => w.label)
+      const pair = [['Sessions', rv.weeks.map(w => w.sessions)], ['Volume (kg × reps)', rv.weeks.map(w => w.volume)]] as const
+      for (const [i, [title, data]] of pair.entries()) {
+        const x = M + i * (chartW + 40)
+        ctx.fillStyle = GRAY
+        ctx.font = font(20, 600)
+        ctx.fillText(title.toUpperCase(), x, y + 20)
+        ctx.drawImage(await chartImage('bar', wl, [...data], chartW, chartH), x, y + 40)
+      }
+      y += 40 + chartH + 40
+    }
+    heading('Coach review')
+    const lists: [string, string[], string][] = [
+      ['New bests', rv.newBests, '#15803d'],
+      ['Stalled (no increase in 3+ sessions)', rv.stalled, '#b45309'],
+      ['In the plan, not done for 2+ weeks', rv.notDone, '#b91c1c'],
+    ]
+    for (const [title, names, color] of lists) {
+      ensure(80)
+      ctx.fillStyle = color
+      ctx.font = font(24, 700)
+      ctx.fillText(title, M, y + 26)
+      y += 40
+      textBlock(names.length ? names.join(' · ') : 'None', 24, names.length ? DARK : GRAY, 34)
+      y += 14
+    }
+    const note = rv.coachNote.trim()
+    if (note) {
+      y += 10
+      ensure(80)
+      ctx.fillStyle = GRAY
+      ctx.font = font(22, 600)
+      ctx.fillText('FROM YOUR COACH', M, y + 22)
+      y += 40
+      textBlock(note, 26, DARK, 38)
+      y += 10
+    }
+    if (rv.closing) {
+      ctx.font = font(26, 600)
+      const lines = wrap(ctx, rv.closing, W - 2 * M - 60)
+      const boxH = 40 + lines.length * 38
+      ensure(boxH + 30)
+      y += 10
+      ctx.fillStyle = '#fff7ed'
+      roundRect(ctx, M, y, W - 2 * M, boxH, 20)
+      ctx.fillStyle = ORANGE
+      lines.forEach((line, i) => { ctx.font = font(26, 600); ctx.fillText(line, M + 30, y + 46 + i * 38) })
+      y += boxH + 30
     }
   }
 

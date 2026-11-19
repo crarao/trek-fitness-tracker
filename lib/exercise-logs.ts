@@ -23,10 +23,11 @@ export type ExerciseLog = {
   weight: number | null
   unit: string
   set_details?: unknown  // [{kg, reps}] per set (17 Nov); read through setsOf()
+  logged_by?: string | null // who saved it (read by the progress list's history, 19 Nov)
   created_at: string
 }
 
-export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, set_details, created_at'
+export const EXERCISE_LOG_COLUMNS = 'id, session_id, exercise_id, exercise_name, position, sets, reps, weight, unit, set_details, logged_by, created_at'
 
 // What the coach sees and edits on a ticked exercise: one row per set (17 Nov; was one sets / reps / weight)
 export type LogDraft = { sets: SetEntry[] }

@@ -15,12 +15,22 @@ import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calo
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 import { workoutTimeLabel } from '@/lib/today-schedule'
+import { getClientSettings, isSelfTraining, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
+import { ownPlanOn } from '@/lib/self-training'
+import { staffWord } from '@/lib/labels'
+import { type ExerciseLog, EXERCISE_LOG_COLUMNS } from '@/lib/exercise-logs'
+import { type Exercise, EXERCISE_COLUMNS } from '@/lib/exercises'
+import { type ProgressLog } from '@/lib/progress'
 
 // Charts load only when the Progress view is shown (keeps Chart.js out of the first download)
 const ProgressCharts = dynamic(() => import('@/app/progress-charts'), {
   ssr: false,
   loading: () => <p className="text-xs text-gray-500 px-1">Loading charts…</p>,
 })
+// Strength per exercise (19 Nov, Part B): shown when the gym's client_sees_detailed_progress switch is on
+const ExerciseProgress = dynamic(() => import('@/components/progress/ExerciseProgress'), { ssr: false })
+// A self-training member's own plan + day logging (19 Nov, Part C)
+const MyPlan = dynamic(() => import('@/components/self-training/MyPlan'), { ssr: false })
 
 type WeeklyPlan = {
   id: string
@@ -28,6 +38,7 @@ type WeeklyPlan = {
   plan_details: string
   workout_time: string | null
   plan_json?: unknown   // structured days (newer plans); null for text-only plans
+  created_by?: string | null // who made it (db/2026-11-19-client-view.md Step 2): the member = their own plan (self-training)
 }
 
 type Session = {
@@ -39,7 +50,8 @@ type Session = {
   plan_day?: string | null   // e.g. "Tue · Upper Body Push" when logged from a day chip
   exercises_done?: unknown   // { done: [names], total } when exercises were ticked (needs the column)
   activity?: string | null   // what was done, from the Log tab ("run", "sport:Badminton")
-  logged_by?: string | null  // set when the coach logged it for the client (gym PT); null = logged here
+  logged_by?: string | null  // who logged it: the coach (gym PT), or this client (since 19 Nov; null = logged here earlier)
+  client_note?: string | null // the client's note on a session their coach logged (db/2026-11-19-client-view.md)
 }
 
 type Feedback = {
@@ -92,6 +104,16 @@ export default function ClientPage() {
     saveTicks({ ...ticks, [key]: cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i] })
   }
   const [dayError, setDayError] = useState('')
+  // Names of the staff who logged this client's sessions (rpc my_loggers, db/2026-11-19-client-view.md); empty
+  // until that SQL runs, then cards read "Logged by your coach"
+  const [loggers, setLoggers] = useState<Record<string, { full_name: string; role: string }>>({})
+  // Strength per exercise (only when the gym shows it): this client's exercise rows + the exercise library
+  const [exLogs, setExLogs] = useState<ProgressLog[]>([])
+  const [exLibrary, setExLibrary] = useState<Exercise[]>([])
+  // "Add a note" on a session the coach logged
+  const [noteFor, setNoteFor] = useState<string | null>(null)
+  const [noteText, setNoteText] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -137,11 +159,15 @@ const [profileMessage, setProfileMessage] = useState('')
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('*, companies:company_id(name, logo_url, feedback_enabled, ai_insights_enabled, session_notes_enabled, country, business_type, client_module_enabled)')
+      .select('*, companies:company_id(*)') // * so client_settings is read once db/2026-11-19-client-view.md has run
       .eq('id', user.id)
       .single()
 
     setProfile(prof)
+    const settings = getClientSettings(prof?.companies)
+
+    // The gym hasn't turned the client app on: the page shows CLIENT_APP_OFF_MESSAGE, nothing else is read
+    if (prof && !settings.client_login) { setLoading(false); return }
 
     if (prof?.companies && !prof.companies.client_module_enabled) {
       const { data: ms } = await supabase
@@ -194,6 +220,27 @@ if (prof) {
 
     setSessions(sessionsData || [])
 
+    // Who logged the sessions the coach saved (names only; the function returns nothing else)
+    if ((sessionsData || []).some(s => s.logged_by && s.logged_by !== user.id)) {
+      const { data: lg, error: lgError } = await supabase.rpc('my_loggers')
+      if (!lgError) setLoggers(Object.fromEntries(((lg || []) as { id: string; full_name: string | null; role: string }[]).map(x => [x.id, { full_name: x.full_name || '', role: x.role }])))
+    }
+
+    // Strength per exercise, when the gym shows it (an error = table not there: the list stays hidden).
+    // Self-training members always: their own day pre-fills from their last sets.
+    const self = isSelfTraining(prof?.client_type, settings)
+    if ((settings.client_sees_detailed_progress && sessionsData?.length) || self) {
+      const [lg, lib] = await Promise.all([
+        supabase.from('exercise_logs').select(EXERCISE_LOG_COLUMNS).eq('client_id', user.id),
+        supabase.from('exercises').select(EXERCISE_COLUMNS),
+      ])
+      if (!lg.error) {
+        const dates = Object.fromEntries((sessionsData || []).map(s => [s.id, String(s.session_date).slice(0, 10)]))
+        setExLogs(((lg.data || []) as ExerciseLog[]).flatMap(l => (dates[l.session_id] ? [{ ...l, session_date: dates[l.session_id] }] : [])))
+        setExLibrary((lib.data || []) as Exercise[])
+      }
+    }
+
     const sessionIds = sessionsData?.map(s => s.id) || []
     if (sessionIds.length) {
       const { data: feedbackData } = await supabase
@@ -208,10 +255,13 @@ if (prof) {
 
   const handleSaveGoal = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase
+    // A blocked update returns 0 rows without an error (client_can_edit_profile off): say so
+    const { data: saved, error } = await supabase
       .from('profiles')
       .update({ goal: goalText })
       .eq('id', user!.id)
+      .select('id')
+    if (error || !saved?.length) { showToast('Could not save your goal' + (error ? ': ' + error.message : '. Ask your gym.'), 'error'); return }
     setShowGoalForm(false)
     setGoalText('')
     initialize()
@@ -221,7 +271,7 @@ if (prof) {
   setSavingProfile(true)
   const { data: { user } } = await supabase.auth.getUser()
   
-  const { error } = await supabase
+  const { data: savedRows, error } = await supabase
     .from('profiles')
     .update({
       age: profileForm.age ? parseInt(profileForm.age) : null,
@@ -237,9 +287,12 @@ if (prof) {
       emergency_contact_phone: profileForm.emergency_contact_phone || null,
     })
     .eq('id', user!.id)
+    .select('id')
 
-  if (error) {
-    setProfileMessage('Error saving profile')
+  // 0 rows without an error = blocked (the gym turned profile edits off)
+  if (error || !savedRows?.length) {
+    setProfileMessage('')
+    showToast('Could not save your profile' + (error ? '' : '. Your gym manages it.'), 'error')
   } else {
     setProfileMessage('Profile saved successfully! ✓')
     setTimeout(() => setProfileMessage(''), 3000)
@@ -327,6 +380,7 @@ const handleChangePassword = async () => {
       duration_minutes: minutes,
       notes: newSession.notes,
       activity,
+      logged_by: user.id, // who logged it (19 Nov): the client themselves
     }
     let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
     // If the activity column is missing in Supabase, save without it
@@ -373,6 +427,7 @@ const handleChangePassword = async () => {
       duration_minutes: minutes,
       notes: dayForm.notes,
       plan_day: link.plan_day,
+      logged_by: user.id, // who logged it (19 Nov): the client themselves
       ...(planDay && ticked.length ? { exercises_done: exercisesDoneFor(planDay, ticked) } : {}),
     }
     let { data: session, error } = await supabase.from('logged_sessions').insert(row).select().single()
@@ -439,10 +494,76 @@ const handleChangePassword = async () => {
   const weekKcal = sessions.filter(s => s.session_date >= weekStartIso).reduce((n, s) => n + (sessionKcal(s) || 0), 0)
   const getFeedback = (sessionId: string) => feedback.find(f => f.session_id === sessionId)
   const byCoach = (s: Session) => !!s.logged_by && s.logged_by !== profile?.id
+  // The gym's client app switches (Super Admin → Client app setup, lib/clientSettings.ts)
+  const gymSettings = getClientSettings(profile?.companies)
+  // Self-training member (Part C): plans, logs and sees their own progress, whatever the PT switches say
+  const selfTraining = isSelfTraining(profile?.client_type, gymSettings)
+  const cs = selfTraining
+    ? { ...gymSettings, client_sees_plan: true, client_can_log_sessions: true, client_can_log_activities: true, client_sees_detailed_progress: true, client_can_edit_profile: true }
+    : gymSettings
+  // "Coach Ravi" / "Anand" (owner or partner) / "your coach" (name not readable yet); "you" for the client
+  const loggerShort = (loggedBy: string | null | undefined) => {
+    if (!loggedBy || loggedBy === profile?.id) return 'you'
+    const l = loggers[loggedBy]
+    const first = (l?.full_name || '').trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]
+    if (!l || !first) return `your ${staffWord(profile?.companies?.business_type).one.toLowerCase()}`
+    return l.role === 'coach' ? `${staffWord(profile?.companies?.business_type).one} ${first}` : first
+  }
+  const loggedByLine = (s: Session) => `Logged by ${loggerShort(s.logged_by)}`
+  // The client's note on a session the coach logged; 0 rows back = not allowed (shown as an error)
+  const saveClientNote = async (s: Session) => {
+    setSavingNote(true)
+    const { data, error } = await supabase.from('logged_sessions')
+      .update({ client_note: noteText.trim() || null }).eq('id', s.id).select('id')
+    setSavingNote(false)
+    if (error || !data?.length) { showToast('Could not save your note' + (error ? ': ' + error.message : ''), 'error'); return }
+    setSessions(prev => prev.map(x => (x.id === s.id ? { ...x, client_note: noteText.trim() || null } : x)))
+    setNoteFor(null)
+    showToast('✓ Note added')
+  }
+  // Note line + "Add a note" for a coach-logged session (only once the client_note column exists)
+  const clientNoteBlock = (s: Session) => {
+    if (!byCoach(s) || !('client_note' in s)) return null
+    if (noteFor === s.id) return (
+      <div className="mt-2 space-y-2">
+        <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={2} maxLength={500}
+          placeholder="How did it feel? Anything for your coach?"
+          className="w-full bg-gray-800 text-white rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-xs resize-none" />
+        <div className="flex gap-2">
+          <button type="button" disabled={savingNote} onClick={() => saveClientNote(s)}
+            className="text-xs bg-orange-500 hover:bg-orange-400 text-white font-medium px-3 py-1.5 rounded-lg disabled:opacity-50">{savingNote ? 'Saving…' : 'Save note'}</button>
+          <button type="button" onClick={() => setNoteFor(null)} className="text-xs text-gray-400 hover:text-white px-2">Cancel</button>
+        </div>
+      </div>
+    )
+    return (
+      <div className="mt-2">
+        {s.client_note && <p className="text-xs text-gray-300 bg-gray-800 rounded-lg px-3 py-2 mb-1">📝 Your note: {s.client_note}</p>}
+        <button type="button" onClick={() => { setNoteFor(s.id); setNoteText(s.client_note || '') }}
+          className="text-xs text-orange-400 hover:text-orange-300">{s.client_note ? 'Edit note' : 'Add a note'}</button>
+      </div>
+    )
+  }
+  // Tabs this gym shows: My Plan (client_sees_plan), Log (client_can_log_activities), Progress, Profile
+  const tabs = (['plan', 'log', 'progress', 'profile'] as const)
+    .filter(t => (t !== 'plan' || cs.client_sees_plan) && (t !== 'log' || cs.client_can_log_activities))
+  const shownTab = tabs.includes(activeTab) ? activeTab : tabs[0]
 
   if (loading) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <p className="text-gray-400">Loading...</p>
+    </div>
+  )
+
+  // Gym hasn't turned the client app on (also refused at login, and by the database)
+  if (profile && !cs.client_login) return (
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center px-6 text-center" data-testid="page-client-off">
+      <p className="text-base font-semibold">{profile?.companies?.name || 'CoachBoard'}</p>
+      <p className="text-sm text-gray-400 mt-2">{CLIENT_APP_OFF_MESSAGE}</p>
+      <button data-nav onClick={() => { supabase.auth.signOut(); router.push('/login') }}
+        className="mt-6 text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg transition">
+        Log out
+      </button>
     </div>
   )
 
@@ -578,9 +699,9 @@ const handleChangePassword = async () => {
 
       {/* Tabs */}
       <div className="flex border-b border-gray-800">
-  {(['plan', 'log', 'progress', 'profile'] as const).map(tab => (
+  {tabs.map(tab => (
     <button key={tab} onClick={() => setActiveTab(tab)}
-      className={`flex-1 py-3 text-xs font-medium transition ${activeTab === tab
+      className={`flex-1 py-3 text-xs font-medium transition ${shownTab === tab
         ? 'text-orange-500 border-b-2 border-orange-500'
         : 'text-gray-500 hover:text-white'}`}>
       {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : 'Profile'}
@@ -591,7 +712,7 @@ const handleChangePassword = async () => {
       <div className="max-w-2xl mx-auto px-4 py-5">
 
         {/* MY PLAN TAB */}
-        {activeTab === 'plan' && (
+        {shownTab === 'plan' && (
           <div>
             {/* Goal Section */}
             <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-4">
@@ -604,14 +725,14 @@ const handleChangePassword = async () => {
                     <p className="text-sm text-gray-500 italic">No goal set yet</p>
                   )}
                 </div>
-                <button
+                {cs.client_can_edit_profile && <button
                   onClick={() => {
                     setGoalText(profile?.goal || '')
                     setShowGoalForm(!showGoalForm)
                   }}
                   className="text-xs text-orange-500 hover:text-orange-400 border border-orange-900 hover:border-orange-500 px-3 py-1.5 rounded-lg transition ml-4">
                   {profile?.goal ? 'Edit' : 'Set Goal'}
-                </button>
+                </button>}
               </div>
 
               {showGoalForm && (
@@ -631,7 +752,11 @@ const handleChangePassword = async () => {
               )}
             </div>
 
-            {plans.length === 0 ? (
+            {selfTraining && profile && country ? (
+              <MyPlan memberId={profile.id} companyId={profile.company_id} availableDays={profile.available_days} country={country}
+                plans={plans} sessions={sessions} logs={exLogs} library={exLibrary}
+                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast} />
+            ) : plans.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 <p className="text-lg mb-1">No plan yet</p>
                 <p className="text-sm">Your coach will assign a plan soon!</p>
@@ -688,8 +813,9 @@ const handleChangePassword = async () => {
                                   const fb = getFeedback(s.id)
                                   return (
                                     <div key={s.id} className="text-xs text-gray-300 space-y-1">
-                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}{byCoach(s) ? ' · Logged by your coach' : ''}</p>
+                                      <p>Done {formatDate(s.session_date, country, 'weekday')}{s.duration_minutes ? ` · ${s.duration_minutes} min` : ''}{sessionKcal(s) ? ` · ${kcalText(sessionKcal(s))} (est.)` : ''}{` · ${loggedByLine(s)}`}</p>
                                       {s.notes && <p className="text-gray-400 bg-gray-900 rounded-lg px-3 py-2">{s.notes}</p>}
+                                      {clientNoteBlock(s)}
                                       {fb?.admin_feedback && (
                                         <p className="text-orange-200 bg-orange-950/60 border border-orange-900 rounded-lg px-3 py-2">💬 Coach: {fb.admin_feedback}</p>
                                       )}
@@ -698,6 +824,12 @@ const handleChangePassword = async () => {
                                 })}
                                 <button type="button" onClick={() => setOpenDay(null)} className="text-xs text-gray-400 hover:text-white">Close</button>
                               </div>
+                            )
+                            // client_can_log_sessions off: the plan is read-only, the coach logs the workout
+                            if (!cs.client_can_log_sessions) return (
+                              <p className={`text-xs text-gray-500 ${inRow ? 'border-t border-gray-800 pt-3' : 'mt-3'}`}>
+                                Your {staffWord(profile?.companies?.business_type).one.toLowerCase()} logs this workout with you.
+                              </p>
                             )
                             return (
                               <div className={inRow ? 'border-t border-gray-800 pt-3' : 'mt-3 rounded-xl border border-orange-800 bg-gray-950 p-4'}>
@@ -721,7 +853,7 @@ const handleChangePassword = async () => {
                       const dayPicker = (
                         <div className="mb-1">
                           <div className="flex items-baseline justify-between gap-2">
-                            <p className="text-xs text-gray-400">Tap a day when you&apos;ve done it</p>
+                            <p className="text-xs text-gray-400">{cs.client_can_log_sessions ? <>Tap a day when you&apos;ve done it</> : 'Tap a day to see it'}</p>
                             <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>
                               {doneCount} of {workoutLabels.length} done
                             </p>
@@ -763,7 +895,7 @@ const handleChangePassword = async () => {
                         <div className="border-t border-gray-800 pt-4">
                           <div className="flex items-baseline justify-between gap-2 mb-2">
                             <p className="text-xs text-gray-400">
-                              {isCurrent ? 'Tap a day to see it and tick it off' : `${summary.workoutDays} workout day${summary.workoutDays === 1 ? '' : 's'} · ${summary.exercises} exercises`}
+                              {isCurrent ? (cs.client_can_log_sessions ? 'Tap a day to see it and tick it off' : 'Tap a day to see it') : `${summary.workoutDays} workout day${summary.workoutDays === 1 ? '' : 's'} · ${summary.exercises} exercises`}
                             </p>
                             {isCurrent && (
                               <p className={`text-xs font-medium ${doneCount > 0 ? 'text-green-400' : 'text-gray-500'}`}>{doneCount} of {workoutLabels.length} done</p>
@@ -772,7 +904,7 @@ const handleChangePassword = async () => {
                           <PlanDays plan={planJson} weekStart={activePlan.week_start} done={done}
                             doneNote={doneDayNotes(activePlan.id, sessions, sessionKcal)}
                             ticks={dayTicks}
-                            onTick={isCurrent ? (d, i) => { if (!done.has(d)) toggleTick(activePlan.id, d, i) } : undefined}
+                            onTick={isCurrent && cs.client_can_log_sessions ? (d, i) => { if (!done.has(d)) toggleTick(activePlan.id, d, i) } : undefined}
                             openDay={openDay ? dayKey(openDay) : null}
                             onToggle={d => {
                               setDayError('')
@@ -818,11 +950,11 @@ const handleChangePassword = async () => {
                         <p className="text-gray-300 whitespace-pre-wrap leading-relaxed text-sm">{profile.diet_plan}</p>
                       </div>
                     )}
-                    <button
+                    {cs.client_can_log_activities && <button
                       onClick={() => { setActiveTab('log'); setNewSession(prev => ({ ...prev, weekly_plan_id: activePlan.id })) }}
                       className="mt-5 w-full bg-orange-500 hover:bg-orange-400 text-white py-2.5 rounded-xl text-sm font-medium transition">
                       Log an Activity for This Week
-                    </button>
+                    </button>}
                   </div>
                 )}
               </>
@@ -831,7 +963,7 @@ const handleChangePassword = async () => {
         )}
 
         {/* LOG ACTIVITY TAB — same form as Done ✓ on a plan day, plus "What did you do?" */}
-        {activeTab === 'log' && (
+        {shownTab === 'log' && (
           <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
             <SessionForm mode="log" idPrefix="log" value={newSession} onChange={setNewSession}
               country={country} notesEnabled={profile?.companies?.session_notes_enabled !== false}
@@ -846,7 +978,7 @@ const handleChangePassword = async () => {
         )}
 
         {/* PROGRESS TAB */}
-        {activeTab === 'progress' && (
+        {shownTab === 'progress' && (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 text-center">
@@ -905,6 +1037,16 @@ const handleChangePassword = async () => {
 <ProgressCharts labels={chartData.labels} sessionCounts={chartData.sessionCounts} minuteCounts={chartData.minuteCounts} />
             )}
 
+            {/* Strength per exercise (client_sees_detailed_progress): read-only, no "logged by" filter */}
+            {cs.client_sees_detailed_progress && exLogs.length > 0 && country && (
+              <ExerciseProgress mode={selfTraining ? 'self' : 'client'} logs={exLogs} library={exLibrary} today={localDateIso()} country={country}
+                plan={(() => {
+                  const cur = selfTraining && profile ? ownPlanOn(plans, profile.id, localDateIso()) : plans.find(p => weekStatus(p.week_start) === 'current')
+                  return cur ? planJsonOf(cur) : null
+                })()}
+                loggerName={id => { const t = loggerShort(id); return t.charAt(0).toUpperCase() + t.slice(1) }} />
+            )}
+
             <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
@@ -926,9 +1068,7 @@ const handleChangePassword = async () => {
                         {session.plan_day && (
                           <p className="text-xs text-green-400 mt-1">✓ {session.plan_day}</p>
                         )}
-                        {byCoach(session) && (
-                          <p className="text-xs text-gray-400 mt-1">Logged by your coach</p>
-                        )}
+                        <p className="text-xs text-gray-400 mt-1">{loggedByLine(session)}</p>
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
@@ -941,6 +1081,7 @@ const handleChangePassword = async () => {
                     {session.notes && (
                       <p className="text-xs text-gray-400 bg-gray-800 rounded-lg px-3 py-2 mt-2">{session.notes}</p>
                     )}
+                    {clientNoteBlock(session)}
                     {profile?.companies?.feedback_enabled !== false && fb?.admin_feedback && (
                       <div className="mt-3 bg-orange-950 border border-orange-900 rounded-xl px-3 py-2">
                         <p className="text-xs text-orange-400 font-medium mb-0.5 uppercase tracking-wider">Coach feedback</p>
@@ -955,10 +1096,11 @@ const handleChangePassword = async () => {
         )}
 
         {/* PROFILE TAB */}
-{activeTab === 'profile' && (
+{shownTab === 'profile' && (
   <div className="space-y-4 mt-4">
-    <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4">
+    <fieldset disabled={!cs.client_can_edit_profile} className="bg-gray-900 rounded-2xl p-5 border border-gray-800 space-y-4 min-w-0">
       <h2 className="font-semibold text-white">My Fitness Profile</h2>
+      {!cs.client_can_edit_profile && <p className="text-xs text-gray-500">Your gym keeps your profile up to date. Ask them to change anything.</p>}
 
       {/* Row 1 - Age and Gender */}
       <div className="grid grid-cols-2 gap-3">
@@ -1092,11 +1234,11 @@ const handleChangePassword = async () => {
         </div>
       )}
 
-      <button onClick={handleSaveProfile} disabled={savingProfile}
+      {cs.client_can_edit_profile && <button onClick={handleSaveProfile} disabled={savingProfile}
         className="w-full bg-orange-500 hover:bg-orange-400 text-white font-semibold py-3 rounded-xl transition disabled:opacity-50 text-sm">
         {savingProfile ? 'Saving...' : 'Save Profile'}
-      </button>
-    </div>
+      </button>}
+    </fieldset>
   </div>
 )}
       </div>

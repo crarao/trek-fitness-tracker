@@ -2005,6 +2005,16 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
+      {/* Monthly reports (19 Nov, app/company/reports): review a month per PT / self-training member, PDF + note */}
+      {trainModule && !dojo && (
+        <div className="px-4 sm:px-8 pt-3">
+          <button type="button" data-nav onClick={() => router.push('/company/reports')} data-testid="link-reports"
+            className="w-full text-left bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 text-sm text-gray-400 hover:border-gray-600 transition">
+            Review a month and send each {mw.one.toLowerCase()} their report <span className="text-white font-medium">→ Monthly reports</span>
+          </button>
+        </div>
+      )}
+
       {trainModule && ptCount > 0 && !attendanceMode && (
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
