@@ -8,8 +8,8 @@
 >
 > Check the project ref in the address bar before running.
 
-**Status: reviewed 19 Nov (decisions in `docs/client-view-findings.md`). Not run yet: Step 1 goes with Part B,
-Step 2 with Part C. Anand runs this; Claude does not.
+**Status: reviewed 19 Nov (decisions in `docs/client-view-findings.md`). Steps 1–2 run on Dev 19 Nov; Mumbai not yet
+(see Run log at the end). Anand runs this; Claude does not.
 
 Additive only (CLAUDE.md Rule #1): no `DROP`, `DELETE`, `TRUNCATE` or dropped columns.
 - New columns, functions, triggers and **restrictive** policies.
@@ -414,5 +414,8 @@ Also re-run the cross-company script (kept outside the repo) after Step 1 and af
 
 ## Run log
 
-- Dev: not run
-- Mumbai: not run
+- Dev (`nnxrmaiinbmxfwzefbwx`): Step 0 (no rows), Step 1 and Step 2 run by Anand on 19 Nov 2026; Step 3 checks passed
+  (4 columns; `client_setting`, `is_self_training_client`, `my_loggers`; the restrictive "client switches" rules and
+  "iso exercise_logs self training"; triggers `protect_session_columns`, `no_client_duplicate_day`, `fill_plan_created_by`).
+  Step 4 tests: not run yet.
+- Mumbai (`nptxjfvkqjuekgkspemu`): not run. Run Step 0 there first (prod data differs from dev).
