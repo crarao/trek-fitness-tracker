@@ -590,6 +590,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
               {p.manage.senseis && sheetItem(sw.many, () => openManage('senseis'))}
               {sheetItem('Branches & batches', () => go('/company/batches'))}
               {sheetItem('Attendance this month', () => go('/company/attendance'))}
+              {sheetItem('Class activities', () => go('/company/activities'))}
               {p.beltsOn && sheetItem('Grading exams', () => go('/company/grading'))}
               {sheetItem('Enquiries', () => go('/company/leads'))}
               {sheetItem('Revenue & fee plans', () => openManage('revenue'))}
