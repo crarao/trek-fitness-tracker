@@ -19,6 +19,8 @@ Additive only (CLAUDE.md Rule #1): no `DROP`, `DELETE`, `TRUNCATE` or dropped co
 **Parts:**
 - **Step 1** (Part B): settings, `client_setting()`, switch rules, `client_note`, the duplicate guard. Run before
   Part B ships.
+- **Step 0 + 0b** (read-only): who uses the client app today. **Step 1b** (right after Step 1, same sitting): keeps the
+  client app fully on for those gyms, so nobody is locked out.
 - **Step 2** (Part C): `weekly_plans.created_by` and the self-training rules. Run before Part C ships.
 - **Step 3**: checks.
 - **Step 4**: tests (each rolls back).
@@ -47,6 +49,21 @@ order by sessions desc;
 
 Any company listed here loses the client app when Step 1 runs. Turn `client_login` on for it in Super Admin
 right after (once Part B is on the dev link / prod), or tell its clients first.
+
+## Step 0b — every gym whose clients signed in recently (read-only, run with Step 0)
+
+Step 0 only finds clients who **log** their own sessions. This also finds clients who just open the app to see their
+plan or progress (any client sign-in in the last 30 days). These are the gyms Step 1b keeps on.
+
+```sql
+select c.name, c.id, count(*) as clients_signed_in, max(u.last_sign_in_at) as last_sign_in
+from auth.users u
+join public.profiles p on p.id = u.id and p.role = 'client' and p.archived_at is null
+join public.companies c on c.id = p.company_id
+where u.last_sign_in_at > now() - interval '30 days'
+group by c.name, c.id
+order by clients_signed_in desc;
+```
 
 ## Step 1 — client app switches (Part B)
 
@@ -253,6 +270,57 @@ Notes:
 - With `client_sees_plan` off the client can't read their plans, so a plan-linked insert also fails
   (the insert rule looks the plan up). That's intended: no plan screen means no plan-day logging.
 
+## Step 1b — keep the client app fully on for gyms already using it (run straight after Step 1)
+
+Decided by Anand 19 Nov: gyms whose clients use the app today keep **everything on**, so their clients see no change.
+Run it in the same sitting as Step 1 (paste it right below Step 1 and run both), so there is no moment when they're
+locked out. Later, Super Admin can change any switch in Companies → Edit → Client app setup.
+
+- **Which gyms:** every company with a client who signed in during the last 30 days (Step 0b) or logged their own session
+  in the last 60 days (Step 0). Check those lists first; to leave a gym out, add its id to `skip`.
+- **Only gyms still on the defaults** (`client_settings = '{}'`): a gym Super Admin has already set up is never overwritten.
+- **Everything on** = the client app as it works today: login, logging plan days and activities, seeing the plan,
+  strength progress (new: weights per exercise) and editing the profile. Self-training stays **off**: it's a new
+  feature, turned on per gym in the setup consultation.
+- An `update` only, no deletes (Rule #1). Undo: Super Admin sets the switches again in the card.
+
+```sql
+begin;
+
+with skip(id) as (
+  select null::uuid   -- e.g. replace null with a company id to leave that gym out: select '…'::uuid union all select '…'::uuid
+),
+users_recently as (
+  select p.company_id from auth.users u
+  join public.profiles p on p.id = u.id and p.role = 'client' and p.archived_at is null
+  where u.last_sign_in_at > now() - interval '30 days'
+  union
+  select p.company_id from public.logged_sessions s
+  join public.profiles p on p.id = s.client_id
+  where (s.logged_by is null or s.logged_by = s.client_id) and s.session_date >= current_date - 60
+)
+update public.companies c
+set client_settings = jsonb_build_object(
+  'client_login', true,
+  'client_can_log_sessions', true,
+  'client_can_log_activities', true,
+  'client_sees_plan', true,
+  'client_sees_detailed_progress', true,
+  'client_can_edit_profile', true,
+  'self_training_enabled', false
+)
+where c.id in (select company_id from users_recently)
+  and c.id not in (select id from skip where id is not null)
+  and c.client_settings = '{}'::jsonb
+returning c.name, c.client_settings;
+
+commit;
+```
+
+**Expect:** one row per gym from Step 0 / 0b (minus `skip`), each with all switches `true` except `self_training_enabled`.
+Then a client of one of those gyms opens the app as before; a client of any other gym sees
+"Your gym hasn't turned on the client app yet."
+
 ## Step 2 — self-training members (Part C)
 
 ```sql
@@ -353,6 +421,9 @@ order by tablename, permissive desc, cmd, policyname;
 -- Expect, per table, the four "iso <table> <action>" rules + the restrictive "… active" rule(s)
 -- + one restrictive "iso <table> client switches".
 
+select name, client_settings from public.companies where client_settings <> '{}'::jsonb order by name;
+-- After Step 1b: the gyms kept on, all switches true except self_training_enabled.
+
 select proname from pg_proc where proname in ('client_setting', 'is_self_training_client', 'my_loggers');
 -- Expect 3 rows.
 
@@ -418,4 +489,6 @@ Also re-run the cross-company script (kept outside the repo) after Step 1 and af
   (4 columns; `client_setting`, `is_self_training_client`, `my_loggers`; the restrictive "client switches" rules and
   "iso exercise_logs self training"; triggers `protect_session_columns`, `no_client_duplicate_day`, `fill_plan_created_by`).
   Step 4 tests: not run yet.
-- Mumbai (`nptxjfvkqjuekgkspemu`): not run. Run Step 0 there first (prod data differs from dev).
+- Mumbai (`nptxjfvkqjuekgkspemu`): not run. Order there: Step 0 + 0b (read, check the gyms) → Step 1 and Step 1b
+  together → Step 2 → Step 3 checks. Prod data differs from dev. (Step 1b was added after the dev run; on dev nothing
+  needed it: Step 0 had no rows.)
