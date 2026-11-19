@@ -167,5 +167,15 @@ export async function loginAs(page: Page, role: Role) {
   await page.goto(gymUrl(ROLE_GYM[role], '/login'))
   await submitLogin(page, id, password)
   const home = ROLE_HOME[role]
-  await page.waitForURL(url => url.pathname === home, { timeout: 30_000 })
+  try {
+    await page.waitForURL(url => url.pathname === home, { timeout: 25_000 })
+  } catch (e) {
+    // Which login was tried, masked (19 Nov: the owner login was refused and the secret can't be read): the kind,
+    // the last 3 characters of the id and its length, and whether the password has spaces at either end.
+    // Never the password itself.
+    const kind = id.includes('@') ? 'email' : /[a-z]/i.test(id) ? 'username' : 'phone'
+    const hint = `QA_LOGINS "${role}": ${kind} id ending "…${id.slice(-3)}" (${id.length} characters)` +
+      `${password !== password.trim() ? ', password has spaces at the start or end' : ''}`
+    throw new Error(`${hint}. Login didn't reach ${home}: ${e instanceof Error ? e.message.split('\n')[0] : e}`)
+  }
 }

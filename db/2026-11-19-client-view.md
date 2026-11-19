@@ -8,8 +8,8 @@
 >
 > Check the project ref in the address bar before running.
 
-**Status: reviewed 19 Nov (decisions in `docs/client-view-findings.md`). Steps 1–2 run on Dev 19 Nov; Mumbai not yet
-(see Run log at the end). Anand runs this; Claude does not.
+**Status: ✅ RUN on Dev and Mumbai, 19 Nov 2026 (see Run log at the end) — do not run Steps 1, 1b or 2 again.
+Decisions in `docs/client-view-findings.md`. Anand runs this; Claude does not.
 
 Additive only (CLAUDE.md Rule #1): no `DROP`, `DELETE`, `TRUNCATE` or dropped columns.
 - New columns, functions, triggers and **restrictive** policies.
@@ -489,6 +489,9 @@ Also re-run the cross-company script (kept outside the repo) after Step 1 and af
   (4 columns; `client_setting`, `is_self_training_client`, `my_loggers`; the restrictive "client switches" rules and
   "iso exercise_logs self training"; triggers `protect_session_columns`, `no_client_duplicate_day`, `fill_plan_created_by`).
   Step 4 tests: not run yet.
-- Mumbai (`nptxjfvkqjuekgkspemu`): not run. Order there: Step 0 + 0b (read, check the gyms) → Step 1 and Step 1b
-  together → Step 2 → Step 3 checks. Prod data differs from dev. (Step 1b was added after the dev run; on dev nothing
-  needed it: Step 0 had no rows.)
+- Mumbai (`nptxjfvkqjuekgkspemu`): run by Anand on 19 Nov 2026, after the app was released to `main` (crarao/trek-fitness-tracker#154).
+  Step 0 + 0b: New Trekking Company, Coach Rich, Syed Fitness (Step 0) and Reach Top Fitness (0b only, viewers).
+  Step 1 + Step 1b together: 4 rows, those four gyms kept fully on (self-training off), nothing skipped. Super Admin card
+  and a client check passed. Step 2 run. Step 3 checks all matched (4 columns, 3 functions, 3 triggers, 5 rules,
+  4 gyms in client_settings). Every other company now starts with the client app off until Super Admin turns it on.
+  Step 4 tests: not run on Mumbai (dev only).
