@@ -1656,6 +1656,14 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           )
                         })()}
 
+                        {/* Monthly reports for this gym (same page the owner uses, app/company/reports) */}
+                        {editingCompany.client_module_enabled && (
+                          <a href={`/company/reports?company=${editingCompany.id}`}
+                            className="block border-t border-gray-800 pt-4 text-sm text-orange-300 hover:text-orange-200">
+                            Monthly reports for {editingCompany.name} →
+                          </a>
+                        )}
+
                         {/* Active/Inactive */}
                         <div className="border-t border-gray-800 pt-4 flex justify-between items-center">
                           <div>

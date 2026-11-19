@@ -51,8 +51,8 @@ export const CLIENT_SETTING_ROWS: { key: ClientSettingKey; label: string; help: 
   { key: 'client_sees_plan', label: 'See their plan', help: 'Clients see the plan their coach made, day by day (read-only).' },
   { key: 'client_sees_detailed_progress', label: 'See strength progress', help: 'Clients see weights and sets per exercise. Off means only the weekly activity charts.' },
   { key: 'client_can_edit_profile', label: 'Edit their profile', help: 'Clients can change their age, weight, goal and other fitness details.' },
+  { key: 'self_training_enabled', label: 'Self-training members', help: 'Members without PT build their own weekly plan, log weights per set and see their progress. The gym sends the monthly report.' },
 ]
-// self_training_enabled joins the card with Part C (self-training members); until then it stays off
 
 type CompanyLike = { company_type?: string | null; client_settings?: unknown } | null | undefined
 

@@ -1,7 +1,7 @@
 'use client'
 
 import PageNav from '@/app/page-nav'
-import NumBox from '@/app/num-box'
+import SetRows from '@/app/set-rows'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
@@ -857,34 +857,11 @@ export default function ClientDetailPage() {
   // a row without reps isn't saved. "Last: …" = the client's last log of this exercise.
   const renderWeightRow = (key: string, i: number, e: PlanDay['exercises'][number]) => {
     if (!exerciseLogsOn || isTimedOrDistance(e)) return null
-    const rows: SetEntry[] = draftFor(key, i, e).sets.length ? draftFor(key, i, e).sets : [{ kg: null, reps: null }]
     const last = lastLogFor(e, datedLogs, exLibrary)
-    const box = 'min-w-0 h-11 bg-gray-800 text-white text-center rounded-lg px-1 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm'
-    const change = (j: number, patch: Partial<SetEntry>) => setDraftSets(key, i, rows.map((r, k) => (k === j ? { ...r, ...patch } : r)))
+    // The rows themselves are app/set-rows.tsx (shared with a self-training member's own day, 19 Nov)
     return (
-      <div className="pl-11 pr-3 pb-2.5 -mt-1 space-y-1.5">
-        <p className="text-[11px] text-gray-500">
-          {last ? <>Last: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'}
-        </p>
-        {rows.map((r, j) => (
-          <div key={j} className="flex items-center gap-1.5">
-            <span className="w-11 shrink-0 text-[11px] text-gray-500">Set {j + 1}</span>
-            <NumBox kind="weight" label={`${e.name} set ${j + 1} kg`} placeholder="kg" className={`${box} w-16`}
-              value={r.kg} onValue={kg => change(j, { kg })} />
-            <span className="text-gray-500 text-xs">kg ×</span>
-            <NumBox kind="reps" label={`${e.name} set ${j + 1} reps`} placeholder="reps" className={`${box} w-14`}
-              value={r.reps} onValue={reps => change(j, { reps })} />
-            <button type="button" aria-label={`Remove set ${j + 1} of ${e.name}`} disabled={rows.length <= 1}
-              onClick={() => setDraftSets(key, i, rows.filter((_, k) => k !== j))}
-              className="w-11 h-11 shrink-0 rounded-lg text-gray-500 hover:text-white disabled:opacity-30">✕</button>
-          </div>
-        ))}
-        <button type="button" disabled={rows.length >= 20}
-          onClick={() => setDraftSets(key, i, [...rows, { ...rows[rows.length - 1] }])}
-          className="h-11 px-4 rounded-lg border border-gray-700 text-sm text-orange-300 hover:border-orange-500 disabled:opacity-40">
-          + Set
-        </button>
-      </div>
+      <SetRows name={e.name} rows={draftFor(key, i, e).sets} onChange={rows => setDraftSets(key, i, rows)}
+        last={last ? <>Last: {logDetail(last) || '—'} · {formatDate(last.session_date, country, 'dayMonth')}</> : 'First time logging this exercise'} />
     )
   }
 

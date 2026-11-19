@@ -35,7 +35,7 @@ const chip = (on: boolean) =>
   `shrink-0 text-xs px-3 py-1.5 rounded-full border transition ${on ? 'bg-orange-500 border-orange-500 text-white font-semibold' : 'border-gray-700 text-gray-300'}`
 
 export default function ExercisePicker({
-  open, onClose, onPick, companyId, title, single = false, initialQuery = '',
+  open, onClose, onPick, companyId, title, single = false, initialQuery = '', libraryOnly = false,
 }: {
   open: boolean
   onClose: () => void
@@ -44,6 +44,7 @@ export default function ExercisePicker({
   title: string            // e.g. "Mon · Push"
   single?: boolean         // pick one exercise and close (the plan builder's name box: change this exercise)
   initialQuery?: string    // search box starts with this (the current name, so its matches show straight away)
+  libraryOnly?: boolean    // no "+ Add '<typed>'" (19 Nov: self-training members pick from the gym's list only)
 }) {
   const key = companyId || '-'
   const [lib, setLib] = useState<Library | null>(() => cache.get(key) ?? null)
@@ -93,7 +94,7 @@ export default function ExercisePicker({
   const typed = tidyName(query)
   // Offered unless the typed name already is an exercise (same name or alias, ignoring case, spaces, dashes)
   const sameAs = typed && lib ? findExercise(typed, lib.list) : null
-  const canAddNew = !!typed && !!lib && !(sameAs && (sameAs.kind === 'name' || sameAs.kind === 'alias'))
+  const canAddNew = !libraryOnly && !!typed && !!lib && !(sameAs && (sameAs.kind === 'name' || sameAs.kind === 'alias'))
   const shown = query.trim() ? 8 : 300 // top 8 matches while searching (17 Nov); the full list when browsing
   // "+ Add": first ask about a close existing exercise, if there is one
   const startAdd = () => {
@@ -247,11 +248,11 @@ export default function ExercisePicker({
               ) : lib.missing && !lib.list.length ? (
                 <div className="px-4 py-6 space-y-2">
                   <p className="text-sm text-gray-400">The exercise list isn&apos;t set up yet.</p>
-                  <p className="text-xs text-gray-500">Type the exercise name above and tap &ldquo;+ Add&rdquo; to put it in the plan.</p>
+                  <p className="text-xs text-gray-500">{libraryOnly ? 'Ask your gym to set up the exercise list.' : <>Type the exercise name above and tap &ldquo;+ Add&rdquo; to put it in the plan.</>}</p>
                 </div>
               ) : results.length === 0 ? (
                 <p className="px-4 py-6 text-sm text-gray-500">
-                  No match{muscle || equipment ? ' with these filters' : ''}.{typed ? ' Add it as a new exercise below.' : ''}
+                  No match{muscle || equipment ? ' with these filters' : ''}.{typed ? (libraryOnly ? ' Try another name, or ask your gym to add it.' : ' Add it as a new exercise below.') : ''}
                 </p>
               ) : (
                 <>
