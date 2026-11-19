@@ -10,7 +10,8 @@ import { type Country, COUNTRIES, normalizeCountry, formatDate, localDateIso, pa
 import { type PhoneCountry, splitE164, toE164, clientPhoneValue, displayPhone, phoneCountry, shownEmail, isNoLogin, waDigits, phoneHint, usernameOf, isPhoneLogin } from '@/lib/phone'
 import UsernameField, { type UsernameStatus } from '@/app/username-field'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
-import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, batchWhen } from '@/lib/batches'
+import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, sortBatches, batchWhen, sortDays } from '@/lib/batches'
+import { availabilityValue, parseDays, expectedDays, attendsLabel } from '@/lib/leave'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, monthStats, statsText, monthRange, addDays, batchesOn as batchesMeetingOn, tapRow, buildAttendanceMessage } from '@/lib/attendance'
 import CountryCodePicker from '@/app/country-code-picker'
 import { weekStatus, dayKey, isRestDay, doneDayKeys, weekEnd, localToday } from '@/lib/plan-summary'
@@ -1599,7 +1600,11 @@ const handleSaveClientProfile = async () => {
       fitness_level: clientProfileForm.fitness_level || null,
       food_preference: clientProfileForm.food_preference || null,
       meals_per_day: clientProfileForm.meals_per_day ? parseInt(clientProfileForm.meals_per_day) : null,
-      available_days: clientProfileForm.available_days || null,
+      // Dojos: only the home batch's days are kept; every day (or none) = empty = "all batch days" (lib/leave.ts)
+      available_days: (() => {
+        const homeBatch = dojo ? batchList.find(b => b.id === clientProfileForm.batch_id) : null
+        return homeBatch ? availabilityValue(parseDays(clientProfileForm.available_days), homeBatch.days) : clientProfileForm.available_days || null
+      })(),
       medical_conditions: clientProfileForm.medical_conditions || null,
       emergency_contact_name: clientProfileForm.emergency_contact_name || null,
       emergency_contact_phone: clientProfileForm.emergency_contact_phone || null,
@@ -3787,7 +3792,7 @@ const handleResetPassword = async () => {
       {/* Card header with Edit button */}
       <div className="flex justify-between items-center">
         <h2 className="font-semibold text-white">{dojo ? `${memberWord(dojoType).one} Profile` : 'Client Fitness Profile'}</h2>
-        {!isCoach && <button
+        {!isCoach && <button data-testid="profile-edit"
           onClick={() => {
             if (editingClientProfile) {
               setEditingClientProfile(false)
@@ -4008,6 +4013,37 @@ const handleResetPassword = async () => {
             </div>
           )}
 
+          {/* Dojo: which of the home batch's days they come (empty = all; used for absences) */}
+          {dojo && batchesOn && (() => {
+            const homeBatch = batchList.find(b => b.id === clientProfileForm.batch_id)
+            const days = sortDays(homeBatch?.days)
+            if (!homeBatch || days.length < 2) return null
+            const picked = expectedDays(clientProfileForm.available_days, days)
+            return (
+              <div data-testid="availability-picker">
+                <label className="text-xs text-gray-500 mb-2 block uppercase tracking-wider">Days they attend</label>
+                <div className="flex gap-2 flex-wrap" role="group" aria-label="Days they attend">
+                  {days.map(day => {
+                    const on = picked.includes(day)
+                    return (
+                      <button key={day} type="button" aria-pressed={on}
+                        onClick={() => {
+                          const next = on ? picked.filter(d => d !== day) : [...picked, day]
+                          if (!next.length) return   // at least one day; untick all = use every batch day
+                          setClientProfileForm({ ...clientProfileForm, available_days: availabilityValue(next, days) || '' })
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${on
+                          ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-500'}`}>
+                        {day}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">All ticked = every class of {homeBatch.name}. Days not ticked don&apos;t count as absent.</p>
+              </div>
+            )
+          })()}
+
           {/* Medical Conditions */}
           <div>
             <label className="text-xs text-gray-500 mb-1.5 block uppercase tracking-wider">Medical Conditions / Injuries</label>
@@ -4168,6 +4204,7 @@ const handleResetPassword = async () => {
                   <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Home batch</p>
                   <p className="text-sm text-white">{batch ? `${batch.name}${batch.is_archived ? ' (archived)' : ''}` : '—'}</p>
                   {batch && batchWhen(batch, country) && <p className="text-xs text-gray-400">{batchWhen(batch, country)}</p>}
+                  {batch && attendsLabel(client?.available_days, batch.days) && <p data-testid="attends-line" className="text-xs text-orange-300">{attendsLabel(client?.available_days, batch.days)}</p>}
                 </div>
               </div>
             )

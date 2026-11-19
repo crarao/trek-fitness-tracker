@@ -12,6 +12,9 @@
 // activity tapped; after that each tap saves. A day more than 7 days back is read-only unless the owner unlocked it
 // (Unlock / Lock again, owner only). The database enforces the lock; its message is shown when a save is refused.
 // Before that SQL runs the tables can't be read: no checklist, no lock, the roll call as before.
+// Leave + availability (same SQL file; rules in lib/leave.ts): a home student not marked present has an "On leave"
+// button → sheet "until when?" (default this day) + note; on leave = greyed "On leave until 24 Nov" with Cancel leave
+// (cancelled_at, never deleted). "Attends: Mon, Wed, Fri" under the name when available_days narrows the batch days.
 
 import PageNav from '@/app/page-nav'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -28,6 +31,9 @@ import {
   type DojoActivity, type BatchClass, type ClassActivity, type ChecklistItem, ACTIVITY_COLUMNS, BATCH_CLASS_COLUMNS,
   CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS,
 } from '@/lib/dojo-activities'
+import { type StudentLeave, LEAVE_COLUMNS, LEAVE_NOTE_MAX, leaveOn, leaveText, leaveProblem, leaveRow, attendsLabel, expectedDays } from '@/lib/leave'
+
+type Student = RosterStudent & { available_days?: string | null }
 
 export default function RollCallPage() {
   const router = useRouter()
@@ -47,7 +53,7 @@ export default function RollCallPage() {
   const [businessType, setBusinessType] = useState<string | null>(null)
   const [batch, setBatch] = useState<Batch | null>(null)
   const [branch, setBranch] = useState<Branch | null>(null)
-  const [students, setStudents] = useState<RosterStudent[]>([])
+  const [students, setStudents] = useState<Student[]>([])
   const [rows, setRows] = useState<AttendanceRow[]>([])   // the whole day, every batch
   const [allBatches, setAllBatches] = useState<Batch[]>([])
   const [staff, setStaff] = useState<Record<string, { name: string; role: string }>>({})
@@ -63,6 +69,13 @@ export default function RollCallPage() {
   const [lockBusy, setLockBusy] = useState(false)
   // One "save the class" at a time (two quick taps must not insert the class twice)
   const ensuring = useRef<Promise<BatchClass | null> | null>(null)
+  // Leave: null = the table isn't there yet (no leave buttons). The sheet is open for one student.
+  const [leaves, setLeaves] = useState<StudentLeave[] | null>(null)
+  const [leaveFor, setLeaveFor] = useState<Student | null>(null)
+  const [leaveTo, setLeaveTo] = useState('')
+  const [leaveNote, setLeaveNote] = useState('')
+  const [leaveError, setLeaveError] = useState('')
+  const [leaveSaving, setLeaveSaving] = useState(false)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -83,10 +96,10 @@ export default function RollCallPage() {
         .select('id, role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
       const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
-      const [ba, people, att, gymBatches, staffList, ranks, acts, classRow] = await Promise.all([
+      const [ba, people, att, gymBatches, staffList, ranks, acts, classRow, leaveRes] = await Promise.all([
         supabase.from('batches').select(BATCH_COLUMNS).eq('id', batchId).maybeSingle(),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
-        supabase.from('profiles').select('id, full_name, batch_id, archived_at, current_rank_id').eq('company_id', profile.company_id)
+        supabase.from('profiles').select('id, full_name, batch_id, archived_at, current_rank_id, available_days').eq('company_id', profile.company_id)
           .eq('role', 'client').is('archived_at', null).order('full_name'),
         // The whole day across batches, to warn when a student already came to another class
         supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('company_id', profile.company_id).eq('class_date', date),
@@ -97,6 +110,9 @@ export default function RollCallPage() {
         // Class activities + this class (an error = the tables aren't there yet: feature hidden)
         supabase.from('dojo_activities').select(ACTIVITY_COLUMNS).eq('company_id', profile.company_id),
         supabase.from('batch_classes').select(BATCH_CLASS_COLUMNS).eq('batch_id', batchId).eq('class_date', date).maybeSingle(),
+        // Leave covering this day (an error = the table isn't there yet: no leave buttons)
+        supabase.from('student_leaves').select(LEAVE_COLUMNS).eq('company_id', profile.company_id)
+          .is('cancelled_at', null).lte('from_date', date).gte('to_date', date),
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: profile.company_id as string })
@@ -109,7 +125,8 @@ export default function RollCallPage() {
       const { data: br } = await supabase.from('branches').select(BRANCH_COLUMNS).eq('id', b.branch_id).maybeSingle()
       if (!live) return
       setBranch((br as Branch | null) ?? null)
-      setStudents((people.data || []) as RosterStudent[])
+      setStudents((people.data || []) as Student[])
+      setLeaves(leaveRes.error ? null : (leaveRes.data || []) as StudentLeave[])
       setRows((att.data || []) as AttendanceRow[])
       setAllBatches((gymBatches.data || []) as Batch[])
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
@@ -265,13 +282,19 @@ export default function RollCallPage() {
 
   const notClassDay = batch && !sortDays(batch.days).includes(weekdayOf(date) as never)
 
-  const studentButton = (s: RosterStudent, present: boolean, dropIn = false) => {
+  const studentButton = (s: Student, present: boolean, dropIn = false) => {
     const also = elsewhereLine(s)
+    const leave = !present && !dropIn ? leaveOf(s) : null
+    const attends = !dropIn && batch ? attendsLabel(s.available_days, batch.days) : ''
+    const offDay = attends && batch && !expectedDays(s.available_days, batch.days).includes(weekdayOf(date) as never)
+    // Leave button: home students not marked present, on an open day, once the table exists
+    const leaveButton = leaves !== null && !dropIn && !present && !locked
     return (
-    <li key={s.id}>
-      <button type="button" onClick={() => askOrTap(s)} aria-pressed={present} disabled={busy.has(s.id) || locked}
-        className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 border text-left transition min-h-[52px] ${present
-          ? 'bg-green-950/50 border-green-800 text-white' : 'bg-gray-900 border-gray-800 text-gray-300 hover:border-gray-600'} disabled:opacity-60`}>
+    <li key={s.id} data-testid="roll-row" data-name={s.full_name} className="flex items-stretch gap-2">
+      <button type="button" onClick={() => askOrTap(s)} aria-pressed={present} disabled={busy.has(s.id) || locked || !!leave}
+        className={`flex-1 min-w-0 flex items-center gap-3 rounded-xl px-4 py-3 border text-left transition min-h-[52px] ${present
+          ? 'bg-green-950/50 border-green-800 text-white' : leave ? 'bg-gray-900/60 border-gray-800 text-gray-500'
+          : 'bg-gray-900 border-gray-800 text-gray-300 hover:border-gray-600'} ${leave ? 'disabled:opacity-100' : 'disabled:opacity-60'}`}>
         <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm shrink-0 ${present ? 'bg-green-500 text-white' : 'border border-gray-600'}`}>
           {present ? '✓' : ''}
         </span>
@@ -280,12 +303,52 @@ export default function RollCallPage() {
             <span className="truncate text-sm font-medium">{s.full_name}</span>
             <BeltChip rank={beltById[s.current_rank_id || '']} />
           </span>
+          {leave && <span data-testid="on-leave" className="block text-[11px] text-gray-400 truncate">{leaveText(leave, date, country)}{leave.note ? ` · ${leave.note}` : ''}</span>}
+          {attends && <span className="block text-[11px] text-gray-500 truncate">{attends}{offDay ? ' · not their day' : ''}</span>}
           {also && <span className="block text-[11px] text-amber-300 truncate">⚠ {present ? 'Also came today' : 'Already came today'} · {also}</span>}
         </span>
         {dropIn && <span className="text-[11px] text-sky-300 border border-sky-900 bg-sky-950/60 px-1.5 py-0.5 rounded">Drop-in</span>}
       </button>
+      {leaveButton && (leave ? (
+        <button type="button" onClick={() => cancelLeave(s, leave)} disabled={busy.has(s.id)}
+          className="shrink-0 px-3 rounded-xl border border-gray-700 text-xs text-gray-300 hover:border-gray-500 disabled:opacity-50">Cancel leave</button>
+      ) : (
+        <button type="button" onClick={() => openLeave(s)} disabled={busy.has(s.id)}
+          className="shrink-0 px-3 rounded-xl border border-gray-800 text-xs text-gray-400 hover:border-gray-600 hover:text-gray-200 disabled:opacity-50">On leave</button>
+      ))}
     </li>
     )
+  }
+
+  // ── Leave ─────────────────────────────────────────────────────────────────────────────────────────────────
+  const leaveOf = (s: Student) => (leaves ? leaveOn(leaves, s.id, date) : null)
+  const openLeave = (s: Student) => { setLeaveFor(s); setLeaveTo(date); setLeaveNote(''); setLeaveError('') }
+
+  const saveLeave = async () => {
+    if (!me || !leaveFor || leaveSaving) return
+    const problem = leaveProblem({ from: date, to: leaveTo, note: leaveNote })
+    if (problem) { setLeaveError(problem); return }
+    setLeaveSaving(true)
+    const { data, error } = await supabase.from('student_leaves')
+      .insert(leaveRow({ companyId: me.companyId, profileId: leaveFor.id, from: date, to: leaveTo, note: leaveNote, markedBy: me.id }))
+      .select(LEAVE_COLUMNS)
+    setLeaveSaving(false)
+    if (error || !data?.length) { setLeaveError(saveErrorText(error)); return }
+    const row = data[0] as StudentLeave
+    setLeaves(l => [...(l || []), row])
+    showToast(`${leaveFor.full_name.split(/\s+/)[0]}: ${leaveText(row, date, country).toLowerCase()}`)
+    setLeaveFor(null)
+  }
+
+  const cancelLeave = async (s: Student, leave: StudentLeave) => {
+    if (!me || busy.has(s.id)) return
+    setBusy(b => new Set(b).add(s.id))
+    const { data, error } = await supabase.from('student_leaves')
+      .update({ cancelled_at: new Date().toISOString(), cancelled_by: me.id }).eq('id', leave.id).select(LEAVE_COLUMNS)
+    setBusy(b => { const n = new Set(b); n.delete(s.id); return n })
+    if (error || !data?.length) { showToast(saveErrorText(error), 'error'); return }
+    setLeaves(l => (l || []).filter(x => x.id !== leave.id))
+    showToast(`Leave cancelled for ${s.full_name.split(/\s+/)[0]}`)
   }
 
   const olderLockBanner = () => {
@@ -361,6 +424,29 @@ export default function RollCallPage() {
                 className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-300 hover:border-gray-500 text-sm">Cancel</button>
               <button type="button" onClick={() => { const s = confirmFor; setConfirmFor(null); tap(s) }}
                 className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm">Mark present too</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {leaveFor && (
+        <div className="fixed inset-0 z-[55] bg-black/70 flex items-end sm:items-center justify-center p-4" onClick={() => setLeaveFor(null)}>
+          <div role="dialog" aria-modal="true" aria-label="On leave" onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl p-5 space-y-3">
+            <p className="text-base font-semibold">{leaveFor.full_name} is on leave</p>
+            <p className="text-xs text-gray-400">From {formatDate(date, country, 'weekday')}. They won&apos;t count as absent while on leave.</p>
+            <label className="block text-xs text-gray-400">Until when?
+              <input type="date" value={leaveTo} min={date} onChange={e => setLeaveTo(e.target.value)} aria-label="Until when"
+                className="mt-1 w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
+            </label>
+            <input value={leaveNote} maxLength={LEAVE_NOTE_MAX} onChange={e => setLeaveNote(e.target.value)} placeholder="Note (optional, e.g. exams, travelling)" aria-label="Leave note"
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-500" />
+            {leaveError && <p className="text-xs text-red-400">{leaveError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setLeaveFor(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-300 hover:border-gray-500 text-sm">Cancel</button>
+              <button type="button" onClick={saveLeave} disabled={leaveSaving}
+                className="flex-1 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-50">{leaveSaving ? 'Saving…' : 'Save leave'}</button>
             </div>
           </div>
         </div>
