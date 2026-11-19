@@ -31,6 +31,7 @@ import {
   type DojoActivity, type BatchClass, type ClassActivity, type ChecklistItem, ACTIVITY_COLUMNS, BATCH_CLASS_COLUMNS,
   CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS,
 } from '@/lib/dojo-activities'
+import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
 import { type StudentLeave, LEAVE_COLUMNS, LEAVE_NOTE_MAX, leaveOn, leaveText, leaveProblem, leaveRow, attendsLabel, expectedDays } from '@/lib/leave'
 
 type Student = RosterStudent & { available_days?: string | null }
@@ -71,6 +72,8 @@ export default function RollCallPage() {
   const ensuring = useRef<Promise<BatchClass | null> | null>(null)
   // Leave: null = the table isn't there yet (no leave buttons). The sheet is open for one student.
   const [leaves, setLeaves] = useState<StudentLeave[] | null>(null)
+  // Holidays on this day (any branch); null = the table isn't there yet
+  const [holidays, setHolidays] = useState<Holiday[] | null>(null)
   const [leaveFor, setLeaveFor] = useState<Student | null>(null)
   const [leaveTo, setLeaveTo] = useState('')
   const [leaveNote, setLeaveNote] = useState('')
@@ -96,7 +99,7 @@ export default function RollCallPage() {
         .select('id, role, company_id, companies:company_id(*)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
       const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
-      const [ba, people, att, gymBatches, staffList, ranks, acts, classRow, leaveRes] = await Promise.all([
+      const [ba, people, att, gymBatches, staffList, ranks, acts, classRow, leaveRes, holidayRes] = await Promise.all([
         supabase.from('batches').select(BATCH_COLUMNS).eq('id', batchId).maybeSingle(),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
         supabase.from('profiles').select('id, full_name, batch_id, archived_at, current_rank_id, available_days').eq('company_id', profile.company_id)
@@ -113,6 +116,7 @@ export default function RollCallPage() {
         // Leave covering this day (an error = the table isn't there yet: no leave buttons)
         supabase.from('student_leaves').select(LEAVE_COLUMNS).eq('company_id', profile.company_id)
           .is('cancelled_at', null).lte('from_date', date).gte('to_date', date),
+        supabase.from('holidays').select(HOLIDAY_COLUMNS).eq('company_id', profile.company_id).eq('holiday_date', date).is('removed_at', null),
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: profile.company_id as string })
@@ -127,6 +131,7 @@ export default function RollCallPage() {
       setBranch((br as Branch | null) ?? null)
       setStudents((people.data || []) as Student[])
       setLeaves(leaveRes.error ? null : (leaveRes.data || []) as StudentLeave[])
+      setHolidays(holidayRes.error ? null : (holidayRes.data || []) as Holiday[])
       setRows((att.data || []) as AttendanceRow[])
       setAllBatches((gymBatches.data || []) as Batch[])
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
@@ -168,13 +173,13 @@ export default function RollCallPage() {
 
   // Marking someone who already came to another batch today asks first (allowed: exams, extra classes)
   const askOrTap = (student: RosterStudent) => {
-    if (locked) return
+    if (blocked) return
     if (!presentIds.has(student.id) && elsewhere(student).length) { setConfirmFor(student); return }
     tap(student)
   }
 
   const tap = async (student: RosterStudent) => {
-    if (!me || busy.has(student.id) || locked) return
+    if (!me || busy.has(student.id) || blocked) return
     const current = presentIds.has(student.id)
     const row = tapRow({ batchId, date, student, companyId: me.companyId, current, markedBy: me.id })
     setBusy(s => new Set(s).add(student.id))
@@ -199,6 +204,9 @@ export default function RollCallPage() {
     () => (activities ? checklist({ activities, cls, saved: classActs }) : { items: [] as ChecklistItem[], logged: false }),
     [activities, cls, classActs])
   const locked = activities !== null && dayLocked(date, today, cls)
+  // A holiday for this batch's branch (or all branches) closes the day: nothing saves (lib/holidays.ts)
+  const holiday = holidays && batch ? holidayFor(holidays, batch.branch_id, date) : null
+  const blocked = locked || !!holiday
   const lockMove = activities !== null && me ? lockAction({ date, today, cls, role: me.role }) : null
 
   // Save the class (logged now, by me) and these ticks, once. A row may already exist (made by Unlock, or by
@@ -236,7 +244,7 @@ export default function RollCallPage() {
   }
 
   const toggleActivity = async (item: ChecklistItem) => {
-    if (!me || locked || actBusy) return
+    if (!me || blocked || actBusy) return
     const flipped = items.map(i => (i.id === item.id ? { ...i, ticked: !i.ticked } : i))
     setActBusy(true)
     if (!logged || !cls) {
@@ -288,10 +296,10 @@ export default function RollCallPage() {
     const attends = !dropIn && batch ? attendsLabel(s.available_days, batch.days) : ''
     const offDay = attends && batch && !expectedDays(s.available_days, batch.days).includes(weekdayOf(date) as never)
     // Leave button: home students not marked present, on an open day, once the table exists
-    const leaveButton = leaves !== null && !dropIn && !present && !locked
+    const leaveButton = leaves !== null && !dropIn && !present && !blocked
     return (
     <li key={s.id} data-testid="roll-row" data-name={s.full_name} className="flex items-stretch gap-2">
-      <button type="button" onClick={() => askOrTap(s)} aria-pressed={present} disabled={busy.has(s.id) || locked || !!leave}
+      <button type="button" onClick={() => askOrTap(s)} aria-pressed={present} disabled={busy.has(s.id) || blocked || !!leave}
         className={`flex-1 min-w-0 flex items-center gap-3 rounded-xl px-4 py-3 border text-left transition min-h-[52px] ${present
           ? 'bg-green-950/50 border-green-800 text-white' : leave ? 'bg-gray-900/60 border-gray-800 text-gray-500'
           : 'bg-gray-900 border-gray-800 text-gray-300 hover:border-gray-600'} ${leave ? 'disabled:opacity-100' : 'disabled:opacity-60'}`}>
@@ -391,7 +399,7 @@ export default function RollCallPage() {
           {items.map(i => (
             <li key={i.id}>
               <button type="button" role="checkbox" aria-checked={i.ticked} aria-label={i.name} title={i.description || undefined}
-                onClick={() => toggleActivity(i)} disabled={locked || actBusy}
+                onClick={() => toggleActivity(i)} disabled={blocked || actBusy}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border transition min-h-[36px] ${i.ticked
                   ? 'bg-orange-500/20 border-orange-600 text-orange-100' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'} disabled:opacity-60`}>
                 <span aria-hidden="true">{i.ticked ? '✓' : '+'}</span>{i.name}
@@ -480,10 +488,15 @@ export default function RollCallPage() {
           <p className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">{problem}</p>
         ) : (
           <>
-            {activities !== null && olderLockBanner()}
+            {holiday && (
+              <p data-testid="holiday-banner" className="text-sm text-amber-200 bg-amber-950/50 border border-amber-800 rounded-xl px-3 py-2.5">
+                🏖 {noClassesText(holiday)}. Nothing is saved for this day.
+              </p>
+            )}
+            {activities !== null && !holiday && olderLockBanner()}
             {activities !== null && activityCard()}
             {notClassDay && <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-900 rounded-xl px-3 py-2">This batch doesn&apos;t usually meet on {weekdayOf(date)}. You can still mark an extra class.</p>}
-            {!locked && <p className="text-xs text-gray-500">Tap each {mw.one.toLowerCase()} who came. Tap again to undo. Not tapped = absent.</p>}
+            {!blocked && <p className="text-xs text-gray-500">Tap each {mw.one.toLowerCase()} who came. Tap again to undo. Not tapped = absent.</p>}
 
             {list.home.length === 0 ? (
               <p className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">
@@ -500,7 +513,7 @@ export default function RollCallPage() {
               </div>
             )}
 
-            {locked ? null : showDropIn ? (
+            {blocked ? null : showDropIn ? (
               <div className="bg-gray-900 border border-gray-800 rounded-2xl p-3 space-y-2">
                 <input type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)}
                   placeholder={`Find a ${mw.one.toLowerCase()} from another batch`}

@@ -17,6 +17,7 @@ import { formatMoney, formatMoneyByCurrency } from '@/lib/currency'
 import { memberWord, staffWord } from '@/lib/labels'
 import { type Branch, type Batch, timeLabel } from '@/lib/batches'
 import { type AttendanceRow } from '@/lib/attendance'
+import { type Holiday, HOLIDAY_COLUMNS, holidayFor } from '@/lib/holidays'
 import { type LeadSummary } from '@/lib/leads'
 import { type GradingExam, GRADING_EXAM_COLUMNS } from '@/lib/belts'
 import {
@@ -109,6 +110,16 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
     return () => { off = true }
   }, [markerIds])
 
+  // Today's holidays (lib/holidays.ts): a closed batch reads "Holiday", never "Not taken". An error = no table yet = none
+  const [holidaysToday, setHolidaysToday] = useState<Holiday[]>([])
+  useEffect(() => {
+    if (!p.companyId) return
+    let off = false
+    supabase.from('holidays').select(HOLIDAY_COLUMNS).eq('company_id', p.companyId).eq('holiday_date', localDateIso()).is('removed_at', null)
+      .then(({ data, error }) => { if (!off && !error) setHolidaysToday((data || []) as Holiday[]) })
+    return () => { off = true }
+  }, [p.companyId])
+
   // Present attendance of the last 60 days, reduced to the last date per student (not seen). Paged: 1,000 rows a page
   const [presence, setPresence] = useState<{ last: Record<string, string>; since: string | null } | null>(null)
   useEffect(() => {
@@ -169,7 +180,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
 
   // ---- 1. Today ----
   const batchRows = batchesShown.map(b => ({
-    b, state: batchState(b, p.attToday, now, p.country) as BatchState,
+    b, state: batchState(b, p.attToday, now, p.country, holidayFor(holidaysToday, b.branch_id, localDateIso())?.name) as BatchState,
     by: markedByName(p.attToday.filter(r => r.batch_id === b.id), staffById, sw.one),
   }))
   const summary = todaySummaryText(todaySummary(batchRows.map(r => r.state)))
@@ -282,6 +293,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
     switch (s.kind) {
       case 'done': return <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-900/50 text-green-400 whitespace-nowrap">{s.came} came</span>
       case 'missed': return <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-red-900/50 text-red-400 whitespace-nowrap">Not taken</span>
+      case 'holiday': return <span data-testid="holiday-chip" className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-900/40 text-amber-300 whitespace-nowrap">Holiday</span>
       case 'upcoming': return <span className="text-xs px-2.5 py-1 rounded-full bg-gray-800 text-gray-400 whitespace-nowrap">Starts {s.startsLabel}</span>
       default: return <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-orange-900/40 text-orange-400 whitespace-nowrap">Take attendance</span>
     }
@@ -370,6 +382,9 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
                               <span className="block text-xs text-gray-500 truncate">
                                 {[activeBranches.length > 1 ? branchName(b.branch_id) : '', state.kind === 'done' && by ? `by ${by}` : ''].filter(Boolean).join(' · ')}
                               </span>
+                            )}
+                            {state.kind === 'holiday' && (
+                              <span className="block text-xs text-amber-300 truncate">No classes — {state.name}</span>
                             )}
                             {state.kind === 'missed' && (
                               <span className="block text-xs text-red-400">Ended {state.endedLabel}, no roll call yet</span>
@@ -591,6 +606,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
               {sheetItem('Branches & batches', () => go('/company/batches'))}
               {sheetItem('Attendance this month', () => go('/company/attendance'))}
               {sheetItem('Class activities', () => go('/company/activities'))}
+              {sheetItem('Holidays', () => go('/company/holidays'))}
               {p.beltsOn && sheetItem('Grading exams', () => go('/company/grading'))}
               {sheetItem('Enquiries', () => go('/company/leads'))}
               {sheetItem('Revenue & fee plans', () => openManage('revenue'))}
