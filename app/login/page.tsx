@@ -7,6 +7,7 @@ import { tenantSlugFromHost } from '@/lib/tenant'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 import { type PhoneCountry, phoneCountry, validLocalDigits, loginEmailFor, phoneHint, loginInputKind, usernameEmail } from '@/lib/phone'
 import CountryCodePicker from '@/app/country-code-picker'
+import { getClientSettings, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
 
 const COACH_OFF_MESSAGE = 'Your coach login is turned off. Ask the gym owner.'
 // Same text as lib/auth-server.ts CLIENT_OFF_MESSAGE (an archived client)
@@ -176,8 +177,10 @@ function LoginForm() {
     }
 
     // On a gym's own address, only that gym's logins (and super admin) get in
+    // (* so client_settings is read once db/2026-11-19-client-view.md has run)
+    let own: { slug?: string | null; company_type?: string | null; client_settings?: unknown } | null = null
     if (profile.role !== 'super_admin') {
-      const { data: own } = await supabase.from('companies').select('slug').eq('id', profile.company_id).maybeSingle()
+      ;({ data: own } = await supabase.from('companies').select('*').eq('id', profile.company_id).maybeSingle())
       if (hostSlug && own?.slug !== hostSlug) {
         await supabase.auth.signOut()
         setError(otherGymMessage(branding?.name))
@@ -204,6 +207,13 @@ function LoginForm() {
       if (profile.archived_at) {
         await supabase.auth.signOut()
         setError(CLIENT_OFF_MESSAGE)
+        setLoading(false)
+        return
+      }
+      // The gym hasn't turned the client app on (Super Admin → Client app setup, lib/clientSettings.ts)
+      if (!getClientSettings(own).client_login) {
+        await supabase.auth.signOut()
+        setError(CLIENT_APP_OFF_MESSAGE)
         setLoading(false)
         return
       }

@@ -199,6 +199,22 @@ create trigger no_client_duplicate_day
   before insert on public.logged_sessions
   for each row execute function public.no_client_duplicate_day();
 
+-- 9a. Who logged a client's sessions / exercise rows, for "Logged by Coach Ravi" in the client app. Clients get
+--     nothing from gym_staff(); this returns only the staff who appear as logged_by on the caller's OWN rows
+--     (id, full name, role; no phone or email).
+create or replace function public.my_loggers()
+returns table (id uuid, full_name text, role text)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.full_name, p.role
+  from profiles p
+  where p.company_id = public.get_my_company_id()
+    and p.role in ('company_admin', 'partner', 'coach')
+    and p.id in (select s.logged_by from logged_sessions s where s.client_id = auth.uid()
+                 union select l.logged_by from exercise_logs l where l.client_id = auth.uid());
+$$;
+revoke execute on function public.my_loggers() from public, anon;
+grant execute on function public.my_loggers() to authenticated;
+
 -- 9. Clients may only correct exercise rows they logged themselves (decision 4), not the coach's
 alter policy "iso exercise_logs update" on public.exercise_logs
   using (
@@ -327,6 +343,9 @@ order by tablename, permissive desc, cmd, policyname;
 -- Expect, per table, the four "iso <table> <action>" rules + the restrictive "… active" rule(s)
 -- + one restrictive "iso <table> client switches".
 
+select proname from pg_proc where proname in ('client_setting', 'is_self_training_client', 'my_loggers');
+-- Expect 3 rows.
+
 select tgname, tgrelid::regclass from pg_trigger
 where tgname in ('protect_session_columns', 'no_client_duplicate_day', 'fill_plan_created_by');
 ```
@@ -365,6 +384,7 @@ rollback;
 | T12 | same, other member | as `<CLIENT>` | insert with `client_id = '<OTHER_CLIENT>'` | error |
 | T13 | `iso weekly_plans update` (self) | a plan for `<CLIENT>` made by staff | `update weekly_plans set plan_details = 'x' where id = '<ID>' returning id` | 0 rows (own plans only) |
 | T14 | no client delete | — | `delete from weekly_plans where client_id = '<CLIENT>' returning id` (same for `logged_sessions`, `exercise_logs`) | 0 rows each |
+| T16 | `my_loggers()` | a session for `<CLIENT>` logged by `<COACH>` | `select * from my_loggers()` | one row: the coach's id and name; another client of the gym gets 0 rows for it |
 | T15 | cross-company read | as `<CLIENT>` | `select count(*) from logged_sessions where client_id = '<OTHER_CLIENT>'` (also plans, exercise logs) | 0 |
 
 Also re-run the cross-company script (kept outside the repo) after Step 1 and after Step 2.

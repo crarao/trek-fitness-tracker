@@ -15,6 +15,7 @@ import BeltsEditor from '@/app/belts-editor'
 import { cleanUpiId, upiProblem } from '@/lib/guardian'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
+import { CLIENT_SETTING_ROWS, getClientSettings, clientSettingsToStore } from '@/lib/clientSettings'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, onePerGym, sortUsage } from '@/lib/platform-usage'
@@ -52,6 +53,7 @@ type Company = {
   business_type?: string | null
   upi_id?: string | null   // dojo fee reminders (absent before db/2026-11-07-upi-id.md)
   grading_enabled?: boolean | null // belt grading (absent before supabase/migrations/20261110120000_belt_grading.sql)
+  client_settings?: Record<string, unknown> | null // client app switches, lib/clientSettings.ts (absent before db/2026-11-19-client-view.md)
 }
 
 type ContactRequest = {
@@ -557,6 +559,11 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
         slug: slug || null,
         // Only once the upi_id column exists (db/2026-11-07-upi-id.md)
         ...('upi_id' in editingCompany ? { upi_id: cleanUpiId(editingCompany.upi_id) || null } : {}),
+        // Client app setup (19 Nov): only once the column exists and only when a switch was changed here,
+        // so saving other fields doesn't pin the defaults. Every switch is stored, as agreed with the gym.
+        ...('client_settings' in editingCompany
+          && editingCompany.client_settings !== companies.find(c => c.id === editingCompany.id)?.client_settings
+          ? { client_settings: clientSettingsToStore(getClientSettings(editingCompany)) } : {}),
       })
       .eq('id', editingCompany.id)
     setSavingCompany(false)
@@ -1606,6 +1613,48 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </div>
                         </div>
                         </div>
+
+                        {/* Client app setup (19 Nov, lib/clientSettings.ts): set by super admin during the gym's setup
+                            consultation. /admin is super admin only (proxy.ts), so owners / partners / coaches never see it;
+                            the database enforces the same switches (public.client_setting, db/2026-11-19-client-view.md). */}
+                        {(() => {
+                          const ready = 'client_settings' in editingCompany
+                          const cs = getClientSettings(editingCompany)
+                          return (
+                            <div className="border-t border-gray-800 pt-4" data-testid="client-app-setup">
+                              <p className="text-sm text-white font-medium">Client app setup</p>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {ready
+                                  ? 'Agreed with the gym in the setup consultation. Only you see these switches.'
+                                  : 'Needs Step 1 of db/2026-11-19-client-view.md first (until then clients keep today\'s app).'}
+                              </p>
+                              {ready && !editingCompany.client_module_enabled && (
+                                <p className="text-xs text-amber-400 mt-1">Client Training Module is off: clients only see their membership.</p>
+                              )}
+                              <div className="space-y-2 mt-3">
+                                {CLIENT_SETTING_ROWS.map(row => {
+                                  const on = cs[row.key]
+                                  const dim = row.key !== 'client_login' && !cs.client_login
+                                  return (
+                                    <div key={row.key} className="flex justify-between items-center gap-3 bg-gray-800/50 rounded-xl px-3 py-2.5">
+                                      <div className={dim ? 'opacity-50' : ''}>
+                                        <p className="text-sm text-white">{row.label}</p>
+                                        <p className="text-xs text-gray-500">{row.help}</p>
+                                      </div>
+                                      <button type="button" disabled={!ready} aria-pressed={on}
+                                        onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [row.key]: !on } })}
+                                        className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on
+                                          ? 'bg-green-950 border-green-700 text-green-400'
+                                          : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                                        {on ? 'ON' : 'OFF'}
+                                      </button>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )
+                        })()}
 
                         {/* Active/Inactive */}
                         <div className="border-t border-gray-800 pt-4 flex justify-between items-center">

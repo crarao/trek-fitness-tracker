@@ -114,7 +114,8 @@ type Session = {
   plan_day?: string | null   // set when the client logged it from a day of the plan
   exercises_done?: unknown   // { done: [names], total } when the client ticked exercises
   activity?: string | null   // what was done, from the client's Log tab ("run", "sport:Badminton")
-  logged_by?: string | null  // staff member who logged it for the client; null = the client logged it
+  logged_by?: string | null  // staff member who logged it for the client; null (or the client's id, since 19 Nov) = the client logged it
+  client_note?: string | null // the client's note on a session staff logged ("Add a note" in the client app, 19 Nov)
 }
 
 type Feedback = {
@@ -3629,6 +3630,9 @@ const handleResetPassword = async () => {
                             ))}
                           </ul>
                         ) : null}
+                        {session.client_note && (
+                          <p className="text-xs text-gray-300 bg-gray-800 rounded-lg px-3 py-2 mt-2">📝 {clientFirstName}&apos;s note: {session.client_note}</p>
+                        )}
                       </div>
                       {fb?.star_rating && (
                         <div className="flex gap-0.5">
