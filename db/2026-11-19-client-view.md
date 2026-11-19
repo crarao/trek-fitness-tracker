@@ -334,6 +334,7 @@ Notes:
 - **Company scope:** a client's `client_id = auth.uid()`, and their profile's `company_id` can't change
   (`protect_profile_columns`). `exercise_logs` additionally checks `company_id` against the session's client.
 - **AI plans:** `/api/generate-plan` stays staff / coach only (`PLAN_ROLES`). There is nothing to add for self-training.
+- **Weekly repeat:** a member's plan is stored once and repeats every week in the app (`lib/self-training.ts`); an edit inserts a new row from that Monday. No extra column needed.
 
 ## Step 3 — checks (read-only)
 
