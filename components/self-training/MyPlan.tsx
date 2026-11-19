@@ -22,7 +22,7 @@ import {
 import { type ProgressLog } from '@/lib/progress'
 import { ownPlanOn, expandOwnPlans, mondayOf } from '@/lib/self-training'
 
-export type MyPlanRow = { id: string; client_id?: string; week_start: string; plan_details: string; plan_json?: unknown; created_by?: string | null }
+export type MyPlanRow = { id: string; client_id?: string; week_start: string; plan_details: string; plan_json?: unknown; created_by?: string | null; created_at?: string | null }
 export type MyPlanSession = {
   id: string; session_date: string; duration_minutes: number; notes: string; weekly_plan_id: string | null; plan_day?: string | null
 }
@@ -198,7 +198,7 @@ export default function MyPlan({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider">My plan</p>
-            <p className="text-sm text-white mt-0.5">{workoutDays(json).length} training days · repeats every week</p>
+            <p className="text-sm text-white mt-0.5">{workoutDays(json).length} training day{workoutDays(json).length === 1 ? '' : 's'} · repeats every week</p>
             <p className="text-[11px] text-gray-500 mt-0.5">Since {formatDate(current.week_start, country, 'dayMonth')} · {done.size} of {workoutDays(json).length} done this week</p>
           </div>
           <button type="button" onClick={startEditing}

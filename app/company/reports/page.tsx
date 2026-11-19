@@ -27,7 +27,7 @@ import { monthReview, plateauLine } from '@/lib/review-report'
 
 type Company = { id: string; name: string; country?: string | null; business_type?: string | null; company_type?: string | null; client_settings?: unknown; created_at?: string }
 type Member = ShareClient & { id: string; client_type?: string | null; weight_kg?: number | null; created_at?: string }
-type Plan = { id: string; client_id: string; week_start: string; plan_details: string; plan_json?: unknown; created_by?: string | null }
+type Plan = { id: string; client_id: string; week_start: string; plan_details: string; plan_json?: unknown; created_by?: string | null; created_at?: string | null }
 type Session = { id: string; client_id: string; session_date: string; duration_minutes: number; weekly_plan_id: string | null; plan_day?: string | null; activity?: string | null }
 type Made = { text: string; toPhone: string | null; toLabel: string }
 
