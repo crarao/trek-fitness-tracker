@@ -18,6 +18,8 @@ import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById } from '@/lib/be
 import BeltChip from '@/app/belt-chip'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, type RosterStudent, type DayEntry, ATTENDANCE_COLUMNS, dayBoard, tapRow, addDays, elsewhereText } from '@/lib/attendance'
+import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
+import { type BatchClass, BATCH_CLASS_COLUMNS, dayLocked, olderThanLock, saveErrorText, LOCK_DAYS } from '@/lib/dojo-activities'
 
 type Student = RosterStudent & { branch_id: string | null }
 
@@ -52,6 +54,10 @@ function TodayAttendance() {
   const [branchFilter, setBranchFilter] = useState('all')
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [confirmFor, setConfirmFor] = useState<{ batch: Batch; entry: DayEntry } | null>(null)
+  // batch id → that batch's class row on this day; null = the lock table isn't there yet
+  const [classByBatch, setClassByBatch] = useState<Record<string, BatchClass> | null>(null)
+  // Holidays on this day (any branch); null = the table isn't there yet
+  const [holidays, setHolidays] = useState<Holiday[] | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = (text: string, kind: 'success' | 'error' = 'success') => {
@@ -74,7 +80,7 @@ function TodayAttendance() {
       if (!profile?.company_id) { router.push('/login'); return }
       const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
       const cId = profile.company_id as string
-      const [br, ba, people, att, staffList, ranks] = await Promise.all([
+      const [br, ba, people, att, staffList, ranks, classes, hol] = await Promise.all([
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
@@ -84,6 +90,10 @@ function TodayAttendance() {
         loadGymStaff(cId),
         // Belt grading on: the gym's belts once, for the chips
         gradingOn(co) ? supabase.from('belt_ranks').select(BELT_RANK_COLUMNS).eq('company_id', cId) : null,
+        // 7-day lock (db/2026-11-19-dojo-activities-absences.md): the day's class rows, for owner unlocks.
+        // An error = the table isn't there yet: no lock shown (and the database doesn't lock either)
+        supabase.from('batch_classes').select(BATCH_CLASS_COLUMNS).eq('company_id', cId).eq('class_date', date),
+        supabase.from('holidays').select(HOLIDAY_COLUMNS).eq('company_id', cId).eq('holiday_date', date).is('removed_at', null),
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: cId })
@@ -98,6 +108,8 @@ function TodayAttendance() {
       setStaff(Object.fromEntries(staffList.map(x => [x.id, { name: x.full_name, role: x.role }])))
       if (ranks?.error) console.error('Belt ranks error:', ranks.error)
       setBeltById(beltsById((ranks && !ranks.error ? ranks.data || [] : []) as BeltRank[]))
+      setHolidays(hol.error ? null : (hol.data || []) as Holiday[])
+      setClassByBatch(classes.error ? null : Object.fromEntries(((classes.data || []) as BatchClass[]).map(c => [c.batch_id, c])))
       setLoading(false)
     })()
     return () => { live = false }
@@ -122,11 +134,17 @@ function TodayAttendance() {
   }
 
   const key = (batchId: string, profileId: string) => `${batchId}:${profileId}`
+  // More than 7 days back and not unlocked by the owner (unlock is per batch, on its roll call)
+  const isLocked = (batchId: string) => classByBatch !== null && dayLocked(date, today, classByBatch[batchId])
+  const oldDay = classByBatch !== null && olderThanLock(date, today)
+  // A holiday for the batch's branch (or all branches) closes it: no ticks
+  const holidayOf = (batchId: string) => (holidays && batchById[batchId] ? holidayFor(holidays, batchById[batchId].branch_id, date) : null)
+  const closed = (batchId: string) => isLocked(batchId) || !!holidayOf(batchId)
 
   const tap = async (batch: Batch, entry: DayEntry) => {
     const s = entry.student
     const k = key(batch.id, s.id)
-    if (!me || busy.has(k)) return
+    if (!me || busy.has(k) || closed(batch.id)) return
     const current = entry.present
     const row = tapRow({ batchId: batch.id, date, student: s, companyId: me.companyId, current, markedBy: me.id })
     const other = (r: AttendanceRow) => r.profile_id !== s.id || r.batch_id !== batch.id
@@ -138,7 +156,7 @@ function TodayAttendance() {
     setBusy(b => { const n = new Set(b); n.delete(k); return n })
     if (error || !data?.length) {
       setRows(rs => [...rs.filter(other), ...(before ? [before] : [])])
-      showToast(error ? 'Could not save: ' + error.message : "Couldn't save: not allowed for this login", 'error')
+      showToast(saveErrorText(error), 'error')
       return
     }
     setRows(rs => [...rs.filter(other), data[0] as AttendanceRow])
@@ -146,6 +164,7 @@ function TodayAttendance() {
 
   // Marking someone who already came to another batch today asks first
   const askOrTap = (batch: Batch, entry: DayEntry) => {
+    if (closed(batch.id)) return
     if (!entry.present && entry.elsewhere.length) { setConfirmFor({ batch, entry }); return }
     tap(batch, entry)
   }
@@ -224,6 +243,12 @@ function TodayAttendance() {
               </div>
             )}
 
+            {oldDay && (
+              <p data-testid="lock-note" className="text-xs text-gray-300 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2">
+                🔒 Older than {LOCK_DAYS} days: locked.{' '}
+                {me?.role === 'company_admin' ? 'To change a batch, open it and tap Unlock.' : 'Ask the owner to unlock a batch.'}
+              </p>
+            )}
             <p className="text-xs text-gray-500">Tick each {mw.one.toLowerCase()} who came. Tick again to undo. Not ticked = absent. ⚠ = already marked in another batch today.</p>
 
             {board.groups.length === 0 && <p className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">No batches on this day.</p>}
@@ -239,10 +264,20 @@ function TodayAttendance() {
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <span className={`text-xs ${g.came ? 'text-green-400 font-semibold' : 'text-gray-500'}`}>{g.came} of {g.entries.filter(e => !e.dropIn).length}{g.entries.some(e => e.dropIn) ? '+' : ''}</span>
-                    <button type="button" data-nav onClick={() => router.push(`/company/attendance/${g.batch.id}${date === today ? '' : `?date=${date}`}`)}
-                      className="text-xs text-sky-300 hover:text-sky-200">+ Drop-in</button>
+                    {holidayOf(g.batch.id) ? (
+                      <span data-testid="holiday-chip" className="text-xs text-amber-300">🏖 Holiday</span>
+                    ) : isLocked(g.batch.id) ? (
+                      <button type="button" data-nav onClick={() => router.push(`/company/attendance/${g.batch.id}?date=${date}`)}
+                        className="text-xs text-gray-300 hover:text-white">🔒 {me?.role === 'company_admin' ? 'Unlock →' : 'Locked'}</button>
+                    ) : (
+                      <button type="button" data-nav onClick={() => router.push(`/company/attendance/${g.batch.id}${date === today ? '' : `?date=${date}`}`)}
+                        className="text-xs text-sky-300 hover:text-sky-200">+ Drop-in</button>
+                    )}
                   </div>
                 </div>
+                {holidayOf(g.batch.id) && (
+                  <p className="px-4 py-2 text-xs text-amber-200 bg-amber-950/40 border-b border-gray-800">{noClassesText(holidayOf(g.batch.id)!)}</p>
+                )}
                 {g.entries.length === 0 ? (
                   <p className="px-4 py-3 text-sm text-gray-500">No {mw.many.toLowerCase()} in this batch yet.</p>
                 ) : (
@@ -256,9 +291,9 @@ function TodayAttendance() {
                         const who = e.present ? markedByName(e.markedBy) : ''
                         return (
                           <tr key={k} onClick={() => askOrTap(g.batch, e)}
-                            className={`cursor-pointer ${busy.has(k) ? 'opacity-60' : ''} ${e.present ? 'bg-green-950/30' : 'hover:bg-gray-800/50'}`}>
+                            className={`${closed(g.batch.id) ? 'cursor-default' : 'cursor-pointer'} ${busy.has(k) ? 'opacity-60' : ''} ${e.present ? 'bg-green-950/30' : 'hover:bg-gray-800/50'}`}>
                             <td className="pl-4 pr-2 py-2.5 w-10">
-                              <button type="button" role="checkbox" aria-checked={e.present} aria-label={`${e.student.full_name} came`} disabled={busy.has(k)}
+                              <button type="button" role="checkbox" aria-checked={e.present} aria-label={`${e.student.full_name} came`} disabled={busy.has(k) || closed(g.batch.id)}
                                 onClick={ev => { ev.stopPropagation(); askOrTap(g.batch, e) }}
                                 className={`w-6 h-6 rounded-md flex items-center justify-center text-sm ${e.present ? 'bg-green-500 text-white' : 'border border-gray-600'}`}>
                                 {e.present ? '✓' : ''}
