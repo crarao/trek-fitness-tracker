@@ -12,7 +12,19 @@ What I found for `claude/coachboard-client-view-nov19.md`. No code changed. The 
 
 ---
 
-## ⚠️ Points for Anand to decide before Part B / C (details in each section)
+## Decisions (Anand, 19 Nov)
+
+1. **The brief's defaults apply.** Client login is off until Super Admin turns it on. FitLoft is in trial, so
+   no client depends on it yet. Turning `client_login` back on lets a gym's clients back in on their next visit,
+   with no password reset. The SQL file's Step 0 lists who would be affected, to check before running it.
+2. Agreed: the switches are enforced by RLS.
+3. Agreed: `client_note`. Clients edit only that column on coach-logged sessions; self-training members edit
+   their own sessions in full.
+4. Agreed: tighten it. Clients may only correct exercise rows they logged themselves.
+5. Agreed: `weekly_plans.created_by`.
+6. Agreed: the coach note isn't stored in v1.
+
+## Points that were raised (kept for the record; answered above)
 
 1. **The brief's gym defaults would lock out today's gym clients.** `client_login` = false and
    `client_can_log_sessions` = false for gyms would, the moment Part B ships, turn off the client app for

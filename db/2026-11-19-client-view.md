@@ -8,8 +8,8 @@
 >
 > Check the project ref in the address bar before running.
 
-**Status: draft for review (Task 0). Don't run yet.** Open questions are in `docs/client-view-findings.md`
-("Points for Anand to decide"). Anand runs this; Claude does not.
+**Status: reviewed 19 Nov (decisions in `docs/client-view-findings.md`). Not run yet: Step 1 goes with Part B,
+Step 2 with Part C. Anand runs this; Claude does not.
 
 Additive only (CLAUDE.md Rule #1): no `DROP`, `DELETE`, `TRUNCATE` or dropped columns.
 - New columns, functions, triggers and **restrictive** policies.
@@ -23,11 +23,30 @@ Additive only (CLAUDE.md Rule #1): no `DROP`, `DELETE`, `TRUNCATE` or dropped co
 - **Step 3**: checks.
 - **Step 4**: tests (each rolls back).
 
-**Defaults (decision 1 in the findings, pending):** this draft treats a key that isn't stored as **what the
-app does today**. Everything is on, except `self_training_enabled`, which is off. So running it changes nothing
-for existing gyms until Super Admin saves the "Client app setup" card. `lib/clientSettings.ts` must use the same
-defaults. If Anand chooses the brief's gym defaults instead (client login off), change the `case` in
-`client_setting()` and back-fill existing companies first.
+**Defaults (decided by Anand 19 Nov):** the brief's defaults apply to a key that isn't stored. Gyms: client login
+off, logging own sessions off. Individual coaches: client login off, logging sessions on. Everything else is on,
+and self-training is off. `lib/clientSettings.ts` uses the same table. Running Step 1 therefore **turns the
+client app off for every company** until Super Admin turns it on in the "Client app setup" card. That's fine:
+FitLoft is in trial and nobody depends on it yet. Turning `client_login` back on lets that gym's clients straight
+back in on their next visit; no password reset is needed. Run Step 0 first to see who would be affected.
+
+## Step 0 — who uses the client app today (read-only, run first)
+
+Companies whose clients logged their own sessions in the last 60 days (`logged_by` empty or themselves):
+
+```sql
+select c.name, c.company_type, count(distinct s.client_id) as clients, count(*) as sessions, max(s.session_date) as last
+from public.logged_sessions s
+join public.profiles p on p.id = s.client_id
+join public.companies c on c.id = p.company_id
+where (s.logged_by is null or s.logged_by = s.client_id)
+  and s.session_date >= current_date - 60
+group by c.name, c.company_type
+order by sessions desc;
+```
+
+Any company listed here loses the client app when Step 1 runs. Turn `client_login` on for it in Super Admin
+right after (once Part B is on the dev link / prod), or tell its clients first.
 
 ## Step 1 — client app switches (Part B)
 
@@ -41,15 +60,21 @@ alter table public.companies add column if not exists client_settings jsonb not 
 -- 2. A note the client adds to a session their coach logged (B5 "Add a note")
 alter table public.logged_sessions add column if not exists client_note text;
 
--- 3. The caller's gym switch. A missing or non-boolean value = today's behaviour (see Defaults above).
+-- 3. The caller's gym switch. A missing or non-boolean value = the default for the gym's company type
+--    (same table as lib/clientSettings.ts).
 create or replace function public.client_setting(p_key text)
 returns boolean language sql stable security definer set search_path = public as $$
   select coalesce(
-    (select case c.client_settings ->> p_key when 'true' then true when 'false' then false end
-       from profiles p join companies c on c.id = p.company_id
-      where p.id = auth.uid()),
-    case p_key when 'self_training_enabled' then false else true end
-  );
+    case c.client_settings ->> p_key when 'true' then true when 'false' then false end,
+    case p_key
+      when 'client_login' then false
+      when 'self_training_enabled' then false
+      when 'client_can_log_sessions' then coalesce(c.company_type, 'gym') = 'coach'
+      else true
+    end
+  )
+  from profiles p join companies c on c.id = p.company_id
+  where p.id = auth.uid();
 $$;
 revoke all on function public.client_setting(text) from public, anon;
 grant execute on function public.client_setting(text) to authenticated;
