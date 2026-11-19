@@ -146,10 +146,11 @@ export default function PlanEditor({
   return (
     <div className="space-y-3">
       {/* Planning vs logging (17 Nov, FitLoft: reps typed into an AI draft were taken as a logged workout) */}
-      <p className="text-[11px] text-gray-400 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2" data-testid="plan-vs-log-note">
+      {/* Not for a self-training member's own plan (libraryOnly): nothing to assign, they log on My Plan */}
+      {!libraryOnly && <p className="text-[11px] text-gray-400 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2" data-testid="plan-vs-log-note">
         This is the plan: target sets, reps and weights. To record a workout, assign the plan, then tick the
         exercises on the day under <span className="text-white">This week</span>.
-      </p>
+      </p>}
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-gray-400">
           {workoutCount} workout day{workoutCount === 1 ? '' : 's'} · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}
@@ -330,11 +331,12 @@ export default function PlanEditor({
           + Add {d.rest ? 'a light activity' : 'exercise'}
         </button>
         <div className="flex items-center justify-between gap-2">
-          <button type="button"
+          {/* Library only (self-training members): no empty row to type into, only + Add exercise */}
+          {libraryOnly ? <span /> : <button type="button"
             onClick={() => updateDay(d.day, x => ({ ...x, exercises: [...x.exercises, emptyExercise()] }))}
             className="text-[11px] text-gray-400 hover:text-white underline underline-offset-2">
             Type one instead
-          </button>
+          </button>}
           <button type="button" onClick={() => setDupOpen(o => !o)} aria-expanded={dupOpen}
             className="text-[11px] text-gray-300 hover:text-white border border-gray-700 px-2.5 py-1 rounded-lg">
             Duplicate day…

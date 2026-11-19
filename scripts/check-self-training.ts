@@ -65,6 +65,13 @@ eq('one plan, four weeks', long.plans.map(p => p.week_start), ['2026-11-02', '20
 const same = expandOwnPlans([plan('a', '2026-11-16', ME), plan('b', '2026-11-16', ME)], [], ME, '2026-11-19')
 eq('two saves in a week: the later one wins', same.plans.map(p => p.id), ['b'])
 
+// An edit in the same week: a newer row with the same Monday must win, whatever the ids (found on dev 19 Nov:
+// ids are random, and the old rule picked by id)
+const first = { ...plan('zzz-first', '2026-11-16', ME), created_at: '2026-11-19T06:00:00Z' }
+const edited = { ...plan('aaa-edited', '2026-11-16', ME), created_at: '2026-11-19T06:25:00Z' }
+eq('same-week edit: the newer save is in effect', ownPlanOn([first, edited], ME, '2026-11-19')?.id, 'aaa-edited')
+eq('same-week edit: the newer save is the week\'s plan', expandOwnPlans([first, edited], [], ME, '2026-11-19').plans.map(p => p.id), ['aaa-edited'])
+
 // A member with no own plans: nothing changes
 const none = expandOwnPlans([gym], sessions, ME, '2026-11-19')
 eq('no own plans: same arrays', [none.plans === undefined, none.plans.length, none.sessions === sessions], [false, 1, true])

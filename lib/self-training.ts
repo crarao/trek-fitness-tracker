@@ -10,7 +10,7 @@
 // "<plan id>@<monday>") and points each session at the copy for its week, so those counters work unchanged.
 // Nothing is saved: copies exist only on screen. realPlanId gives the stored id back for saving.
 
-export type OwnPlanLike = { id: string; week_start: string; created_by?: string | null; client_id?: string }
+export type OwnPlanLike = { id: string; week_start: string; created_by?: string | null; client_id?: string; created_at?: string | null }
 export type OwnSessionLike = { weekly_plan_id?: string | null; session_date: string }
 
 const COPY = '@'
@@ -30,6 +30,13 @@ export function mondayOf(iso: string): string {
 }
 
 export const isOwnPlan = (p: OwnPlanLike, clientId: string) => !!p.created_by && p.created_by === clientId
+
+// Oldest first: by week, then by when it was saved (an edit in the same week is a newer row with the same
+// Monday, so it must win; ids are random and say nothing about order), then id so the order is stable
+const oldestFirst = (a: OwnPlanLike, b: OwnPlanLike) =>
+  mondayOf(a.week_start).localeCompare(mondayOf(b.week_start))
+  || (a.created_at || '').localeCompare(b.created_at || '')
+  || a.id.localeCompare(b.id)
 export const realPlanId = (id: string) => id.split(COPY)[0]
 export const isPlanCopy = (id: string) => id.includes(COPY)
 
@@ -38,7 +45,7 @@ export function ownPlanOn<T extends OwnPlanLike>(plans: T[], clientId: string, d
   const week = mondayOf(date)
   return plans
     .filter(p => isOwnPlan(p, clientId) && mondayOf(p.week_start) <= week)
-    .sort((a, b) => b.week_start.localeCompare(a.week_start) || b.id.localeCompare(a.id))[0] ?? null
+    .sort((a, b) => oldestFirst(b, a))[0] ?? null
 }
 
 // Plans with one copy per week for every own plan (from its week to the week before the next own plan, or
@@ -48,7 +55,7 @@ export function expandOwnPlans<P extends OwnPlanLike, S extends OwnSessionLike>(
   plans: P[], sessions: S[], clientId: string, upTo: string,
 ): { plans: P[]; sessions: S[] } {
   const own = plans.filter(p => isOwnPlan(p, clientId))
-    .sort((a, b) => a.week_start.localeCompare(b.week_start) || a.id.localeCompare(b.id))
+    .sort(oldestFirst)
   if (!own.length) return { plans, sessions }
   const last = mondayOf(upTo)
   // One plan per week: a later plan saved for the same week wins (an edit on the same week)
