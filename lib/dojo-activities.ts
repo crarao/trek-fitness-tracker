@@ -8,7 +8,6 @@
 // Nothing is deleted (CLAUDE.md Rule #1): archive an activity, untick = removed_at.
 
 import { addDays } from './attendance'
-import type { BeltRank } from './belts'
 
 export type DojoActivity = {
   id: string
@@ -18,12 +17,8 @@ export type DojoActivity = {
   sort_order: number
   is_default: boolean
   is_archived: boolean
-  // Items by belt (db/2026-11-20-activity-items.md): undefined before that SQL ran
-  parent_id?: string | null      // the category this item is under; null = a category
-  min_rank_id?: string | null    // the belt where it's first taught; null = every belt
 }
-// '*' so parent_id / min_rank_id are read once they exist, and nothing breaks before
-export const ACTIVITY_COLUMNS = '*'
+export const ACTIVITY_COLUMNS = 'id, company_id, name, description, sort_order, is_default, is_archived'
 
 export type BatchClass = {
   id: string
@@ -91,7 +86,7 @@ export function moveActivity(list: DojoActivity[], id: string, dir: -1 | 1): { i
 
 // ── The class checklist ─────────────────────────────────────────────────────────────────────────────────────
 
-export type ChecklistItem = { id: string; name: string; description: string | null; ticked: boolean; archived: boolean; parentId?: string | null; minRankId?: string | null }
+export type ChecklistItem = { id: string; name: string; description: string | null; ticked: boolean; archived: boolean }
 
 // What the roll call shows. No class row yet (or a row made only to unlock the day, logged_at null, with no
 // activities): the active list with the defaults pre-ticked (not saved until the class is saved). A logged class:
@@ -109,8 +104,7 @@ export function checklist(opts: {
     const row = byId.get(a.id)
     const ticked = logged ? !!row && !row.removed_at : a.is_default
     if (a.is_archived && !(row && !row.removed_at)) continue
-    items.push({ id: a.id, name: a.is_archived && row ? row.activity_name : a.name, description: a.description, ticked: ticked && (logged || !a.parent_id), archived: a.is_archived,
-      parentId: a.parent_id ?? null, minRankId: a.min_rank_id ?? null })
+    items.push({ id: a.id, name: a.is_archived && row ? row.activity_name : a.name, description: a.description, ticked, archived: a.is_archived })
   }
   // A ticked activity whose list row we can't see any more (shouldn't happen: activities are never deleted)
   for (const r of opts.saved) {
@@ -163,35 +157,4 @@ export function saveErrorText(error: { message?: string } | null | undefined): s
   if (!m) return "Couldn't save: not allowed for this login"
   if (/locked|unlock|logged_by must be|can't be moved|can''t be moved/i.test(m)) return m
   return 'Could not save: ' + m
-}
-
-// ── Items by belt (db/2026-11-20-activity-items.md) ─────────────────────────────────────────────────────────
-// The 13 generic activities are categories; items under them (katas, kicks, kumite drills…) carry the belt where
-// they're first taught. Higher belts keep practising, so an item applies to that belt and every higher one.
-
-export const isItem = (a: Pick<DojoActivity, 'parent_id'>) => !!a.parent_id
-export const categoriesOf = <T extends Pick<DojoActivity, 'parent_id' | 'sort_order' | 'name'>>(list: T[]) => sortActivities(list.filter(a => !a.parent_id))
-export const itemsOf = <T extends Pick<DojoActivity, 'parent_id' | 'sort_order' | 'name'>>(list: T[], parentId: string) => sortActivities(list.filter(a => a.parent_id === parentId))
-
-// Does an item starting at minRankId apply to a student with this belt? No belt on the item, or no belt ladder
-// (grading off) = everyone. A student with no belt set counts as the lowest belt (a new student starts at White).
-export function appliesToBelt(minRankId: string | null | undefined, studentRankId: string | null | undefined, ranks: Pick<BeltRank, 'id' | 'rank_order'>[]): boolean {
-  if (!minRankId || !ranks.length) return true
-  const min = ranks.find(r => r.id === minRankId)
-  if (!min) return true
-  const lowest = Math.min(...ranks.map(r => r.rank_order))
-  const mine = ranks.find(r => r.id === studentRankId)?.rank_order ?? lowest
-  return mine >= min.rank_order
-}
-
-// "White and above", "Brown – 3rd kyu and above", "Every belt"
-export function fromBeltText(minRankId: string | null | undefined, ranks: BeltRank[], label: (r: BeltRank) => string): string {
-  const r = minRankId ? ranks.find(x => x.id === minRankId) : null
-  return r ? `${label(r)} and above` : 'Every belt'
-}
-
-// Roll call: show an item when someone in the class has that belt or higher (or it's already ticked)
-export function itemShown(item: Pick<ChecklistItem, 'minRankId' | 'ticked'>, studentRankIds: (string | null | undefined)[], ranks: Pick<BeltRank, 'id' | 'rank_order'>[]): boolean {
-  if (item.ticked || !studentRankIds.length) return true
-  return studentRankIds.some(id => appliesToBelt(item.minRankId, id, ranks))
 }

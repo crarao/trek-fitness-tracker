@@ -29,7 +29,7 @@ import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen, sort
 import { type AttendanceRow, type RosterStudent, ATTENDANCE_COLUMNS, roster, tapRow, addDays, weekdayOf, cameElsewhere, elsewhereText } from '@/lib/attendance'
 import {
   type DojoActivity, type BatchClass, type ClassActivity, type ChecklistItem, ACTIVITY_COLUMNS, BATCH_CLASS_COLUMNS,
-  CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS, itemShown,
+  CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS,
 } from '@/lib/dojo-activities'
 import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
 import { type StudentLeave, LEAVE_COLUMNS, LEAVE_NOTE_MAX, leaveOn, leaveText, leaveProblem, leaveRow, attendsLabel, expectedDays } from '@/lib/leave'
@@ -67,8 +67,6 @@ export default function RollCallPage() {
   const [cls, setCls] = useState<BatchClass | null>(null)
   const [classActs, setClassActs] = useState<ClassActivity[]>([])
   const [actBusy, setActBusy] = useState(false)
-  // Categories opened to show their belt items (20 Nov); kept for this visit only
-  const [openCats, setOpenCats] = useState<Set<string>>(new Set())
   const [lockBusy, setLockBusy] = useState(false)
   // One "save the class" at a time (two quick taps must not insert the class twice)
   const ensuring = useRef<Promise<BatchClass | null> | null>(null)
@@ -391,20 +389,6 @@ export default function RollCallPage() {
         </button>
       ) : null
     }
-    // Items by belt: under their category, only those for a belt someone in this class has (or already ticked)
-    const ranks = Object.values(beltById)
-    const classBelts = [...list.home.map(h => h.student), ...list.dropIns].map(st => st.current_rank_id)
-    const top = items.filter(i => !i.parentId)
-    const kids = (id: string) => items.filter(i => i.parentId === id && itemShown(i, classBelts, ranks))
-    const chip = (i: ChecklistItem, sub = false) => (
-      <button key={i.id} type="button" role="checkbox" aria-checked={i.ticked} aria-label={i.name} title={i.description || undefined}
-        onClick={() => toggleActivity(i)} disabled={blocked || actBusy}
-        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border transition min-h-[36px] ${i.ticked
-          ? (sub ? 'bg-sky-500/20 border-sky-600 text-sky-100' : 'bg-orange-500/20 border-orange-600 text-orange-100')
-          : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'} disabled:opacity-60`}>
-        <span aria-hidden="true">{i.ticked ? '✓' : '+'}</span>{i.name}
-      </button>
-    )
     return (
       <section data-testid="class-activities" className="bg-gray-900 border border-gray-800 rounded-2xl p-3 space-y-2">
         <div className="flex items-baseline justify-between gap-2 px-1">
@@ -412,30 +396,16 @@ export default function RollCallPage() {
           <p className="text-[11px] text-gray-500">{logged ? `${ticksSummary(items)} · saved` : 'Saved with the first ' + mw.one.toLowerCase() + ' you mark'}</p>
         </div>
         <ul className="flex flex-wrap gap-1.5">
-          {top.map(i => {
-            const sub = kids(i.id)
-            const open = openCats.has(i.id)
-            const subTicked = sub.filter(x => x.ticked).length
-            return (
-              <li key={i.id} className={open ? 'basis-full' : ''}>
-                <div className="flex items-center gap-1">
-                  {chip(i)}
-                  {sub.length > 0 && (
-                    <button type="button" aria-expanded={open} aria-label={`${i.name} items`}
-                      onClick={() => setOpenCats(o => { const n = new Set(o); if (n.has(i.id)) n.delete(i.id); else n.add(i.id); return n })}
-                      className={`min-h-[36px] px-2 rounded-lg border text-[11px] ${subTicked ? 'border-sky-700 text-sky-300' : 'border-gray-700 text-gray-400'} hover:border-gray-500`}>
-                      {open ? '▾' : '▸'} {subTicked ? `${subTicked}/${sub.length}` : sub.length}
-                    </button>
-                  )}
-                </div>
-                {open && sub.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5 ml-3 pl-2 border-l border-gray-800" data-testid="activity-items">
-                    {sub.map(x => chip(x, true))}
-                  </div>
-                )}
-              </li>
-            )
-          })}
+          {items.map(i => (
+            <li key={i.id}>
+              <button type="button" role="checkbox" aria-checked={i.ticked} aria-label={i.name} title={i.description || undefined}
+                onClick={() => toggleActivity(i)} disabled={blocked || actBusy}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border transition min-h-[36px] ${i.ticked
+                  ? 'bg-orange-500/20 border-orange-600 text-orange-100' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'} disabled:opacity-60`}>
+                <span aria-hidden="true">{i.ticked ? '✓' : '+'}</span>{i.name}
+              </button>
+            </li>
+          ))}
         </ul>
       </section>
     )
