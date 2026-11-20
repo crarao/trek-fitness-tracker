@@ -97,6 +97,7 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 
 - [ ] **#21 Medical report upload** feeding into the diet chart.
 - [x] **#22 Subdomain branding** — moved up and shipped 31 Oct, see Done.
+- [ ] **Parked (20 Nov): Dojo activity items by belt** — sub-points under each class activity heading (e.g. Kata practice → Heian Shodan, Heian Nidan…), each with the belt where it's first taught; the roll call opens a heading to tick them, reports count them by the student's belt on the class date, Grading shows "For <next belt>: Heian Nidan 12×". **Built and tested, then closed unmerged:** DSSKA's sensei wants only the 13 headings, not sub-points. Revisit only if a dojo asks. The code is in closed **PR #159** (commit `654be67`, with its SQL `db/2026-11-20-activity-items.md`, never run anywhere); reopen the PR or cherry-pick that commit onto a branch off `dev`. A smaller idea from the same talk: a belt on a heading itself (e.g. "Weapon training: Purple and above").
 
 ---
 
