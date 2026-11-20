@@ -4,6 +4,7 @@
 import {
   type DojoActivity, sortActivities, activityNameTaken, activityProblem, nextSortOrder, moveActivity,
   checklist, activityRowsToSave, ticksSummary, olderThanLock, dayLocked, lockAction, saveErrorText,
+  appliesToBelt, itemShown, categoriesOf, itemsOf, fromBeltText,
 } from '../lib/dojo-activities'
 
 let failed = 0
@@ -69,6 +70,33 @@ check('trigger text shown as is', saveErrorText({ message: 'Attendance for 2026-
   'Attendance for 2026-11-01 is locked (older than 7 days). Ask the owner to unlock it.')
 check('other errors prefixed', saveErrorText({ message: 'network down' }), 'Could not save: network down')
 check('no rows back', saveErrorText(null), "Couldn't save: not allowed for this login")
+
+console.log('\n4. items by belt')
+const ranks = [
+  { id: 'w', rank_order: 1, belt_name: 'White', kyu: null, color_hex: '#fff', is_active: true },
+  { id: 'y', rank_order: 2, belt_name: 'Yellow', kyu: 8, color_hex: '#ff0', is_active: true },
+  { id: 'b3', rank_order: 7, belt_name: 'Brown', kyu: 3, color_hex: '#730', is_active: true },
+]
+const kata: DojoActivity = { ...a('kata', 'Kata practice', 6) }
+const heian: DojoActivity = { ...a('hs', 'Heian Shodan', 1, true), parent_id: 'kata', min_rank_id: 'w' }
+const bassai: DojoActivity = { ...a('bd', 'Bassai Dai', 7), parent_id: 'kata', min_rank_id: 'b3' }
+const tree = [kata, bassai, heian, a('wu', 'Warm-up', 1, true)]
+check('categories only', categoriesOf(tree).map(x => x.id), ['wu', 'kata'])
+check('items of a category, in order', itemsOf(tree, 'kata').map(x => x.id), ['hs', 'bd'])
+check('Bassai Dai: not for a Yellow belt', appliesToBelt('b3', 'y', ranks), false)
+check('Bassai Dai: Brown 3 kyu yes', appliesToBelt('b3', 'b3', ranks), true)
+check('Heian Shodan: higher belts keep it', appliesToBelt('w', 'b3', ranks), true)
+check('no belt on the item = everyone', appliesToBelt(null, 'y', ranks), true)
+check('student without a belt = lowest belt', [appliesToBelt('w', null, ranks), appliesToBelt('y', null, ranks)], [true, false])
+check('grading off (no ladder) = everyone', appliesToBelt('b3', 'y', []), true)
+const cl = checklist({ activities: tree, cls: null, saved: [] })
+check('items are never pre-ticked (even marked default)', cl.items.filter(i => i.ticked).map(i => i.id), ['wu'])
+check('items carry their category and belt', cl.items.find(i => i.id === 'bd'), { id: 'bd', name: 'Bassai Dai', description: null, ticked: false, archived: false, parentId: 'kata', minRankId: 'b3' })
+check('kids batch: Bassai Dai hidden', itemShown({ minRankId: 'b3', ticked: false }, ['w', 'y'], ranks), false)
+check('…shown once a Brown belt is in the class', itemShown({ minRankId: 'b3', ticked: false }, ['w', 'b3'], ranks), true)
+check('…and when already ticked', itemShown({ minRankId: 'b3', ticked: true }, ['w'], ranks), true)
+check('from-belt text', [fromBeltText('b3', ranks, r => `${r.belt_name} ${r.kyu}`), fromBeltText(null, ranks, r => r.belt_name)], ['Brown 3 and above', 'Every belt'])
+check('move within a category only', moveActivity(itemsOf(tree, 'kata'), 'bd', -1), [{ id: 'bd', sort_order: 1 }, { id: 'hs', sort_order: 2 }])
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)

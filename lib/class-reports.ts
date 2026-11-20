@@ -10,8 +10,36 @@ import { type Batch, sortBatches } from './batches'
 import { type AttendanceRow, batchesOn, weekdayOf, addDays } from './attendance'
 import { type StudentLeave, leaveOn, expectedDays } from './leave'
 import { type Holiday, holidayFor } from './holidays'
-import { type DojoActivity, sortActivities } from './dojo-activities'
+import { type DojoActivity, sortActivities, appliesToBelt, categoriesOf, itemsOf } from './dojo-activities'
 import { type BeltRank, type Eligibility, eligibility } from './belts'
+
+// Items by belt (db/2026-11-20-activity-items.md): an item ticked on a class counts for a student only when their
+// belt ON THE CLASS DATE is the item's belt or higher. Without this (no items, no belts) everything counts.
+export type BeltScope = {
+  activities: Pick<DojoActivity, 'id' | 'parent_id' | 'min_rank_id'>[]
+  ranks: Pick<BeltRank, 'id' | 'rank_order'>[]
+  rankOn: (studentId: string, date: string) => string | null | undefined
+}
+const counts = (scope: BeltScope | undefined, activityId: string, studentId: string, date: string) => {
+  if (!scope) return true
+  const a = scope.activities.find(x => x.id === activityId)
+  return appliesToBelt(a?.min_rank_id, scope.rankOn(studentId, date), scope.ranks)
+}
+
+// The student's belt on a date from the belt history (student_grades): the latest change dated on or before it
+// (achieved_on, else the day it was entered); before the first change, the earliest belt on record; no history =
+// the current belt. Undone (voided) rows are ignored.
+export function beltOnDate(
+  history: { student_id: string; rank_id: string; achieved_on: string | null; created_at: string; voided_at?: string | null }[],
+  studentId: string, date: string, currentRankId: string | null | undefined,
+): string | null {
+  const rows = history.filter(h => h.student_id === studentId && !h.voided_at)
+    .map(h => ({ ...h, day: (h.achieved_on || h.created_at).slice(0, 10) }))
+    .sort((a, b) => a.day.localeCompare(b.day) || a.created_at.localeCompare(b.created_at))
+  if (!rows.length) return currentRankId ?? null
+  const upTo = rows.filter(r => r.day <= date)
+  return (upTo.length ? upTo[upTo.length - 1] : rows[0]).rank_id
+}
 
 export type ReportClass = { id: string; batch_id: string; class_date: string; logged_at: string | null }
 export type ReportClassActivity = { class_id: string; activity_id: string; activity_name: string; removed_at: string | null }
@@ -62,7 +90,7 @@ export function dayReport<B extends RBatch>(opts: { date: string; batches: B[]; 
 // ── 2. By student ──────────────────────────────────────────────────────────────────────────────────────────
 
 export type DayStatus = 'came' | 'absent' | 'leave' | 'holiday' | 'not-logged' | 'off' | 'future' | 'before-join'
-export type StudentDay = { date: string; status: DayStatus; activities: string[] }
+export type StudentDay = { date: string; status: DayStatus; activities: string[]; ids?: string[] }
 
 export type ReportStudent = { id: string; full_name: string; batch_id?: string | null; branch_id?: string | null; available_days?: string | null; created_at?: string | null }
 
@@ -79,6 +107,7 @@ export function studentDays(opts: {
   index: ClassIndex
   leaves: StudentLeave[]
   holidays: Holiday[]
+  scope?: BeltScope
 }): StudentDay[] {
   const mine = opts.attendance.filter(r => r.present && r.profile_id === opts.student.id)
   const joined = (opts.student.created_at || '').slice(0, 10)
@@ -88,8 +117,14 @@ export function studentDays(opts: {
     const here = mine.filter(r => r.class_date === d)
     if (here.length) {
       const names: string[] = []
-      for (const r of here) for (const a of opts.index.get(key(r.batch_id, d))?.activities || []) if (!names.includes(a.name)) names.push(a.name)
-      out.push({ date: d, status: 'came', activities: names })
+      const ids: string[] = []
+      for (const r of here) {
+        for (const a of opts.index.get(key(r.batch_id, d))?.activities || []) {
+          if (ids.includes(a.id) || !counts(opts.scope, a.id, opts.student.id, d)) continue
+          ids.push(a.id); names.push(a.name)
+        }
+      }
+      out.push({ date: d, status: 'came', activities: names, ids })
       continue
     }
     let status: DayStatus
@@ -168,6 +203,7 @@ export function readiness<S extends ReportStudent & { current_rank_id?: string |
   attendance: AttendanceRow[]
   index: ClassIndex
   asOf: string
+  scope?: BeltScope
 }): ReadinessRow<S>[] {
   return opts.students.filter(s => s.current_rank_id).map(s => {
     const e = eligibility({ ranks: opts.ranks, currentRankId: s.current_rank_id, achievedOn: s.rank_achieved_on, examDate: opts.asOf })
@@ -177,6 +213,7 @@ export function readiness<S extends ReportStudent & { current_rank_id?: string |
     const seen = new Set<string>()
     for (const r of rows) {
       for (const a of opts.index.get(key(r.batch_id, r.class_date))?.activities || []) {
+        if (!counts(opts.scope, a.id, s.id, r.class_date)) continue
         const k = `${r.class_date}|${a.id}`   // once per day even if two classes did it
         if (seen.has(k)) continue
         seen.add(k)
@@ -189,3 +226,46 @@ export function readiness<S extends ReportStudent & { current_rank_id?: string |
 
 // Eligible first, then not yet, then highest belt / no belt
 const readyOrder = (e: Eligibility) => (e.kind === 'eligible' ? 0 : e.kind === 'not-yet' ? 1 : 2)
+
+// ── Categories with items: totals rolled up ────────────────────────────────────────────────────────────────
+
+export type TreeTotal = { id: string; name: string; count: number; items: { id: string; name: string; count: number }[] }
+
+// One student's period as categories → items. A category counts a day when the category itself or any of its items
+// was done that day (so "Kata practice 22×" includes the days only a specific kata was ticked). Zero rows left out.
+export function treeTotals(days: StudentDay[], activities: DojoActivity[]): TreeTotal[] {
+  const dayIds = days.filter(d => d.status === 'came').map(d => new Set(d.ids || []))
+  const n = (ids: string[]) => dayIds.filter(s => ids.some(id => s.has(id))).length
+  return categoriesOf(activities).map(c => {
+    const items = itemsOf(activities, c.id).map(i => ({ id: i.id, name: i.name, count: n([i.id]) })).filter(i => i.count > 0)
+    return { id: c.id, name: c.name, count: n([c.id, ...itemsOf(activities, c.id).map(i => i.id)]), items }
+  }).filter(t => t.count > 0)
+}
+
+// The items a student is learning for their next grading: those first taught at their current belt
+export function syllabusFor<T extends Pick<DojoActivity, 'id' | 'name' | 'parent_id' | 'min_rank_id' | 'is_archived' | 'sort_order'>>(activities: T[], currentRankId: string | null | undefined): T[] {
+  if (!currentRankId) return []
+  return sortActivities(activities.filter(a => a.parent_id && !a.is_archived && a.min_rank_id === currentRankId))
+}
+
+// The by-activity report as categories → items. A category's numbers are rolled up: classes that ticked the
+// category or any of its items.
+export function activityTree<B extends RBatch>(opts: { activities: DojoActivity[]; batches: B[]; index: ClassIndex; from: string; to: string }): (ActivityRow<B> & { items: ActivityRow<B>[] })[] {
+  const flat = activityReport(opts)
+  const byId = new Map(flat.map(r => [r.activity.id, r]))
+  const rolled = (ids: string[]): Omit<ActivityRow<B>, 'activity'> => {
+    const per = new Map<string, { count: number; last: string }>()
+    for (const { cls, activities } of opts.index.values()) {
+      if (cls.class_date < opts.from || cls.class_date > opts.to || !activities.some(a => ids.includes(a.id))) continue
+      const cur = per.get(cls.batch_id) || { count: 0, last: '' }
+      per.set(cls.batch_id, { count: cur.count + 1, last: cls.class_date > cur.last ? cls.class_date : cur.last })
+    }
+    const batches = opts.batches.filter(b => per.has(b.id)).map(batch => ({ batch, count: per.get(batch.id)!.count, last: per.get(batch.id)!.last || null }))
+      .sort((x, y) => y.count - x.count || x.batch.name.localeCompare(y.batch.name))
+    return { total: batches.reduce((n, b) => n + b.count, 0), last: batches.reduce<string | null>((l, b) => (b.last && (!l || b.last > l) ? b.last : l), null), batches }
+  }
+  return categoriesOf(opts.activities).filter(c => byId.has(c.id)).map(c => {
+    const items = itemsOf(opts.activities, c.id).map(i => byId.get(i.id)).filter((r): r is ActivityRow<B> => !!r)
+    return { ...byId.get(c.id)!, ...rolled([c.id, ...items.map(i => i.activity.id)]), items }
+  })
+}

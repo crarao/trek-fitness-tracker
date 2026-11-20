@@ -7,6 +7,8 @@
 //              each activity was done.
 //   Activity — each activity in the month: classes that did it, per batch, and when it was last done.
 //   Grading  — (belt grading on) the existing belt rule next to classes and activity counts since the belt date.
+// Items by belt (db/2026-11-20-activity-items.md): categories show their items under them; an item counts for a
+// student only when their belt on the class date (belt history, student_grades) is the item's belt or higher.
 // Each month's data is read once (attendance paged, class activities in chunks). Before the SQL ran: a note.
 
 import PageNav from '@/app/page-nav'
@@ -24,7 +26,7 @@ import { type DojoActivity, ACTIVITY_COLUMNS, sortActivities } from '@/lib/dojo-
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltsById, beltLabel, toGoText } from '@/lib/belts'
 import {
   type ReportClass, type ReportClassActivity, type ReportStudent, type DayStatus,
-  indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityReport, readiness,
+  type BeltScope, indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityTree, readiness, beltOnDate, treeTotals, syllabusFor,
 } from '@/lib/class-reports'
 
 type Tab = 'day' | 'student' | 'activity' | 'grading'
@@ -85,6 +87,8 @@ export default function ClassReportsPage() {
   const [students, setStudents] = useState<Student[]>([])
   const [activities, setActivities] = useState<DojoActivity[]>([])
   const [ranks, setRanks] = useState<BeltRank[]>([])
+  // Belt history (student_grades, read once): who had which belt on a class date
+  const [history, setHistory] = useState<{ student_id: string; rank_id: string; achieved_on: string | null; created_at: string; voided_at?: string | null }[]>([])
   const [tab, setTab] = useState<Tab>('day')
   const [branch, setBranch] = useState('all')
   const [day, setDay] = useState(today)
@@ -124,6 +128,10 @@ export default function ClassReportsPage() {
       setStudents((people.data || []) as Student[])
       setActivities((act.data || []) as DojoActivity[])
       setRanks(rk && !rk.error ? (rk.data || []) as BeltRank[] : [])
+      if (rk && !rk.error && (rk.data || []).length) {
+        const gr = await supabase.from('student_grades').select('*').eq('company_id', cId)
+        if (live && !gr.error) setHistory((gr.data || []) as typeof history)
+      }
       setLoading(false)
     })()
     return () => { live = false }
@@ -168,6 +176,12 @@ export default function ClassReportsPage() {
   const logged = useMemo(() => (data ? loggedDays(data.attendance, data.classes) : new Set<string>()), [data])
   const batchOf = (id: string | null | undefined) => batches.find(b => b.id === id) ?? null
   const rankById = beltsById(ranks)
+  // Items count by belt on the day; no belts (grading off) = everything counts, as before
+  const scope: BeltScope | undefined = ranks.length ? {
+    activities, ranks,
+    rankOn: (id, d) => beltOnDate(history, id, d, students.find(x => x.id === id)?.current_rank_id),
+  } : undefined
+  const itemIds = new Set(activities.filter(a => a.parent_id).map(a => a.name))
   const gradingTab = ranks.length > 0
   const tabs: [Tab, string][] = [['day', 'By day'], ['student', `By ${mw.one.toLowerCase()}`], ['activity', 'By activity'], ...(gradingTab ? [['grading', 'Grading'] as [Tab, string]] : [])]
 
@@ -206,7 +220,8 @@ export default function ClassReportsPage() {
                 : <span className="text-xs text-red-400 shrink-0">{day > today ? '' : 'Not logged'}</span>}
             </div>
             {r.activities.length > 0 ? (
-              <div className="flex flex-wrap gap-1">{r.activities.map(a => <span key={a} className="text-[11px] text-orange-100 bg-orange-500/20 border border-orange-700 px-2 py-0.5 rounded">{a}</span>)}</div>
+              <div className="flex flex-wrap gap-1">{r.activities.map(a => <span key={a} className={`text-[11px] px-2 py-0.5 rounded border ${itemIds.has(a)
+                ? 'text-sky-100 bg-sky-500/20 border-sky-700' : 'text-orange-100 bg-orange-500/20 border-orange-700'}`}>{a}</span>)}</div>
             ) : r.logged && !r.holiday ? <p className="text-[11px] text-gray-500">No activities ticked</p> : null}
           </button>
         ))}
@@ -217,9 +232,10 @@ export default function ClassReportsPage() {
   const studentTab = () => {
     const s = shownStudents.find(x => x.id === studentId) ?? null
     const { from, to } = monthBounds(month)
-    const days = s && data ? studentDays({ student: s, homeBatch: batchOf(s.batch_id), from, to, today, attendance: data.attendance, logged, index, leaves: data.leaves, holidays: data.holidays }) : []
+    const days = s && data ? studentDays({ student: s, homeBatch: batchOf(s.batch_id), from, to, today, attendance: data.attendance, logged, index, leaves: data.leaves, holidays: data.holidays, scope }) : []
     const byDate = Object.fromEntries(days.map(d => [d.date, d]))
     const totals = studentTotals(days)
+    const tree = treeTotals(days, activities)
     return (
       <div className="space-y-3" data-testid="report-student">
         <select value={studentId} onChange={e => setStudentId(e.target.value)} aria-label={`Pick a ${mw.one.toLowerCase()}`}
@@ -260,10 +276,19 @@ export default function ClassReportsPage() {
             </div>
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 space-y-2" data-testid="student-activity-totals">
               <p className="text-sm font-semibold">Activities this month</p>
-              {totals.activities.length === 0 ? <p className="text-sm text-gray-500">None recorded.</p> : (
+              {tree.length === 0 ? <p className="text-sm text-gray-500">None recorded.</p> : (
                 <ul className="space-y-1">
-                  {totals.activities.map(a => (
-                    <li key={a.name} className="flex justify-between text-sm"><span className="text-gray-300">{a.name}</span><span className="text-white font-semibold">{a.count}×</span></li>
+                  {tree.map(t => (
+                    <li key={t.id}>
+                      <div className="flex justify-between text-sm"><span className="text-gray-300">{t.name}</span><span className="text-white font-semibold">{t.count}×</span></div>
+                      {t.items.length > 0 && (
+                        <ul className="ml-4 pl-2 border-l border-gray-800">
+                          {t.items.map(i => (
+                            <li key={i.id} className="flex justify-between text-xs"><span className="text-sky-200">{i.name}</span><span className="text-gray-300">{i.count}×</span></li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}
@@ -283,7 +308,7 @@ export default function ClassReportsPage() {
 
   const activityTab = () => {
     const { from, to } = monthBounds(month)
-    const rows = data ? activityReport({ activities, batches: shownBatches, index, from, to }) : []
+    const rows = data ? activityTree({ activities, batches: shownBatches, index, from, to }) : []
     return (
       <div className="space-y-3" data-testid="report-activity">
         {monthNav}
@@ -304,6 +329,16 @@ export default function ClassReportsPage() {
                 ))}
               </ul>
             )}
+            {r.items.length > 0 && (
+              <ul className="mt-1 ml-2 pl-3 border-l border-gray-800 space-y-0.5" data-testid="activity-report-items">
+                {r.items.map(it => (
+                  <li key={it.activity.id} data-name={it.activity.name} className="flex justify-between gap-3 text-xs">
+                    <span className={`truncate ${it.total ? 'text-sky-200' : 'text-gray-500'}`}>{it.activity.name}{it.activity.archived ? ' (archived)' : ''}</span>
+                    <span className="shrink-0 text-gray-400">{it.total}×{it.last ? ` · last ${formatDate(it.last, country, 'dayMonth')}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         ))}
       </div>
@@ -313,7 +348,7 @@ export default function ClassReportsPage() {
   const gradingTabView = () => {
     if (!grading) return <div className="h-32 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse" aria-label="Loading" />
     const gIndex = indexClasses(grading.classes, grading.acts)
-    const rows = readiness({ students: shownStudents, ranks, attendance: grading.attendance, index: gIndex, asOf: today })
+    const rows = readiness({ students: shownStudents, ranks, attendance: grading.attendance, index: gIndex, asOf: today, scope })
     const order = sortActivities(activities)
     return (
       <div className="space-y-2" data-testid="report-grading">
@@ -322,7 +357,9 @@ export default function ClassReportsPage() {
         {rows.map(r => {
           const e = r.eligibility
           const status = e.kind === 'eligible' ? (e.dateMissing ? 'Ready · belt date missing' : 'Ready') : e.kind === 'not-yet' ? toGoText(e.daysToGo) : e.kind === 'top' ? 'Highest belt' : 'Belt not set'
-          const counts = order.map(a => ({ name: a.name, n: r.activities[a.id] || 0 })).filter(x => x.n > 0)
+          const counts = order.filter(a => !a.parent_id).map(a => ({ name: a.name, n: r.activities[a.id] || 0 })).filter(x => x.n > 0)
+          // Items first taught at their current belt = what they're learning for the next grading (0× shows a gap)
+          const syllabus = syllabusFor(activities, r.student.current_rank_id).map(a => ({ name: a.name, n: r.activities[a.id] || 0 }))
           return (
             <div key={r.student.id} data-testid="readiness-row" data-name={r.student.full_name} className="bg-gray-900 border border-gray-800 rounded-2xl px-4 py-3 space-y-1">
               <div className="flex items-center justify-between gap-3">
@@ -335,6 +372,12 @@ export default function ClassReportsPage() {
               <p className="text-[11px] text-gray-500">
                 {'to' in e && e.to ? `Next: ${beltLabel(e.to)} · ` : ''}{r.classes} class{r.classes === 1 ? '' : 'es'} since {r.since ? formatDate(r.since, country, 'medium') : '—'}
               </p>
+              {syllabus.length > 0 && (
+                <p className="text-[11px]" data-testid="readiness-syllabus">
+                  <span className="text-gray-500">For {'to' in e && e.to ? beltLabel(e.to) : 'next belt'}: </span>
+                  {syllabus.map((x, k) => <span key={x.name} className={x.n ? 'text-sky-200' : 'text-amber-300'}>{k ? ' · ' : ''}{x.name} {x.n}×</span>)}
+                </p>
+              )}
               {counts.length > 0 && <p className="text-[11px] text-gray-300">{counts.map(c => `${c.name} ${c.n}`).join(' · ')}</p>}
             </div>
           )

@@ -1,7 +1,7 @@
 // Prints the dojo class report rules (lib/class-reports.ts) for sample inputs. Fails (exit 1) on a wrong answer.
 //   npx tsc scripts/check-class-reports.ts --outDir /tmp/ccr --module commonjs --target es2020 --skipLibCheck && node /tmp/ccr/scripts/check-class-reports.js
 
-import { indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityReport, readiness } from '../lib/class-reports'
+import { indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityReport, readiness, beltOnDate, treeTotals, activityTree, syllabusFor, type BeltScope } from '../lib/class-reports'
 import { absenteesFor } from '../lib/absences'
 import type { AttendanceRow } from '../lib/attendance'
 import type { DojoActivity } from '../lib/dojo-activities'
@@ -97,6 +97,51 @@ const rd = readiness({ students: [
 check('eligible first, no-belt left out', rd.map(r => [r.student.id, r.eligibility.kind]), [['a', 'eligible'], ['b', 'not-yet']])
 check('activity counts since the belt date', rd[0].activities, { wu: 1, ka: 2, old: 1 })
 check('classes since', rd.map(r => r.classes), [2, 0])
+
+console.log('\n5. items by belt')
+// Kata practice with two items: Heian Nidan (Yellow+) and Bassai Dai (Brown+)
+const tActs: DojoActivity[] = [A('ka', 'Kata', 2), A('wu', 'Warm-up', 1),
+  { ...A('hn', 'Heian Nidan', 1), parent_id: 'ka', min_rank_id: 'y' }, { ...A('bd', 'Bassai Dai', 2), parent_id: 'ka', min_rank_id: 'br' }]
+const tRanks = [{ id: 'w', rank_order: 1 }, { id: 'y', rank_order: 2 }, { id: 'br', rank_order: 7 }]
+const tClasses = [{ id: 't1', batch_id: 'j', class_date: '2026-11-16', logged_at: 'x' }, { id: 't2', batch_id: 'j', class_date: '2026-11-18', logged_at: 'x' }]
+const tIndex = indexClasses(tClasses, [
+  { class_id: 't1', activity_id: 'wu', activity_name: 'Warm-up', removed_at: null },
+  { class_id: 't1', activity_id: 'hn', activity_name: 'Heian Nidan', removed_at: null },
+  { class_id: 't1', activity_id: 'bd', activity_name: 'Bassai Dai', removed_at: null },
+  { class_id: 't2', activity_id: 'ka', activity_name: 'Kata', removed_at: null },
+])
+const tAtt = [att('kid', 'j', '2026-11-16'), att('kid', 'j', '2026-11-18'), att('sen', 'j', '2026-11-16')]
+// The kid was White until 17 Nov, Yellow from then; the senior is Brown
+const history = [
+  { student_id: 'kid', rank_id: 'w', achieved_on: '2026-09-01', created_at: '2026-09-01T00:00:00Z' },
+  { student_id: 'kid', rank_id: 'y', achieved_on: '2026-11-17', created_at: '2026-11-17T00:00:00Z' },
+  { student_id: 'kid', rank_id: 'br', achieved_on: '2026-11-10', created_at: '2026-11-10T00:00:00Z', voided_at: 'x' },
+]
+check('belt on the day: before the grading', beltOnDate(history, 'kid', '2026-11-16', 'y'), 'w')
+check('belt on the day: after the grading', beltOnDate(history, 'kid', '2026-11-18', 'y'), 'y')
+check('undone (voided) change ignored', beltOnDate(history, 'kid', '2026-11-12', 'y'), 'w')
+check('before the first record: earliest belt', beltOnDate(history, 'kid', '2026-01-01', 'y'), 'w')
+check('no history: current belt', beltOnDate(history, 'sen', '2026-11-16', 'br'), 'br')
+const scope: BeltScope = { activities: tActs, ranks: tRanks, rankOn: (id, d) => beltOnDate(history, id, d, id === 'sen' ? 'br' : 'y') }
+const kidDays = studentDays({ student: { id: 'kid', full_name: 'Kid', batch_id: 'j' }, homeBatch: juniors, from: '2026-11-16', to: '2026-11-18', today,
+  attendance: tAtt, logged: loggedDays(tAtt, tClasses), index: tIndex, leaves: [], holidays: [], scope })
+check('White kid on 16 Nov: warm-up only (Heian Nidan is Yellow+)', kidDays[0].activities, ['Warm-up'])
+check('Yellow kid on 18 Nov: the category ticked for everyone', kidDays[2].activities, ['Kata'])
+const senDays = studentDays({ student: { id: 'sen', full_name: 'Sen', batch_id: 'j' }, homeBatch: juniors, from: '2026-11-16', to: '2026-11-16', today,
+  attendance: tAtt, logged: loggedDays(tAtt, tClasses), index: tIndex, leaves: [], holidays: [], scope })
+check('Brown senior: both katas', senDays[0].activities, ['Warm-up', 'Heian Nidan', 'Bassai Dai'])
+check('without a scope everything counts (as before)', studentDays({ student: { id: 'kid', full_name: 'Kid', batch_id: 'j' }, homeBatch: juniors, from: '2026-11-16', to: '2026-11-16', today,
+  attendance: tAtt, logged: loggedDays(tAtt, tClasses), index: tIndex, leaves: [], holidays: [] })[0].activities.length, 3)
+check('tree totals roll items into the category', treeTotals(senDays, tActs), [
+  { id: 'wu', name: 'Warm-up', count: 1, items: [] },
+  { id: 'ka', name: 'Kata', count: 1, items: [{ id: 'hn', name: 'Heian Nidan', count: 1 }, { id: 'bd', name: 'Bassai Dai', count: 1 }] }])
+check('kid: Kata counted on 18 Nov only', treeTotals(kidDays, tActs).map(t => [t.name, t.count, t.items.length]), [['Warm-up', 1, 0], ['Kata', 1, 0]])
+const at = activityTree({ activities: tActs, batches, index: tIndex, from: '2026-11-16', to: '2026-11-22' })
+check('activity tree: category rolled up, items under it', at.map(r => [r.activity.name, r.total, r.items.map(i => `${i.activity.name}:${i.total}`)]),
+  [['Warm-up', 1, []], ['Kata', 2, ['Heian Nidan:1', 'Bassai Dai:1']]])
+check("syllabus = items first taught at the student's belt", syllabusFor(tActs, 'y').map(a => a.name), ['Heian Nidan'])
+const rdy = readiness({ students: [{ id: 'kid', full_name: 'Kid', current_rank_id: 'y', rank_achieved_on: '2026-11-01' }], ranks: [], attendance: tAtt, index: tIndex, asOf: today, scope })
+check('readiness counts only what applied on each day', rdy[0].activities, { wu: 1, ka: 1 })
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
