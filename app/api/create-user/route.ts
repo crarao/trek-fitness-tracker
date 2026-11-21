@@ -7,7 +7,7 @@ import { NO_LOGIN_DOMAIN, generatedStudentLogin, splitE164, toE164, normalizeUse
 import { takenUsernames, freeSuggestions, isDuplicateLogin } from '@/lib/username-server'
 import { normalizeEmail, clientEmailProblem, clientEmailAllowed, passwordProblem, authErrorMessage } from '@/lib/login-rules'
 import { GUARDIAN_RELATIONS } from '@/lib/guardian'
-import { isDojo } from '@/lib/labels'
+import { isDojo, isYoga, isClassBased } from '@/lib/labels'
 import { checkPlacement } from '@/lib/placement-server'
 import { gradingOn, validIsoDate } from '@/lib/belts'
 import { checkBelt, addGradeHistory } from '@/lib/belts-server'
@@ -213,6 +213,16 @@ const password: string = childNoPhone ? randomBytes(12).toString('base64url') : 
     return NextResponse.json({ error: authErrorMessage(authError.message) }, { status: 400 })
   }
 
+// Class mode (lib/labels.ts isClassBased): a dojo always (no extra read, unchanged); a yoga studio once it has an active
+// branch. Then every client is PT, so trainers see them on the roll call (attendance RLS: coaches mark PT clients only)
+let classBased = role === 'client' && isDojo(companyRow?.business_type as string | null)
+if (role === 'client' && !classBased && isYoga(companyRow?.business_type as string | null)) {
+  const { count, error: branchCountError } = await supabaseAdmin.from('branches')
+    .select('id', { count: 'exact', head: true }).eq('company_id', company_id).eq('is_archived', false)
+  if (branchCountError) console.error('create-user branch count error:', branchCountError.message)
+  classBased = isClassBased(companyRow?.business_type as string | null, branchCountError ? 0 : count)
+}
+
 const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   id: authData.user.id,
   company_id,
@@ -223,7 +233,7 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   trainer_name: trainer_name || null,
   diet_plan: diet_plan || null,
   // Dojo (business type martial_arts): every student is a PT client, so senseis see them and progress can be shared
-  client_type: role === 'client' && isDojo(companyRow?.business_type as string | null) ? 'pt' : client_type || 'member',
+  client_type: classBased ? 'pt' : client_type || 'member',
   ...clientPlace,
   ...guardian,
   ...clientBasics,

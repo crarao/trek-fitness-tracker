@@ -30,6 +30,27 @@ export function isDojo(value: string | null | undefined): boolean {
   return value === 'martial_arts'
 }
 
+// A yoga studio / teacher (business type 'yoga'). Runs as classes once it has a branch (isClassBased)
+export function isYoga(value: string | null | undefined): boolean {
+  return value === 'yoga'
+}
+
+// Business types that can run as classes (branches, batches, roll call, attendance): martial arts and yoga.
+// Used to decide whether to ask for branches at all; whether the classes screens are on is isClassBased.
+export function canRunClasses(value: string | null | undefined): boolean {
+  return isDojo(value) || isYoga(value)
+}
+
+// Class mode (yoga demo slice, 21 Nov): branches, batches, roll call and attendance instead of plans and sessions.
+// Martial arts: always, exactly what isDojo() returns (DSSKA unchanged). Yoga: only with at least one active branch
+// (super admin adds the first branch = classes on; a yoga teacher without branches keeps plans and sessions).
+// Everything else: never. Karate-only items (parent ticked by default, Student / Sensei, belts, 🥋) stay on isDojo().
+// Check: scripts/check-class-based.ts
+export function isClassBased(value: string | null | undefined, activeBranches: number | null | undefined): boolean {
+  if (isDojo(value)) return true
+  return isYoga(value) && (activeBranches ?? 0) > 0
+}
+
 // The visible word for a client on staff screens. Only words people read: never rename columns, routes, types or variables.
 // New UI must use this instead of hard-coding "Member".
 export function memberWord(value: string | null | undefined): { one: string; many: string } {

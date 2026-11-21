@@ -10,7 +10,7 @@ import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { isDojo } from '@/lib/labels'
+import { canRunClasses } from '@/lib/labels'
 import {
   type DojoActivity, ACTIVITY_COLUMNS, ACTIVITY_NAME_MAX, ACTIVITY_DESCRIPTION_MAX, sortActivities,
   tidyActivityName, activityNameTaken, activityProblem, nextSortOrder, moveActivity,
@@ -58,7 +58,7 @@ export default function ActivitiesPage() {
       setCompanyId(cId)
       setUserId(user.id)
       setCompanyName(co?.name || '')
-      if (!isDojo(co?.business_type)) setNotDojo(true)
+      if (!canRunClasses(co?.business_type)) setNotDojo(true)
       if (res.error) setMissing(true)
       else setList((res.data || []) as DojoActivity[])
       setLoading(false)

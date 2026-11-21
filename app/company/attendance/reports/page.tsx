@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { isDojo, memberWord } from '@/lib/labels'
+import { canRunClasses, memberWord } from '@/lib/labels'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, WEEKDAYS, timeLabel } from '@/lib/batches'
 import { type AttendanceRow, addDays } from '@/lib/attendance'
 import { type StudentLeave, LEAVE_COLUMNS } from '@/lib/leave'
@@ -120,7 +120,7 @@ export default function ClassReportsPage() {
       setMe({ role: profile.role as string, companyId: cId })
       setCountry(normalizeCountry(co?.country))
       setBusinessType(co?.business_type ?? null)
-      if (!isDojo(co?.business_type)) setNotDojo(true)
+      if (!canRunClasses(co?.business_type)) setNotDojo(true)
       if (br.error || ba.error || people.error || act.error) { setMissing(true); setLoading(false); return }
       setBranches(((br.data || []) as Branch[]).filter(b => !b.is_archived))
       setBatches((ba.data || []) as Batch[])

@@ -28,7 +28,7 @@ import { weeklyTotals } from '@/lib/weekly-totals'
 import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { workoutTimeLabel } from '@/lib/today-schedule'
 import { isCoachCompany } from '@/lib/company-type'
-import { memberWord, staffWord, isDojo } from '@/lib/labels'
+import { memberWord, staffWord, isClassBased, canRunClasses } from '@/lib/labels'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
   type StudentGrade, gradeSourceLabel, visibleGradeHistory } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
@@ -505,7 +505,7 @@ export default function ClientDetailPage() {
     if (linkApplied.current || loading || !client) return
     linkApplied.current = true
     // Dojo: no Plans tab (attendance replaces plans later): plan links open Sessions, "today" opens Log session
-    if (isDojo((client as { companies?: { business_type?: string | null } }).companies?.business_type) && (linkTab === 'plans' || linkTab === 'sessions')) {
+    if (isClassBased((client as { companies?: { business_type?: string | null } }).companies?.business_type, branchList.filter(b => !b.is_archived).length) && (linkTab === 'plans' || linkTab === 'sessions')) {
       setActiveTab('sessions')
       if (linkLog === 'today' || linkDay === 'today') openMarkForm(DOJO_LOG_KEY)
       return
@@ -520,7 +520,7 @@ export default function ClientDetailPage() {
     setScrollToPlanId(cur.id)
     const today = planJsonOf(cur)?.days.find(d => d.day === todayWeekday())
     if (today && !today.rest) setCoachOpenDay(today.day)
-  }, [loading, client, plans, linkTab, linkDay])
+  }, [loading, client, plans, linkTab, linkDay, branchList])
 
   // Seconds counter for the AI "working" panel
   useEffect(() => {
@@ -621,9 +621,9 @@ export default function ClientDetailPage() {
           if (history.error) console.error('Belt history error:', history.error)
           setBeltHistory(history.error ? null : visibleGradeHistory((history.data || []) as StudentGrade[]))
         }
-        // Dojo: the gym's branches and batches (for the Profile tab); an error = tables not there yet
+        // Dojo (or yoga): the gym's branches and batches (for the Profile tab); an error = tables not there yet
         const bt = (clientData as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
-        if (clientData?.company_id && isDojo(bt)) {
+        if (clientData?.company_id && canRunClasses(bt)) {
           const [br, ba] = await Promise.all([
             supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', clientData.company_id).order('name'),
             supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', clientData.company_id),
@@ -743,7 +743,8 @@ export default function ClientDetailPage() {
   const coachCompany = isCoachCompany((client as { companies?: { company_type?: string | null } } | null)?.companies)
   // Dojo (business type martial_arts): "Sensei", every student is PT (no PT badge / checkbox), short profile (age, gender, medical, parent)
   const dojoType = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
-  const dojo = isDojo(dojoType)
+  // Class mode (lib/labels.ts isClassBased): every dojo (= isDojo, unchanged), a yoga studio with an active branch
+  const dojo = isClassBased(dojoType, branchList.filter(b => !b.is_archived).length)
   // Dojo with the attendance table: attendance replaces Log session (Sessions tab = Attendance, Progress counts classes)
   const attendanceMode = dojo && attendanceOn
   const sw = staffWord(dojoType)

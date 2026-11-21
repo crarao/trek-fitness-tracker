@@ -17,7 +17,7 @@ import CountryCodePicker from '@/app/country-code-picker'
 import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type LeadSummary } from '@/lib/leads'
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
-import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
+import { memberWord, isDojo, staffWord, ptWord, isClassBased, canRunClasses } from '@/lib/labels'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions, defaultBeltId, beltsById } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
@@ -111,7 +111,8 @@ export default function CompanyAdminPage() {
   const mw = memberWord(businessType)
   // Dojo: "Sensei" for coach logins, every student is a PT client (no PT checkbox / badges), no exercise list
   const sw = staffWord(businessType)
-  const dojo = isDojo(businessType)
+  // Karate-only items (parent fee reminder): martial arts only. Class mode (`dojo` below) also covers yoga with a branch
+  const karate = isDojo(businessType)
   // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
   const [guardianColumns, setGuardianColumns] = useState(false)
   // Branches & batches (dojos, db/2026-11-03-branches-batches.md): on once the tables exist. 'all' | branch id | 'none'
@@ -119,6 +120,9 @@ export default function CompanyAdminPage() {
   const [branchList, setBranchList] = useState<Branch[]>([])
   const [batchList, setBatchList] = useState<Batch[]>([])
   const [branchFilter, setBranchFilter] = useState<string>('all')
+  // Class mode (lib/labels.ts isClassBased): a dojo always (= isDojo, unchanged), a yoga studio once it has an active
+  // branch. Named `dojo` because every dojo screen below follows it; karate-only items use `karate` above
+  const dojo = isClassBased(businessType, branchList.filter(b => !b.is_archived).length)
   // Dojo attendance (#78): today's present rows; null = attendance not set up yet (then sessions as before)
   const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
   // Dojo: branches / batches / attendance have been asked for (until then a skeleton, not the gym dashboard)
@@ -270,7 +274,7 @@ export default function CompanyAdminPage() {
     setUpiId(company?.upi_id || '')
     setCoachCompany(isCoachCompany(company))
     setBusinessType(company?.business_type ?? null)
-    if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
+    if (canRunClasses(company?.business_type)) fetchBatches(profile.company_id)
     if (gradingOn(company)) fetchBeltRanks(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
     if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
@@ -835,7 +839,7 @@ export default function CompanyAdminPage() {
   const todaysBatches = attendanceMode
     ? batchesMeetingOn(batchList.filter(b => !branchById[b.branch_id]?.is_archived), localDateIso())
     : []
-  const dojoPending = dojo && !batchesChecked
+  const dojoPending = canRunClasses(businessType) && !batchesChecked
 
   // The WhatsApp link a row's Remind / Send reminder opens (null = the button opens the member instead).
   // One rule for the table and the dojo home's Fees card, so both open the same message and number.
@@ -865,7 +869,7 @@ export default function CompanyAdminPage() {
     const days = m ? daysLeft(m.end_date) : null
     // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
     // (lib/guardian.ts feeReminder). Otherwise the row's usual Remind / Follow Up message.
-    const fee = dojo && status === 'expiring' && m
+    const fee = karate && status === 'expiring' && m
       ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
           currency: m.currency || currency, dojoName: companyName, country, upiId })
       : null
@@ -1524,7 +1528,7 @@ export default function CompanyAdminPage() {
               </svg>
               <input
                 type="text"
-                placeholder={attendanceMode ? `${mw.one} or parent · name or phone` : isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
+                placeholder={attendanceMode ? `${mw.one}${karate ? ' or parent' : ''} · name or phone` : isDojo(businessType) ? 'Search students by name or phone...' : 'Search by name or phone...'}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full bg-gray-800 text-white rounded-lg pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm placeholder-gray-600"
@@ -1600,7 +1604,7 @@ export default function CompanyAdminPage() {
 
                   // Dojos only: fee due today or within 7 days and a parent WhatsApp number → "Send reminder" to the parent
                   // (lib/guardian.ts feeReminder). Otherwise the row keeps its usual Remind / Follow Up / View button.
-                  const fee = dojo && status === 'expiring' && m
+                  const fee = karate && status === 'expiring' && m
                     ? feeReminder({ student: client, dueDate: m.end_date, daysLeft: days, amount: m.amount_paid,
                         currency: m.currency || currency, dojoName: companyName, country, upiId })
                     : null
@@ -1967,7 +1971,7 @@ export default function CompanyAdminPage() {
                           {row.name}{row.off ? ' (login off)' : ''}
                         </span>
                         <span className="text-xs text-gray-400 shrink-0">
-                          <span className="text-lg font-bold text-white">{row.clients.length}</span> {dojo ? (row.clients.length === 1 ? 'student' : 'students') : `client${row.clients.length === 1 ? '' : 's'}`}
+                          <span className="text-lg font-bold text-white">{row.clients.length}</span> {dojo ? (row.clients.length === 1 ? mw.one.toLowerCase() : mw.many.toLowerCase()) : `client${row.clients.length === 1 ? '' : 's'}`}
                           {row.clients.length > 0 && !attendanceMode && <span className="text-gray-500"> · {trainedToday} trained today</span>}
                         </span>
                       </div>
@@ -2046,7 +2050,7 @@ export default function CompanyAdminPage() {
                     <p className="text-xs text-gray-500"><span className={`font-semibold ${trainedToday.length ? 'text-green-400' : 'text-gray-400'}`}>{trainedToday.length}</span> trained</p>
                   </div>
                   {trainedToday.length === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT'} sessions logged yet today.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? mw.one.toLowerCase() : 'PT'} sessions logged yet today.</p>
                   ) : (
                     <ul className="mt-1 divide-y divide-gray-800">
                       {trainedToday.map(s => {
@@ -2094,7 +2098,7 @@ export default function CompanyAdminPage() {
                   {/* Dojo: no plans (attendance replaces them later), so no plan progress, missed days or "no plan" list */}
                   {!dojo && <>
                   {weekTotals.planned === 0 ? (
-                    <p className="text-sm text-gray-400 mt-1">No {dojo ? 'student' : 'PT client'} has a plan for this week yet.</p>
+                    <p className="text-sm text-gray-400 mt-1">No {dojo ? mw.one.toLowerCase() : 'PT client'} has a plan for this week yet.</p>
                   ) : (
                     <>
                       <div className="flex items-baseline gap-2 mt-1">
@@ -2165,7 +2169,7 @@ export default function CompanyAdminPage() {
             <div className="flex items-baseline justify-between gap-3">
               <button type="button" onClick={() => setShowActivity(!showActivity)} aria-expanded={showActivity}
                 className="flex-1 min-w-0 flex items-baseline justify-between gap-3 text-left">
-                <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} activity <span className="normal-case text-gray-600">({dojo ? 'students' : 'PT'} · today / since Mon)</span></p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} activity <span className="normal-case text-gray-600">({dojo ? mw.many.toLowerCase() : 'PT'} · today / since Mon)</span></p>
                 <span className="flex items-baseline gap-3 shrink-0">
                   {!showActivity && recent && (() => {
                     const coachSessionsToday = coachActivity.reduce((n, a) => n + a.today.sessions, 0)
@@ -2201,7 +2205,7 @@ export default function CompanyAdminPage() {
                           <span className={`text-sm truncate ${a.coach.archived_at ? 'text-gray-500' : 'text-white'}`}>{a.coach.full_name}{a.coach.archived_at ? ' (off)' : ''}</span>
                           <span className="text-xs text-gray-400 shrink-0">
                             <span className="text-white font-semibold">{a.today.sessions}</span> / {a.week.sessions} sessions
-                            {' · '}{a.today.clients.length} / {a.week.clients.length} {dojo ? 'students' : 'clients'}
+                            {' · '}{a.today.clients.length} / {a.week.clients.length} {dojo ? mw.many.toLowerCase() : 'clients'}
                             {a.week.covering > 0 && <span className="text-sky-300"> · {a.today.covering} / {a.week.covering} covering</span>}
                           </span>
                         </button>

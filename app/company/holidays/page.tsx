@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { isDojo } from '@/lib/labels'
+import { canRunClasses } from '@/lib/labels'
 import { type Branch, BRANCH_COLUMNS, WEEKDAYS } from '@/lib/batches'
 import {
   type Holiday, HOLIDAY_COLUMNS, HOLIDAY_NAME_MAX, holidaysShown, canAdd, holidayProblem, tidyHolidayName,
@@ -60,7 +60,7 @@ export default function HolidaysPage() {
       setMe({ id: user.id, companyId: profile.company_id as string })
       setCompanyName(co?.name || '')
       setCountry(normalizeCountry(co?.country))
-      if (!isDojo(co?.business_type)) setNotDojo(true)
+      if (!canRunClasses(co?.business_type)) setNotDojo(true)
       setBranches(((br.data || []) as Branch[]).filter(b => !b.is_archived))
       setLoading(false)
     })()

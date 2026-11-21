@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
 import { thisWeekMonday } from '@/lib/calories'
-import { staffWord, ptWord, isDojo } from '@/lib/labels'
+import { staffWord, ptWord, isClassBased, canRunClasses } from '@/lib/labels'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attendance'
 import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
@@ -99,7 +99,7 @@ export default function CoachHomePage() {
       business_type: profile?.companies?.business_type ?? null,
     })
     // Dojo: the line under each student ("Kokapet · Juniors · Mon/Wed/Fri 6–7 pm"). Errors (no tables yet) = no line
-    if (isDojo(profile?.companies?.business_type)) {
+    if (canRunClasses(profile?.companies?.business_type)) {
       const [pl, br, ba] = await Promise.all([
         supabase.from('profiles').select('id, branch_id, batch_id').eq('role', 'client').eq('client_type', 'pt').is('archived_at', null),
         supabase.from('branches').select(BRANCH_COLUMNS),
@@ -162,7 +162,7 @@ export default function CoachHomePage() {
   const openClient = (id: string) => {
     if (openingId) return
     setOpeningId(id)
-    const dojoHome = isDojo(company?.business_type)
+    const dojoHome = isClassBased(company?.business_type, dojoBranches.filter(b => !b.is_archived).length)
     // Dojo with attendance: the student's Attendance tab; before that, Sessions with Log session open
     router.push(dojoHome ? (attToday ? `/company/client/${id}?tab=sessions` : `/company/client/${id}?tab=sessions&log=today`) : `/company/client/${id}?tab=plans&day=today`)
     setTimeout(() => setOpeningId(prev => (prev === id ? null : prev)), 10000) // safety reset
@@ -190,7 +190,8 @@ export default function CoachHomePage() {
   const bt = company?.business_type
   const sw = staffWord(bt)
   const pw = ptWord(bt)
-  const dojo = isDojo(bt)
+  // Class mode: every dojo (= isDojo, unchanged), a yoga studio with an active branch (lib/labels.ts)
+  const dojo = isClassBased(bt, dojoBranches.filter(b => !b.is_archived).length)
   // Attendance replaces logged sessions for "came today" once the attendance table exists
   const attendanceMode = dojo && attToday !== null
   const cameIds = new Set((attToday || []).map(r => r.profile_id))

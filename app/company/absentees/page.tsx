@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, normalizeCountry, formatDate, localDateIso } from '@/lib/locale'
-import { isDojo, memberWord } from '@/lib/labels'
+import { canRunClasses, memberWord } from '@/lib/labels'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, timeLabel } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS } from '@/lib/attendance'
 import { type StudentLeave, LEAVE_COLUMNS } from '@/lib/leave'
@@ -87,7 +87,7 @@ export default function AbsenteesPage() {
       setCompanyName(co?.name || '')
       setCountry(normalizeCountry(co?.country))
       setBusinessType(co?.business_type ?? null)
-      if (!isDojo(co?.business_type)) setNotDojo(true)
+      if (!canRunClasses(co?.business_type)) setNotDojo(true)
       if ([br, ba, people, att, cls, lv, hol, tpl].some(r => r.error)) {
         ;[br, ba, people, att, cls, lv, hol, tpl].forEach(r => { if (r.error) console.error('Absentees load:', r.error.message) })
         setMissing(true); setLoading(false); return
