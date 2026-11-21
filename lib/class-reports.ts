@@ -189,3 +189,52 @@ export function readiness<S extends ReportStudent & { current_rank_id?: string |
 
 // Eligible first, then not yet, then highest belt / no belt
 const readyOrder = (e: Eligibility) => (e.kind === 'eligible' ? 0 : e.kind === 'not-yet' ? 1 : 2)
+
+// ── 5. One student, month by month ─────────────────────────────────────────────────────────────────────────
+
+export const HISTORY_MONTHS = 6
+
+export type MonthSummary = {
+  month: string          // 'YYYY-MM-01'
+  soFar: boolean         // the current month (counted up to today)
+  came: number
+  of: number             // classes they had: came + absent (holidays, leave, off days and not-logged days left out)
+  absent: number
+  leave: number
+  activities: { name: string; count: number }[]   // times done, most first
+}
+
+const firstOf = (d: string) => `${d.slice(0, 7)}-01`
+const shift = (monthIso: string, n: number) => {
+  const [y, m] = monthIso.split('-').map(Number)
+  const t = new Date(Date.UTC(y, m - 1 + n, 1))
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-01`
+}
+const lastOf = (monthIso: string) => addDays(shift(monthIso, 1), -1)
+
+// The months to show: this month back to the month they joined, at most `months`, newest first
+export function historyMonths(today: string, joined: string | null | undefined, months = HISTORY_MONTHS): string[] {
+  const out: string[] = []
+  const stop = joined ? firstOf(joined.slice(0, 10)) : null
+  for (let i = 0, m = firstOf(today); i < months; i++, m = shift(m, -1)) {
+    if (stop && m < stop) break
+    out.push(m)
+  }
+  return out
+}
+
+// The range to read for those months (first day of the oldest to today)
+export function historyRange(today: string, joined: string | null | undefined, months = HISTORY_MONTHS): { from: string; to: string } {
+  const list = historyMonths(today, joined, months)
+  return { from: list[list.length - 1] ?? firstOf(today), to: today }
+}
+
+// Month by month for one student, with the same day rules as the calendar (studentDays) and the absentee list
+export function monthSummaries(opts: Omit<Parameters<typeof studentDays>[0], 'from' | 'to'> & { months?: number }): MonthSummary[] {
+  return historyMonths(opts.today, opts.student.created_at, opts.months).map(month => {
+    const to = lastOf(month) < opts.today ? lastOf(month) : opts.today
+    const days = studentDays({ ...opts, from: month, to })
+    const t = studentTotals(days)
+    return { month, soFar: to === opts.today && lastOf(month) > opts.today, came: t.came, of: t.came + t.absent, absent: t.absent, leave: t.leave, activities: t.activities }
+  })
+}

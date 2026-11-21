@@ -1,7 +1,7 @@
 // Prints the dojo class report rules (lib/class-reports.ts) for sample inputs. Fails (exit 1) on a wrong answer.
 //   npx tsc scripts/check-class-reports.ts --outDir /tmp/ccr --module commonjs --target es2020 --skipLibCheck && node /tmp/ccr/scripts/check-class-reports.js
 
-import { indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityReport, readiness } from '../lib/class-reports'
+import { indexClasses, loggedDays, dayReport, studentDays, studentTotals, activityReport, readiness, historyMonths, historyRange, monthSummaries } from '../lib/class-reports'
 import { absenteesFor } from '../lib/absences'
 import type { AttendanceRow } from '../lib/attendance'
 import type { DojoActivity } from '../lib/dojo-activities'
@@ -97,6 +97,22 @@ const rd = readiness({ students: [
 check('eligible first, no-belt left out', rd.map(r => [r.student.id, r.eligibility.kind]), [['a', 'eligible'], ['b', 'not-yet']])
 check('activity counts since the belt date', rd[0].activities, { wu: 1, ka: 2, old: 1 })
 check('classes since', rd.map(r => r.classes), [2, 0])
+
+console.log('\n5. month by month')
+check('6 months, newest first', historyMonths(today, '2025-01-10'), ['2026-11-01', '2026-10-01', '2026-09-01', '2026-08-01', '2026-07-01', '2026-06-01'])
+check('stops at the month they joined', historyMonths(today, '2026-10-20T08:00:00Z'), ['2026-11-01', '2026-10-01'])
+check('no join date: 6 months', historyMonths(today, null).length, 6)
+check('over the year end', historyMonths('2026-02-03', '2025-01-01'), ['2026-02-01', '2026-01-01', '2025-12-01', '2025-11-01', '2025-10-01', '2025-09-01'])
+check('range to read', historyRange(today, '2026-10-20'), { from: '2026-10-01', to: today })
+// B (Juniors, joined 1 Nov): came 16 Nov, absent 18 Nov (untapped, class logged); October before joining
+const ms = monthSummaries({ student: { id: 'b', full_name: 'B', batch_id: 'j', branch_id: 'kok', created_at: '2026-10-05T00:00:00Z' }, homeBatch: juniors,
+  today, attendance, logged, index, leaves: [{ id: 'l', profile_id: 'b', from_date: '2026-11-11', to_date: '2026-11-11', note: null, cancelled_at: null }], holidays: [] })
+check('months listed', ms.map(m => m.month), ['2026-11-01', '2026-10-01'])
+check('this month (so far): came / of / absent / leave', [ms[0].soFar, ms[0].came, ms[0].of, ms[0].absent, ms[0].leave], [true, 1, 2, 1, 1])
+check('activities of the month', ms[0].activities, [{ name: 'Kata', count: 1 }, { name: 'Warm-up', count: 1 }])
+check('a month with no logged classes: nothing counted', [ms[1].soFar, ms[1].came, ms[1].of], [false, 0, 0])
+check('same as the calendar for the month', studentTotals(studentDays({ student: { id: 'b', full_name: 'B', batch_id: 'j', branch_id: 'kok', created_at: '2026-10-05' }, homeBatch: juniors,
+  from: '2026-11-01', to: today, today, attendance, logged, index, leaves: [{ id: 'l', profile_id: 'b', from_date: '2026-11-11', to_date: '2026-11-11', note: null, cancelled_at: null }], holidays: [] })).absent, ms[0].absent)
 
 console.log(failed ? `\n${failed} check(s) FAILED` : '\nAll checks passed')
 if (failed) process.exit(1)
