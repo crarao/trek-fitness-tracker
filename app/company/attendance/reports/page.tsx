@@ -11,6 +11,7 @@
 
 import PageNav from '@/app/page-nav'
 import BeltChip from '@/app/belt-chip'
+import StudentMonths from '@/app/student-months'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -90,6 +91,8 @@ export default function ClassReportsPage() {
   const [day, setDay] = useState(today)
   const [month, setMonth] = useState(shiftMonth(today, 0))
   const [studentId, setStudentId] = useState('')
+  // By student: the month calendar or the last 6 months (21 Nov)
+  const [studentView, setStudentView] = useState<'calendar' | 'months'>('calendar')
   const [data, setData] = useState<RangeData | null>(null)
   const [dataLoading, setDataLoading] = useState(false)
   const [grading, setGrading] = useState<RangeData | null>(null)
@@ -124,6 +127,13 @@ export default function ClassReportsPage() {
       setStudents((people.data || []) as Student[])
       setActivities((act.data || []) as DojoActivity[])
       setRanks(rk && !rk.error ? (rk.data || []) as BeltRank[] : [])
+      // Opened from a student's "Month by month" (?student=<id>&month=YYYY-MM-01): that student's month calendar
+      const q = new URLSearchParams(window.location.search)
+      const qs = q.get('student'), qm = q.get('month')
+      if (qs) {
+        setTab('student'); setStudentId(qs)
+        if (qm && /^\d{4}-\d{2}-01$/.test(qm) && qm <= shiftMonth(localDateIso(), 0)) setMonth(qm)
+      }
       setLoading(false)
     })()
     return () => { live = false }
@@ -227,8 +237,22 @@ export default function ClassReportsPage() {
           <option value="">Pick a {mw.one.toLowerCase()}…</option>
           {shownStudents.map(x => <option key={x.id} value={x.id}>{x.full_name}{batchOf(x.batch_id) ? ` · ${batchOf(x.batch_id)!.name}` : ''}</option>)}
         </select>
-        {monthNav}
         {s && (
+          <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1" role="tablist" aria-label="View">
+            {(['calendar', 'months'] as const).map(v => (
+              <button key={v} type="button" role="tab" aria-selected={studentView === v} onClick={() => setStudentView(v)}
+                className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium ${studentView === v ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                {v === 'calendar' ? 'Calendar' : 'Months'}
+              </button>
+            ))}
+          </div>
+        )}
+        {s && studentView === 'months' && me && (
+          <StudentMonths companyId={me.companyId} student={s} homeBatch={batchOf(s.batch_id)} country={country}
+            onOpenMonth={m => { setMonth(m); setStudentView('calendar') }} />
+        )}
+        {(!s || studentView === 'calendar') && monthNav}
+        {s && studentView === 'calendar' && (
           <>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="bg-gray-900 border border-gray-800 rounded-xl py-2"><p className="text-xl font-bold text-green-400" data-testid="student-came">{totals.came}</p><p className="text-[11px] text-gray-500">came</p></div>
