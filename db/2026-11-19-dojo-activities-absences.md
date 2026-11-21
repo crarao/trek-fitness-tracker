@@ -1,4 +1,4 @@
-# 19 Nov 2026 — Dojo class activities, leave, holidays, absence messages, 7-day lock — ✅ RUN ON DEV 19 NOV, not yet on Mumbai
+# 19 Nov 2026 — Dojo class activities, leave, holidays, absence messages, 7-day lock — ✅ RUN ON DEV 19 NOV AND MUMBAI 21 NOV — do not run again
 
 > **1. Run in: Dev — project `nnxrmaiinbmxfwzefbwx`**
 > SQL Editor: https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
@@ -469,4 +469,4 @@ No undo SQL is written here (CLAUDE.md Rule #1). An undo would remove the six ta
 
 - Checked by Claude 19 Nov on a local Postgres 16 with stand-ins for auth and the existing tables: Steps 1–3 ran clean, 27 role tests matched (lock, owner-only unlock, cross-gym, holidays per branch, no delete)
 - Dev: ✅ Steps 1–3 run by Anand 19 Nov, all checks passed
-- Mumbai: not run yet
+- Mumbai: ✅ Step 1, Step 2 (slug `dsska`, 13 rows) and Step 3 (all checks passed) run by Anand 21 Nov, before `dev` was merged into `main`
