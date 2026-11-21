@@ -1,4 +1,4 @@
-# 21 Nov 2026 — Yoga demo slice: activity categories + the yoga starter list — NOT RUN YET
+# 21 Nov 2026 — Yoga demo slice: activity categories + the yoga starter list — STEP 1 RUN ON DEV 21 NOV
 
 > **1. Run in: Dev — project `nnxrmaiinbmxfwzefbwx`**
 > SQL Editor: https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
@@ -86,5 +86,5 @@ where c.business_type = 'yoga' group by 1, 2 order by 1, 2;   -- per slug: Asana
 
 ## Run log
 
-- Dev: not run yet
+- Dev: Step 1 run 21 Nov 2026 (by Anand). Step 2 not needed on dev (the seed script adds the list)
 - Mumbai: not run
