@@ -1,4 +1,4 @@
-# 21 Nov 2026 — Yoga demo data (QA Yoga Solo + QA Yoga Studio) — DEV ONLY — NOT RUN YET
+# 21 Nov 2026 — Yoga demo data (QA Yoga Solo + QA Yoga Studio) — DEV ONLY — RUN ON DEV 21 NOV
 
 > **1. Run in: Dev — project `nnxrmaiinbmxfwzefbwx`**
 > SQL Editor: https://supabase.com/dashboard/project/nnxrmaiinbmxfwzefbwx/sql/new
@@ -206,5 +206,5 @@ from public.companies c where c.slug in ('qayogasolo', 'qayogastudio');
 
 ## Run log
 
-- Dev: not run yet
+- Dev: run 21 Nov 2026 (by Anand), after creating both companies in Super Admin
 - Mumbai: never
