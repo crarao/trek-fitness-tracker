@@ -5,6 +5,7 @@
 //   QA Yoga Studio (qayogastudio) gym + yoga + 2 branches, 5 batches, 2 trainers, 16 members
 //
 // Before: Step 1 of db/2026-11-21-activity-category.md on dev (the category column).
+// No computer? db/2026-11-21-yoga-demo-seed.md does the same in the dev SQL Editor (logins made in Super Admin).
 // Run from the repo root with the DEV .env.local (NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY):
 //   npx tsc scripts/seed-yoga-demo.ts --outDir /tmp/yoga --module commonjs --target es2020 --skipLibCheck --esModuleInterop
 //   NODE_PATH=$PWD/node_modules node /tmp/yoga/scripts/seed-yoga-demo.js
