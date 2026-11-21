@@ -19,7 +19,11 @@ import BeltChip from '@/app/belt-chip'
 import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, type RosterStudent, type DayEntry, ATTENDANCE_COLUMNS, dayBoard, tapRow, addDays, elsewhereText } from '@/lib/attendance'
 import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
-import { type BatchClass, BATCH_CLASS_COLUMNS, dayLocked, olderThanLock, saveErrorText, LOCK_DAYS } from '@/lib/dojo-activities'
+import {
+  type BatchClass, type DojoActivity, type ClassActivity, BATCH_CLASS_COLUMNS, ACTIVITY_COLUMNS, CLASS_ACTIVITY_COLUMNS,
+  dayLocked, olderThanLock, saveErrorText, LOCK_DAYS, checklist,
+} from '@/lib/dojo-activities'
+import { saveClassLogged } from '@/lib/class-save'
 
 type Student = RosterStudent & { branch_id: string | null }
 
@@ -56,6 +60,11 @@ function TodayAttendance() {
   const [confirmFor, setConfirmFor] = useState<{ batch: Batch; entry: DayEntry } | null>(null)
   // batch id → that batch's class row on this day; null = the lock table isn't there yet
   const [classByBatch, setClassByBatch] = useState<Record<string, BatchClass> | null>(null)
+  // Class activities (21 Nov): the gym's list (null = table missing) and each class's saved ticks. A student marked
+  // here saves the class with its pre-ticked activities, like the roll call; each batch shows a read-only line.
+  const [activities, setActivities] = useState<DojoActivity[] | null>(null)
+  const [actsByClass, setActsByClass] = useState<Record<string, ClassActivity[]>>({})
+  const savingClass = useRef<Record<string, Promise<void>>>({})
   // Holidays on this day (any branch); null = the table isn't there yet
   const [holidays, setHolidays] = useState<Holiday[] | null>(null)
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null)
@@ -80,7 +89,7 @@ function TodayAttendance() {
       if (!profile?.company_id) { router.push('/login'); return }
       const co = (profile as unknown as { companies: { country?: string | null; business_type?: string | null; grading_enabled?: boolean | null } | null }).companies
       const cId = profile.company_id as string
-      const [br, ba, people, att, staffList, ranks, classes, hol] = await Promise.all([
+      const [br, ba, people, att, staffList, ranks, classes, hol, acts] = await Promise.all([
         supabase.from('branches').select(BRANCH_COLUMNS).eq('company_id', cId).order('name'),
         supabase.from('batches').select(BATCH_COLUMNS).eq('company_id', cId),
         // Database rules give a sensei the gym's PT students (every dojo student); owners all clients
@@ -94,6 +103,7 @@ function TodayAttendance() {
         // An error = the table isn't there yet: no lock shown (and the database doesn't lock either)
         supabase.from('batch_classes').select(BATCH_CLASS_COLUMNS).eq('company_id', cId).eq('class_date', date),
         supabase.from('holidays').select(HOLIDAY_COLUMNS).eq('company_id', cId).eq('holiday_date', date).is('removed_at', null),
+        supabase.from('dojo_activities').select(ACTIVITY_COLUMNS).eq('company_id', cId),
       ])
       if (!live) return
       setMe({ id: user.id, role: profile.role as string, companyId: cId })
@@ -110,6 +120,16 @@ function TodayAttendance() {
       setBeltById(beltsById((ranks && !ranks.error ? ranks.data || [] : []) as BeltRank[]))
       setHolidays(hol.error ? null : (hol.data || []) as Holiday[])
       setClassByBatch(classes.error ? null : Object.fromEntries(((classes.data || []) as BatchClass[]).map(c => [c.batch_id, c])))
+      if (!acts.error && !classes.error) {
+        const ids = ((classes.data || []) as BatchClass[]).map(c => c.id)
+        const ca = ids.length ? await supabase.from('batch_class_activities').select(CLASS_ACTIVITY_COLUMNS).in('class_id', ids) : null
+        if (!live) return
+        if (ca?.error) console.error('Class activities error:', ca.error)
+        const by: Record<string, ClassActivity[]> = {}
+        for (const r of (ca && !ca.error ? ca.data || [] : []) as ClassActivity[]) (by[r.class_id] ||= []).push(r)
+        setActivities((acts.data || []) as DojoActivity[])
+        setActsByClass(by)
+      } else setActivities(null)
       setLoading(false)
     })()
     return () => { live = false }
@@ -160,6 +180,33 @@ function TodayAttendance() {
       return
     }
     setRows(rs => [...rs.filter(other), data[0] as AttendanceRow])
+    // The first mark in a class saves it with its pre-ticked activities (as the roll call does)
+    await ensureClass(batch.id)
+  }
+
+  // ── Class activities (read-only here; changed on the batch's roll call) ──
+  const checklistOf = (batchId: string) => {
+    if (!activities) return null
+    const cls = classByBatch?.[batchId] ?? null
+    return checklist({ activities, cls, saved: cls ? actsByClass[cls.id] || [] : [] })
+  }
+  const ensureClass = (batchId: string): Promise<void> => {
+    const cl = checklistOf(batchId)
+    if (!me || !cl || cl.logged || !activities?.length) return Promise.resolve()
+    if (batchId in savingClass.current) return savingClass.current[batchId]
+    const existing = classByBatch?.[batchId] ?? null
+    const run = (async () => {
+      const res = await saveClassLogged(supabase, {
+        companyId: me.companyId, batchId, date, me: me.id, existing, items: cl.items,
+        saved: existing ? actsByClass[existing.id] || [] : [],
+      })
+      if ('error' in res) { showToast(saveErrorText(res.error), 'error'); return }
+      setClassByBatch(m => ({ ...(m || {}), [batchId]: res.cls }))
+      setActsByClass(m => ({ ...m, [res.cls.id]: res.acts }))
+    })()
+    savingClass.current[batchId] = run
+    run.finally(() => { delete savingClass.current[batchId] })
+    return run
   }
 
   // Marking someone who already came to another batch today asks first
@@ -278,6 +325,23 @@ function TodayAttendance() {
                 {holidayOf(g.batch.id) && (
                   <p className="px-4 py-2 text-xs text-amber-200 bg-amber-950/40 border-b border-gray-800">{noClassesText(holidayOf(g.batch.id)!)}</p>
                 )}
+                {!holidayOf(g.batch.id) && (() => {
+                  const cl = checklistOf(g.batch.id)
+                  if (!cl || !cl.items.length) return null
+                  const ticked = cl.items.filter(i => i.ticked).map(i => i.name)
+                  return (
+                    <div data-testid="today-activities" className="flex items-start gap-3 px-4 py-2 border-b border-gray-800 text-xs">
+                      <p className="flex-1 min-w-0 text-gray-400">
+                        <span className="text-gray-500">{cl.logged ? 'Activities: ' : 'Pre-ticked (saved with the first mark): '}</span>
+                        <span className={cl.logged ? 'text-orange-100' : 'text-gray-400'}>{ticked.length ? ticked.join(', ') : 'none ticked'}</span>
+                      </p>
+                      {!closed(g.batch.id) && (
+                        <button type="button" data-nav onClick={() => router.push(`/company/attendance/${g.batch.id}${date === today ? '' : `?date=${date}`}`)}
+                          className="shrink-0 text-orange-400 hover:text-orange-300">Edit activities →</button>
+                      )}
+                    </div>
+                  )
+                })()}
                 {g.entries.length === 0 ? (
                   <p className="px-4 py-3 text-sm text-gray-500">No {mw.many.toLowerCase()} in this batch yet.</p>
                 ) : (
