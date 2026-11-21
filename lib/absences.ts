@@ -81,6 +81,13 @@ export function absenteesFor<B extends AbsBatch>(opts: {
 export const PLACEHOLDERS = ['{child_name}', '{date}', '{batch_time}', '{dojo_name}'] as const
 export const DEFAULT_ABSENCE_BODY =
   "{child_name} did not attend today's karate class ({date}, {batch_time} batch) at {dojo_name}. Please let us know if all is well."
+// Yoga studios (21 Nov): the same placeholders, no "karate class"
+export const YOGA_ABSENCE_BODY =
+  "We missed {child_name} at today's yoga class ({date}, {batch_time} batch) at {dojo_name}. Hope all is well, see you at the next class."
+// The standard message for the business type: yoga gets its own, everyone else (dojos) exactly DEFAULT_ABSENCE_BODY
+export function defaultAbsenceBody(businessType?: string | null): string {
+  return businessType === 'yoga' ? YOGA_ABSENCE_BODY : DEFAULT_ABSENCE_BODY
+}
 export const TEMPLATE_MAX = 1000
 
 export function fillTemplate(body: string, vars: Record<string, string>): string {
@@ -110,6 +117,7 @@ export function absenceMessage(opts: {
   companyName: string
   body?: string | null              // the gym's template; empty = the standard one
   country: Country | null
+  businessType?: string | null      // picks the standard message when the gym has none (yoga / dojo)
 }): { text: string; toPhone: string | null; toParent: boolean; toLabel: string } {
   const { student, country } = opts
   const to = pickRecipient(student, raw => waDigits(raw, country))
@@ -121,7 +129,7 @@ export function absenceMessage(opts: {
     batch_time: timeLabel(opts.batch?.start_time, country) || 'class',
     dojo_name: opts.companyName,
   }
-  const body = (opts.body || '').trim() || DEFAULT_ABSENCE_BODY
+  const body = (opts.body || '').trim() || defaultAbsenceBody(opts.businessType)
   const relation = (student.guardian_relation || '').trim()
   const parent = (student.guardian_name || '').trim()
   const toLabel = to.toParent ? (relation && parent ? `${relation} (${parent})` : relation || parent || 'Parent') : student.full_name

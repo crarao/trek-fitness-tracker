@@ -17,8 +17,53 @@ export type DojoActivity = {
   sort_order: number
   is_default: boolean
   is_archived: boolean
+  category?: string | null   // db/2026-11-21-activity-category.md (yoga: Asana, Pranayama…); null / missing = none
 }
-export const ACTIVITY_COLUMNS = 'id, company_id, name, description, sort_order, is_default, is_archived'
+// * so category is read once db/2026-11-21-activity-category.md has run, and nothing breaks before it
+export const ACTIVITY_COLUMNS = '*'
+
+// The yoga categories offered on the activities page (free text in the database; null = no category)
+export const YOGA_CATEGORIES = ['Asana', 'Pranayama', 'Meditation', 'Yoga Nidra'] as const
+export const CATEGORY_MAX = 40
+
+// The yoga starter list (scripts/seed-yoga-demo.ts; same rows as Step 2 of db/2026-11-21-activity-category.md)
+export const YOGA_STARTER_ACTIVITIES: { name: string; description: string | null; category: string; is_default: boolean }[] = [
+  { name: 'Surya Namaskar', description: 'Sun salutation rounds', category: 'Asana', is_default: true },
+  { name: 'Standing poses', description: 'Tadasana, Trikonasana, Virabhadrasana', category: 'Asana', is_default: false },
+  { name: 'Balancing poses', description: 'Vrikshasana, Garudasana', category: 'Asana', is_default: false },
+  { name: 'Seated & forward bends', description: 'Paschimottanasana, Baddha Konasana', category: 'Asana', is_default: false },
+  { name: 'Backbends', description: 'Bhujangasana, Dhanurasana, Ustrasana', category: 'Asana', is_default: false },
+  { name: 'Inversions', description: 'Sarvangasana, Halasana', category: 'Asana', is_default: false },
+  { name: 'Anulom Vilom', description: 'Alternate nostril breathing', category: 'Pranayama', is_default: false },
+  { name: 'Kapalbhati', description: 'Skull-shining breath', category: 'Pranayama', is_default: false },
+  { name: 'Bhastrika', description: 'Bellows breath', category: 'Pranayama', is_default: false },
+  { name: 'Bhramari', description: 'Humming bee breath', category: 'Pranayama', is_default: false },
+  { name: 'Ujjayi', description: 'Ocean breath', category: 'Pranayama', is_default: false },
+  { name: 'Breath awareness', description: null, category: 'Meditation', is_default: false },
+  { name: 'Om chanting', description: null, category: 'Meditation', is_default: false },
+  { name: 'Trataka', description: 'Candle gazing', category: 'Meditation', is_default: false },
+  { name: 'Guided meditation', description: null, category: 'Meditation', is_default: false },
+  { name: 'Shavasana', description: 'Final relaxation', category: 'Yoga Nidra', is_default: true },
+  { name: 'Body scan', description: null, category: 'Yoga Nidra', is_default: false },
+  { name: 'Sankalpa', description: 'Resolve', category: 'Yoga Nidra', is_default: false },
+  { name: 'Guided Yoga Nidra', description: null, category: 'Yoga Nidra', is_default: false },
+]
+
+// Items (already in list order) grouped by category, groups in order of first appearance, uncategorised last.
+// No item with a category = one group with category null: the screens then draw exactly the old flat list.
+export function groupByCategory<T extends { category?: string | null }>(items: T[]): { category: string | null; items: T[] }[] {
+  const named = new Map<string, T[]>()
+  const none: T[] = []
+  for (const i of items) {
+    const c = (i.category || '').trim()
+    if (!c) { none.push(i); continue }
+    named.set(c, [...(named.get(c) || []), i])
+  }
+  if (!named.size) return [{ category: null, items }]
+  const groups: { category: string | null; items: T[] }[] = [...named].map(([category, list]) => ({ category, items: list }))
+  if (none.length) groups.push({ category: null, items: none })
+  return groups
+}
 
 export type BatchClass = {
   id: string
@@ -86,7 +131,7 @@ export function moveActivity(list: DojoActivity[], id: string, dir: -1 | 1): { i
 
 // ── The class checklist ─────────────────────────────────────────────────────────────────────────────────────
 
-export type ChecklistItem = { id: string; name: string; description: string | null; ticked: boolean; archived: boolean }
+export type ChecklistItem = { id: string; name: string; description: string | null; ticked: boolean; archived: boolean; category?: string | null }
 
 // What the roll call shows. No class row yet (or a row made only to unlock the day, logged_at null, with no
 // activities): the active list with the defaults pre-ticked (not saved until the class is saved). A logged class:
@@ -104,7 +149,8 @@ export function checklist(opts: {
     const row = byId.get(a.id)
     const ticked = logged ? !!row && !row.removed_at : a.is_default
     if (a.is_archived && !(row && !row.removed_at)) continue
-    items.push({ id: a.id, name: a.is_archived && row ? row.activity_name : a.name, description: a.description, ticked, archived: a.is_archived })
+    items.push({ id: a.id, name: a.is_archived && row ? row.activity_name : a.name, description: a.description, ticked, archived: a.is_archived,
+      ...(a.category ? { category: a.category } : {}) })
   }
   // A ticked activity whose list row we can't see any more (shouldn't happen: activities are never deleted)
   for (const r of opts.saved) {

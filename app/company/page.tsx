@@ -1253,7 +1253,7 @@ export default function CompanyAdminPage() {
             </button>
             {showCoaches && (
               <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType)} and plans only: no payments, leads or settings.</p>
+                <p className="text-xs text-gray-500 mb-3">{sw.many} see {ptWord(businessType, dojo)} and plans only: no payments, leads or settings.</p>
                 {coaches.length === 0 ? (
                   <p className="text-sm text-gray-400 mb-3">No {sw.many.toLowerCase()} yet.</p>
                 ) : (
@@ -1954,7 +1954,7 @@ export default function CompanyAdminPage() {
         <div className="px-4 sm:px-8 pt-3">
           <div className="bg-gray-900 border border-purple-900/50 rounded-2xl p-4">
             <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} assignments <span className="normal-case text-gray-600">({ptWord(businessType)} by primary {sw.one.toLowerCase()})</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">{sw.one} assignments <span className="normal-case text-gray-600">({ptWord(businessType, dojo)} by primary {sw.one.toLowerCase()})</span></p>
               <p className="text-xs text-gray-500 shrink-0">{ptCount - unassigned.length} of {ptCount} assigned</p>
             </div>
             <ul className="mt-2 divide-y divide-gray-800">
@@ -2025,7 +2025,7 @@ export default function CompanyAdminPage() {
             {/* Collapsed by default: a one-line summary; tap for Today / This week */}
             <button type="button" onClick={() => setShowTraining(!showTraining)} aria-expanded={showTraining}
               className="w-full flex items-baseline justify-between gap-3 text-left">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">({ptWord(businessType)}) · {formatDate(new Date(), country, 'weekday')}</span></p>
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Training <span className="normal-case text-gray-600">({ptWord(businessType, dojo)}) · {formatDate(new Date(), country, 'weekday')}</span></p>
               <span className="flex items-baseline gap-3 shrink-0">
                 {!showTraining && recent && (
                   <span className="text-xs text-gray-500">
@@ -2108,7 +2108,7 @@ export default function CompanyAdminPage() {
                       <div className="mt-2 h-2 rounded-full bg-gray-800 overflow-hidden" role="progressbar" aria-valuenow={pct(weekTotals) ?? 0} aria-valuemin={0} aria-valuemax={100}>
                         <div className="h-full bg-purple-500 rounded-full" style={{ width: `${pct(weekTotals)}%` }} />
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} {ptWord(businessType)} have a plan this week</p>
+                      <p className="text-xs text-gray-500 mt-2">{withPlanCount} of {ptCount} {ptWord(businessType, dojo)} have a plan this week</p>
                     </>
                   )}
                   {missedWeek.length > 0 && (

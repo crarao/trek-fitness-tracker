@@ -10,16 +10,17 @@ import PageNav from '@/app/page-nav'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { canRunClasses } from '@/lib/labels'
+import { canRunClasses, isYoga } from '@/lib/labels'
 import {
   type DojoActivity, ACTIVITY_COLUMNS, ACTIVITY_NAME_MAX, ACTIVITY_DESCRIPTION_MAX, sortActivities,
   tidyActivityName, activityNameTaken, activityProblem, nextSortOrder, moveActivity,
+  YOGA_CATEGORIES, CATEGORY_MAX, groupByCategory,
 } from '@/lib/dojo-activities'
 
 const INPUT = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-500'
 const BTN = 'text-xs text-gray-300 border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg disabled:opacity-40'
 
-type Draft = { id: string | null; name: string; description: string; is_default: boolean }
+type Draft = { id: string | null; name: string; description: string; is_default: boolean; category: string }
 
 export default function ActivitiesPage() {
   const router = useRouter()
@@ -30,6 +31,9 @@ export default function ActivitiesPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [companyName, setCompanyName] = useState('')
   const [list, setList] = useState<DojoActivity[]>([])
+  // Categories (db/2026-11-21-activity-category.md): the column exists, and the box shows for yoga or once one is used
+  const [categoryColumn, setCategoryColumn] = useState(false)
+  const [yoga, setYoga] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -61,6 +65,13 @@ export default function ActivitiesPage() {
       if (!canRunClasses(co?.business_type)) setNotDojo(true)
       if (res.error) setMissing(true)
       else setList((res.data || []) as DojoActivity[])
+      setYoga(isYoga(co?.business_type))
+      if (!res.error && res.data?.length) setCategoryColumn('category' in (res.data[0] as object))
+      else if (!res.error && isYoga(co?.business_type)) {
+        // Empty list: one light probe for the column (yoga only)
+        const probe = await supabase.from('dojo_activities').select('category').limit(1)
+        if (live) setCategoryColumn(!probe.error)
+      }
       setLoading(false)
     })()
     return () => { live = false }
@@ -76,7 +87,8 @@ export default function ActivitiesPage() {
     if (activityNameTaken(list, name, draft.id ?? undefined)) { setError('There is already an activity with this name (maybe archived).'); return }
     setSaving(true)
     setError('')
-    const fields = { name, description: draft.description.trim() || null, is_default: draft.is_default }
+    const fields = { name, description: draft.description.trim() || null, is_default: draft.is_default,
+      ...(showCategory ? { category: draft.category.trim().slice(0, CATEGORY_MAX) || null } : {}) }
     const { data, error } = draft.id
       ? await supabase.from('dojo_activities').update(fields).eq('id', draft.id).eq('company_id', companyId).select(ACTIVITY_COLUMNS)
       : await supabase.from('dojo_activities')
@@ -115,10 +127,16 @@ export default function ActivitiesPage() {
 
   const form = (d: Draft) => (
     <div className="space-y-2 bg-gray-950/60 border border-gray-800 rounded-xl p-3">
-      <input value={d.name} maxLength={ACTIVITY_NAME_MAX} autoFocus placeholder="Activity name (e.g. Kata practice)" aria-label="Activity name"
+      <input value={d.name} maxLength={ACTIVITY_NAME_MAX} autoFocus placeholder={yoga ? "Activity name (e.g. Surya Namaskar)" : "Activity name (e.g. Kata practice)"} aria-label="Activity name"
         onChange={e => setDraft({ ...d, name: e.target.value })} className={INPUT} />
       <input value={d.description} maxLength={ACTIVITY_DESCRIPTION_MAX} placeholder="Description (optional)" aria-label="Description"
         onChange={e => setDraft({ ...d, description: e.target.value })} className={INPUT} />
+      {showCategory && (
+        <select value={d.category} aria-label="Category" onChange={e => setDraft({ ...d, category: e.target.value })} className={INPUT}>
+          <option value="">No category</option>
+          {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      )}
       <label className="flex items-center gap-2 text-sm text-gray-300">
         <input type="checkbox" checked={d.is_default} onChange={e => setDraft({ ...d, is_default: e.target.checked })} className="w-4 h-4 accent-orange-500" />
         Pre-tick on every new class
@@ -137,6 +155,8 @@ export default function ActivitiesPage() {
 
   const active = sortActivities(list.filter(a => !a.is_archived))
   const archived = sortActivities(list.filter(a => a.is_archived))
+  const showCategory = categoryColumn && (yoga || list.some(a => a.category))
+  const categoryOptions = [...new Set([...(yoga ? YOGA_CATEGORIES : []), ...list.map(a => (a.category || '').trim()).filter(Boolean)])]
 
   const row = (a: DojoActivity, i: number) => (
     <li key={a.id} data-testid="activity-row" data-name={a.name}>
@@ -161,7 +181,7 @@ export default function ActivitiesPage() {
                 <button type="button" onClick={() => patch(a, { is_archived: false }, `${a.name} restored`)} className={BTN}>Restore</button>
               ) : (
                 <>
-                  <button type="button" onClick={() => { setError(''); setDraft({ id: a.id, name: a.name, description: a.description || '', is_default: a.is_default }) }} className={BTN}>Edit</button>
+                  <button type="button" onClick={() => { setError(''); setDraft({ id: a.id, name: a.name, description: a.description || '', is_default: a.is_default, category: a.category || '' }) }} className={BTN}>Edit</button>
                   <button type="button" aria-pressed={a.is_default}
                     onClick={() => patch(a, { is_default: !a.is_default }, a.is_default ? `${a.name}: not pre-ticked` : `${a.name}: pre-ticked`)}
                     className={BTN}>{a.is_default ? 'Stop pre-ticking' : 'Pre-tick'}</button>
@@ -210,9 +230,17 @@ export default function ActivitiesPage() {
               Pre-ticked activities start ticked on every new class.
             </p>
             {active.length === 0 && !draft && <p className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-sm text-gray-400">No activities yet.</p>}
-            <ul className="space-y-2">{active.map(row)}</ul>
+            {/* Grouped by category once any activity has one; else the flat list as before */}
+            {groupByCategory(active).map(g => g.category === null && !active.some(a => a.category)
+              ? <ul key="-" className="space-y-2">{g.items.map(a => row(a, active.indexOf(a)))}</ul>
+              : (
+                <div key={g.category ?? '-'} className="space-y-2">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">{g.category ?? 'Other'}</p>
+                  <ul className="space-y-2">{g.items.map(a => row(a, active.indexOf(a)))}</ul>
+                </div>
+              ))}
             {draft && !draft.id ? form(draft) : (
-              <button type="button" onClick={() => { setError(''); setDraft({ id: null, name: '', description: '', is_default: false }) }}
+              <button type="button" onClick={() => { setError(''); setDraft({ id: null, name: '', description: '', is_default: false, category: '' }) }}
                 className="w-full text-sm text-orange-400 hover:text-orange-300 border border-dashed border-gray-700 hover:border-orange-700 rounded-xl py-2.5">
                 + Add activity
               </button>

@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { type Country, formatDate, localDateIso } from '@/lib/locale'
 import { formatMoney, formatMoneyByCurrency } from '@/lib/currency'
-import { memberWord, staffWord } from '@/lib/labels'
+import { memberWord, staffWord, isDojo } from '@/lib/labels'
 import { type Branch, type Batch, timeLabel } from '@/lib/batches'
 import { type AttendanceRow } from '@/lib/attendance'
 import { type Holiday, HOLIDAY_COLUMNS, holidayFor } from '@/lib/holidays'
@@ -83,6 +83,8 @@ const linkBtn = 'text-xs text-orange-400 hover:text-orange-300 py-2'
 export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
   const router = useRouter()
   const mw = memberWord(p.businessType)
+  // Who pays and gets the messages: the parent in a dojo, the member themselves elsewhere (yoga)
+  const payer = isDojo(p.businessType) ? { one: 'parent', many: 'parents' } : { one: mw.one.toLowerCase(), many: mw.many.toLowerCase() }
   const sw = staffWord(p.businessType)
   const many = mw.many.toLowerCase()
   const one = mw.one.toLowerCase()
@@ -402,7 +404,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
               <button type="button" data-nav data-testid="absentees-link" onClick={() => router.push('/company/absentees')}
                 className="mt-3 w-full min-h-[44px] flex items-center justify-between gap-3 bg-gray-800/60 hover:bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-left">
                 <span className="text-sm text-white">Today&apos;s absentees</span>
-                <span className="text-xs text-green-400">Message parents →</span>
+                <span className="text-xs text-green-400">Message {payer.many} →</span>
               </button>
             </div>
           </div>
@@ -416,7 +418,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
               ) : (
                 <>
                   <p className="text-2xl font-bold text-amber-400 mt-1">{formatMoneyByCurrency(fees.totals.byCurrency, p.currency)}</p>
-                  <p className="text-xs text-gray-500">from {fees.totals.parents} parent{fees.totals.parents === 1 ? '' : 's'}</p>
+                  <p className="text-xs text-gray-500">from {fees.totals.parents} {fees.totals.parents === 1 ? payer.one : payer.many}</p>
                   {fees.dueThisWeek.length > 0 && (
                     <div className="mt-3">
                       <p className="text-xs text-gray-500 uppercase tracking-wider">Due this week · {fees.dueThisWeek.length}</p>
@@ -428,7 +430,7 @@ export default function DojoHome<S extends DojoStudent>(p: Props<S>) {
                   )}
                   {fees.lapsed.length > 0 && (
                     <div className="mt-3">
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">Lapsed · call the parent · {fees.lapsed.length}</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">Lapsed · call the {payer.one} · {fees.lapsed.length}</p>
                       <ul className="divide-y divide-gray-800">{fees.lapsed.slice(0, 3).map(r => feeRow(r, 'lapsed'))}</ul>
                       {fees.lapsed.length > 3 && (
                         <button type="button" onClick={() => showTab('expired')} className={linkBtn}>+ {fees.lapsed.length - 3} more lapsed · see Expired</button>

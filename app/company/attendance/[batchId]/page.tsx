@@ -29,7 +29,7 @@ import { type Batch, type Branch, BATCH_COLUMNS, BRANCH_COLUMNS, batchWhen, sort
 import { type AttendanceRow, type RosterStudent, ATTENDANCE_COLUMNS, roster, tapRow, addDays, weekdayOf, cameElsewhere, elsewhereText } from '@/lib/attendance'
 import {
   type DojoActivity, type BatchClass, type ClassActivity, type ChecklistItem, ACTIVITY_COLUMNS, BATCH_CLASS_COLUMNS,
-  CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS,
+  CLASS_ACTIVITY_COLUMNS, checklist, activityRowsToSave, ticksSummary, dayLocked, lockAction, saveErrorText, LOCK_DAYS, groupByCategory,
 } from '@/lib/dojo-activities'
 import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
 import { type StudentLeave, LEAVE_COLUMNS, LEAVE_NOTE_MAX, leaveOn, leaveText, leaveProblem, leaveRow, attendsLabel, expectedDays } from '@/lib/leave'
@@ -395,18 +395,29 @@ export default function RollCallPage() {
           <p className="text-sm font-semibold">Activities</p>
           <p className="text-[11px] text-gray-500">{logged ? `${ticksSummary(items)} · saved` : 'Saved with the first ' + mw.one.toLowerCase() + ' you mark'}</p>
         </div>
-        <ul className="flex flex-wrap gap-1.5">
-          {items.map(i => (
-            <li key={i.id}>
-              <button type="button" role="checkbox" aria-checked={i.ticked} aria-label={i.name} title={i.description || undefined}
-                onClick={() => toggleActivity(i)} disabled={blocked || actBusy}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border transition min-h-[36px] ${i.ticked
-                  ? 'bg-orange-500/20 border-orange-600 text-orange-100' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'} disabled:opacity-60`}>
-                <span aria-hidden="true">{i.ticked ? '✓' : '+'}</span>{i.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+        {/* Grouped by category (yoga: Asana, Pranayama…); a list without categories is one flat list, as before */}
+        {groupByCategory(items).map(g => {
+          const chips = (
+            <ul key={g.category ?? '-'} className="flex flex-wrap gap-1.5">
+              {g.items.map(i => (
+                <li key={i.id}>
+                  <button type="button" role="checkbox" aria-checked={i.ticked} aria-label={i.name} title={i.description || undefined}
+                    onClick={() => toggleActivity(i)} disabled={blocked || actBusy}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs border transition min-h-[36px] ${i.ticked
+                      ? 'bg-orange-500/20 border-orange-600 text-orange-100' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'} disabled:opacity-60`}>
+                    <span aria-hidden="true">{i.ticked ? '✓' : '+'}</span>{i.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+          return g.category === null && items.every(i => !i.category) ? chips : (
+            <div key={g.category ?? '-'} className="space-y-1" data-testid="activity-group">
+              <p className="text-[11px] text-gray-500 uppercase tracking-wider px-1">{g.category ?? 'Other'}</p>
+              {chips}
+            </div>
+          )
+        })}
       </section>
     )
   }

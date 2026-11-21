@@ -20,7 +20,7 @@ import { type StudentLeave, LEAVE_COLUMNS } from '@/lib/leave'
 import { type Holiday, HOLIDAY_COLUMNS } from '@/lib/holidays'
 import { BATCH_CLASS_COLUMNS, saveErrorText } from '@/lib/dojo-activities'
 import {
-  type AbsenceStudent, type RunState, absenteesFor, absenceMessage, waLink, DEFAULT_ABSENCE_BODY, PLACEHOLDERS, TEMPLATE_MAX,
+  type AbsenceStudent, type RunState, absenteesFor, absenceMessage, waLink, defaultAbsenceBody, PLACEHOLDERS, TEMPLATE_MAX,
   templateProblem, unknownPlaceholders, startRun, advance, runDone, runCurrent, runProgress, runSummary,
 } from '@/lib/absences'
 
@@ -110,7 +110,7 @@ export default function AbsenteesPage() {
     [today, students, shownBatches, attendance, classes, leaves, holidays])
   const batchOf = (s: AbsenceStudent) => batches.find(b => b.id === s.batch_id) ?? null
   const messageFor = (s: AbsenceStudent, body: string | null = savedBody) =>
-    absenceMessage({ student: s, batch: batchOf(s), date: today, companyName, body, country })
+    absenceMessage({ student: s, batch: batchOf(s), date: today, companyName, body, country, businessType })
   const everyone = result.groups.flatMap(g => g.students)
   const sendable = everyone.filter(s => messageFor(s).toPhone)
   const byId = (id: string | null) => everyone.find(s => s.id === id) ?? null
@@ -140,7 +140,7 @@ export default function AbsenteesPage() {
   }
 
   // ── Template ──────────────────────────────────────────────────────────────────────────────────────────────
-  const startEdit = () => { setDraft(savedBody ?? DEFAULT_ABSENCE_BODY); setTplError(''); setEditing(true) }
+  const startEdit = () => { setDraft(savedBody ?? defaultAbsenceBody(businessType)); setTplError(''); setEditing(true) }
   const insert = (ph: string) => {
     const el = textRef.current
     const at = el ? el.selectionStart ?? draft.length : draft.length
@@ -163,7 +163,7 @@ export default function AbsenteesPage() {
     showToast('Message saved ✓')
   }
   const sample: AbsenceStudent = everyone[0] ?? { id: 'sample', full_name: 'Aarav', guardian_name: 'Priya', guardian_phone: null, phone: null }
-  const preview = absenceMessage({ student: sample, batch: everyone[0] ? batchOf(everyone[0]) : batches[0], date: today, companyName, body: editing ? draft : savedBody, country })
+  const preview = absenceMessage({ student: sample, batch: everyone[0] ? batchOf(everyone[0]) : batches[0], date: today, companyName, body: editing ? draft : savedBody, country, businessType })
   const unknown = editing ? unknownPlaceholders(draft) : []
 
   const current = run ? byId(runCurrent(run)) : null
@@ -309,7 +309,7 @@ export default function AbsenteesPage() {
                     <button type="button" onClick={saveTemplate} disabled={tplSaving}
                       className="bg-orange-500 hover:bg-orange-400 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50">{tplSaving ? 'Saving…' : 'Save message'}</button>
                     <button type="button" onClick={() => setEditing(false)} className="bg-gray-800 hover:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg">Cancel</button>
-                    <button type="button" onClick={() => setDraft(DEFAULT_ABSENCE_BODY)} className="text-xs text-gray-400 hover:text-white px-2">Use the standard message</button>
+                    <button type="button" onClick={() => setDraft(defaultAbsenceBody(businessType))} className="text-xs text-gray-400 hover:text-white px-2">Use the standard message</button>
                   </div>
                 </div>
               )}

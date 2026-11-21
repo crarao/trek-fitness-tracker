@@ -60,11 +60,19 @@ export function memberWord(value: string | null | undefined): { one: string; man
 // The visible word for a coach login (role 'coach'): Sensei / Senseis in a dojo, else Coach / Coaches.
 // Words only: the role, routes (/coach) and variables keep their names.
 export function staffWord(value: string | null | undefined): { one: string; many: string } {
-  return isDojo(value) ? { one: 'Sensei', many: 'Senseis' } : { one: 'Coach', many: 'Coaches' }
+  if (isDojo(value)) return { one: 'Sensei', many: 'Senseis' }
+  return isYoga(value) ? { one: 'Trainer', many: 'Trainers' } : { one: 'Coach', many: 'Coaches' }
+}
+
+// The word for the place on staff screens: Dojo (martial arts), Studio (yoga), else Gym
+export function placeWord(value: string | null | undefined): string {
+  return isDojo(value) ? 'Dojo' : isYoga(value) ? 'Studio' : 'Gym'
 }
 
 // How the PT clients are named on staff screens. In a dojo every student is a PT client (create-user saves them as
 // client_type 'pt' so senseis see them and progress can be shared), so the PT label would be noise: they're "students".
-export function ptWord(value: string | null | undefined): string {
-  return isDojo(value) ? 'students' : 'PT clients'
+// classMode (isClassBased): a yoga studio with branches makes every member PT too, so "members" there.
+export function ptWord(value: string | null | undefined, classMode = false): string {
+  if (isDojo(value)) return 'students'
+  return classMode ? 'members' : 'PT clients'
 }

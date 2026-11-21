@@ -189,7 +189,7 @@ export default function CoachHomePage() {
   // Dojo (business type martial_arts): "Sensei" and "students" (every student is a PT client there), lib/labels.ts
   const bt = company?.business_type
   const sw = staffWord(bt)
-  const pw = ptWord(bt)
+  const pw = ptWord(bt, isClassBased(bt, dojoBranches.filter(b => !b.is_archived).length))
   // Class mode: every dojo (= isDojo, unchanged), a yoga studio with an active branch (lib/labels.ts)
   const dojo = isClassBased(bt, dojoBranches.filter(b => !b.is_archived).length)
   // Attendance replaces logged sessions for "came today" once the attendance table exists
