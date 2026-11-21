@@ -75,6 +75,7 @@ export type BatchState =
   | { kind: 'on' }
   | { kind: 'upcoming'; startsLabel: string }
   | { kind: 'no-time' }
+  | { kind: 'holiday'; name: string }   // closed today (lib/holidays.ts): never "Not taken"
 
 // rows: attendance rows (any batch / day; filtered here to this batch, today, present)
 export function batchState(
@@ -82,10 +83,12 @@ export function batchState(
   rows: AttendanceRow[],
   nowLocal: Date,
   country: Country | null,
+  holidayName?: string | null,   // the holiday closing this batch's branch today, if any
 ): BatchState {
   const today = iso(nowLocal)
   const came = new Set(rows.filter(r => r.batch_id === batch.id && r.class_date === today && r.present).map(r => r.profile_id)).size
   if (came > 0) return { kind: 'done', came }
+  if (holidayName) return { kind: 'holiday', name: holidayName }
   const start = minutesOf(batch.start_time)
   if (start === null) return { kind: 'no-time' }
   const endGiven = minutesOf(batch.end_time)
@@ -106,7 +109,7 @@ export function batchState(
 export function todaySummary(states: BatchState[]): { done: number; total: number; came: number; missed: number } {
   return {
     done: states.filter(s => s.kind === 'done').length,
-    total: states.length,
+    total: states.filter(s => s.kind !== 'holiday').length,   // a holiday batch isn't a class today
     came: states.reduce((n, s) => n + (s.kind === 'done' ? s.came : 0), 0),
     missed: states.filter(s => s.kind === 'missed').length,
   }

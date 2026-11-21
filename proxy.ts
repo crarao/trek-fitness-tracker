@@ -16,7 +16,11 @@ import { tenantSlugFromHost, rootHost } from '@/lib/tenant'
 //   /admin             super_admin
 //   /coach             coach
 //   /company/client    company_admin, partner, coach   (coaches open PT clients; RLS limits them to PT)
-//   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS)
+//   /company/attendance, /company/grading  company_admin, partner, coach (grading: coaches read only, RLS;
+//                      incl. /company/attendance/reports, the dojo class reports)
+//   /company/activities company_admin, partner         (dojo class activities; senseis tick them on the roll call)
+//   /company/holidays  company_admin, partner          (dojo holiday calendar)
+//   /company/absentees company_admin, partner          (today's absentees, WhatsApp to parents)
 //   /company           company_admin, partner          (incl. /company/leads, /company/exercises, /company/today)
 //   /client            client
 //   /dashboard         any logged-in user (routes by role)
@@ -47,6 +51,12 @@ const SECTIONS: { prefix: string; roles: Role[] }[] = [
   { prefix: '/company/grading', roles: ['company_admin', 'partner', 'coach'] },
   // Monthly reports (19 Nov): owner / partner for their gym, super admin for any (?company=<id>). Before /company.
   { prefix: '/company/reports', roles: ['company_admin', 'partner', 'super_admin'] },
+  // Dojo class activities list (19 Nov): owner / partner edit it; senseis only tick them on the roll call
+  { prefix: '/company/activities', roles: ['company_admin', 'partner'] },
+  // Dojo holidays calendar (19 Nov): owner / partner; senseis see "No classes" on the roll call and their home
+  { prefix: '/company/holidays', roles: ['company_admin', 'partner'] },
+  // Today's absentees + the absence WhatsApp (19 Nov): owner / partner only (they send the messages)
+  { prefix: '/company/absentees', roles: ['company_admin', 'partner'] },
   { prefix: '/company', roles: ['company_admin', 'partner'] },
   { prefix: '/client', roles: ['client'] },
 ]

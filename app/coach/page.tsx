@@ -12,6 +12,7 @@ import { thisWeekMonday } from '@/lib/calories'
 import { staffWord, ptWord, isDojo } from '@/lib/labels'
 import { type Branch, type Batch, BRANCH_COLUMNS, BATCH_COLUMNS, homeBatchLine, batchWhen } from '@/lib/batches'
 import { type AttendanceRow, ATTENDANCE_COLUMNS, batchesOn } from '@/lib/attendance'
+import { type Holiday, HOLIDAY_COLUMNS, holidayFor, noClassesText } from '@/lib/holidays'
 import { withoutEarlyLinks } from '@/lib/adherence'
 import { todayRows, sortRows, type CoachClient, type CoachPlan, type CoachSession, type StaffMember, type TodayRow } from '@/lib/coach-today'
 import { loadGymStaff } from '@/lib/gym-staff'
@@ -33,6 +34,8 @@ export default function CoachHomePage() {
   const [placement, setPlacement] = useState<Record<string, string>>({})
   // Dojo attendance (#78): today's present rows (null = attendance not set up yet), and the gym's branches / batches
   const [attToday, setAttToday] = useState<AttendanceRow[] | null>(null)
+  // Dojo holidays today (lib/holidays.ts): a closed batch shows "No classes — <name>" instead of Take attendance
+  const [holidaysToday, setHolidaysToday] = useState<Holiday[]>([])
   const [dojoBranches, setDojoBranches] = useState<Branch[]>([])
   const [dojoBatches, setDojoBatches] = useState<Batch[]>([])
   const [clients, setClients] = useState<CoachClient[]>([])
@@ -116,6 +119,9 @@ export default function CoachHomePage() {
         setDojoBatches((ba.data || []) as Batch[])
         const att = await supabase.from('attendance').select(ATTENDANCE_COLUMNS).eq('class_date', today).eq('present', true)
         setAttToday(att.error ? null : (att.data || []) as AttendanceRow[])
+        // Holidays today (an error = the table isn't there yet: none)
+        const hol = await supabase.from('holidays').select(HOLIDAY_COLUMNS).eq('holiday_date', today).is('removed_at', null)
+        setHolidaysToday(hol.error ? [] : (hol.data || []) as Holiday[])
       }
     }
     // Belt grading: one read of the gym's belts for the chips (an error = none, no chips)
@@ -287,6 +293,7 @@ export default function CoachHomePage() {
               <span className="flex gap-3">
                 <button type="button" data-nav onClick={() => router.push('/company/attendance/today')} className="text-xs text-orange-400 hover:text-orange-300">All of today →</button>
                 <button type="button" data-nav onClick={() => router.push('/company/attendance')} className="text-xs text-orange-400 hover:text-orange-300">This month →</button>
+                <button type="button" data-nav onClick={() => router.push('/company/attendance/reports')} className="text-xs text-orange-400 hover:text-orange-300">Reports →</button>
               </span>
             </div>
             {todaysBatches.length === 0 ? (
@@ -296,6 +303,7 @@ export default function CoachHomePage() {
                 {todaysBatches.map(b => {
                   const came = (attToday || []).filter(a => a.batch_id === b.id).length
                   const branchName = dojoBranches.find(x => x.id === b.branch_id)?.name
+                  const holiday = came ? null : holidayFor(holidaysToday, b.branch_id, today)
                   return (
                     <li key={b.id}>
                       <button type="button" data-nav onClick={() => router.push(`/company/attendance/${b.id}`)}
@@ -305,7 +313,9 @@ export default function CoachHomePage() {
                             <p className="text-sm font-medium text-white truncate">{b.name}</p>
                             <p className="text-[11px] text-gray-500 truncate">{[dojoBranches.filter(x => !x.is_archived).length > 1 ? branchName : '', batchWhen(b, country).split(' · ')[1] || ''].filter(Boolean).join(' · ')}</p>
                           </div>
-                          <span className={`text-xs shrink-0 ${came ? 'text-green-400 font-semibold' : 'text-orange-400'}`}>{came ? `${came} came` : 'Take attendance'}</span>
+                          {holiday
+                            ? <span data-testid="holiday-chip" className="text-xs shrink-0 text-amber-300">{noClassesText(holiday)}</span>
+                            : <span className={`text-xs shrink-0 ${came ? 'text-green-400 font-semibold' : 'text-orange-400'}`}>{came ? `${came} came` : 'Take attendance'}</span>}
                         </div>
                       </button>
                     </li>
