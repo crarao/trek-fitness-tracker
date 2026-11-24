@@ -110,5 +110,5 @@ commit;
 -- the trigger a no-op with create or replace … begin return new; end. The column stays (Rule #1).
 --
 -- Run log:
--- - Dev (nnxrmaiinbmxfwzefbwx): not run yet.
+-- - Dev (nnxrmaiinbmxfwzefbwx): Step 1 run by Anand on 24 Nov 2026; Step 3 trigger check passed (protect_self_training_flag, 1 row).
 -- - Mumbai (nptxjfvkqjuekgkspemu): not run yet.
