@@ -29,6 +29,7 @@ import { beforeYouStart, isCovering } from '@/lib/coach-today'
 import { workoutTimeLabel } from '@/lib/today-schedule'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, staffWord, isDojo } from '@/lib/labels'
+import { getClientSettings, TRAINING_TYPES, trainingFields, trainingTypeOf, type TrainingType } from '@/lib/clientSettings'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions,
   type StudentGrade, gradeSourceLabel, visibleGradeHistory } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
@@ -68,6 +69,7 @@ type ClientProfile = {
   trainer_name: string | null
   diet_plan: string | null
   client_type: string | null
+  self_training?: boolean | null // supabase/migrations/20261124120000_self_training_flag.sql
   archived_at: string | null
   primary_coach_id?: string | null   // usual coach (#40); a soft link, never limits who can train the client
   created_at?: string                // joined date (header "Joined Oct 2026")
@@ -234,6 +236,8 @@ export default function ClientDetailPage() {
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member',
+    // Gyms with self-training on (24 Nov): PT / Self-training / Membership only
+    training: 'member' as TrainingType,
     // Multi-country: the client's country, phone code and default currency; the renewal's currency
     country: 'IN' as Country, phone_country: 'IN' as PhoneCountry, currency: '', membership_currency: ''
   })
@@ -744,6 +748,9 @@ export default function ClientDetailPage() {
   // Dojo (business type martial_arts): "Sensei", every student is PT (no PT badge / checkbox), short profile (age, gender, medical, parent)
   const dojoType = (client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type
   const dojo = isDojo(dojoType)
+  // Self-training (24 Nov): the gym has it on and profiles.self_training exists → PT / Self-training / Membership only
+  const selfTrainingGym = !dojo && !!client && getClientSettings((client as { companies?: unknown }).companies as Parameters<typeof getClientSettings>[0]).self_training_enabled
+  const selfTrainingChoice = selfTrainingGym && !!client && 'self_training' in client
   // Dojo with the attendance table: attendance replaces Log session (Sessions tab = Attendance, Progress counts classes)
   const attendanceMode = dojo && attendanceOn
   const sw = staffWord(dojoType)
@@ -1782,7 +1789,9 @@ const handleResetPassword = async () => {
       setEditMessage('Error: ' + result.error)
       return
     }
-    await supabase.from('profiles').update({ client_type: dojo ? 'pt' : editClientForm.client_type }).eq('id', clientId)
+    await supabase.from('profiles').update(dojo ? { client_type: 'pt' }
+      : selfTrainingChoice ? trainingFields(editClientForm.training, true)
+      : { client_type: editClientForm.client_type }).eq('id', clientId)
     setSavingEdit(false)
     setEditMessage('Saved! ✓')
     showToast(`${memberWord((client as { companies?: { business_type?: string | null } } | null)?.companies?.business_type).one} updated ✓`)
@@ -2285,7 +2294,8 @@ const handleResetPassword = async () => {
       // Opens in Renew mode: dates start after the current membership (or today)
       start_date: renewalStartDate(),
       end_date: '',
-      client_type: client?.client_type || 'member'
+      client_type: client?.client_type || 'member',
+      training: trainingTypeOf(client),
     })
     setMembershipMode('renew')
     setMembershipMessage('')
@@ -2486,6 +2496,9 @@ const handleResetPassword = async () => {
                     {client?.client_type === 'pt' && !dojo && (
                       <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-2 py-0.5 rounded-full">PT</span>
                     )}
+                    {selfTrainingGym && client?.client_type !== 'pt' && client?.self_training === true && (
+                      <span className="text-xs bg-teal-900/50 text-teal-300 border border-teal-800 px-2 py-0.5 rounded-full" data-testid="badge-self">Self-training</span>
+                    )}
                     {client?.archived_at && (
                       <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 px-2 py-0.5 rounded-full">Archived</span>
                     )}
@@ -2605,7 +2618,28 @@ const handleResetPassword = async () => {
                 className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
             )}
             {/* Dojo: every student is PT (senseis see them, progress can be shared), so no checkbox */}
-            {!dojo && <label className="flex items-center gap-3 cursor-pointer py-1">
+            {/* Gyms with self-training on (24 Nov): one choice instead of the PT checkbox */}
+            {selfTrainingChoice && (
+              <fieldset data-testid="edit-training-type">
+                <legend className="text-xs text-gray-500 mb-1.5">Training type</legend>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {TRAINING_TYPES.map(t => {
+                    const on = editClientForm.training === t.value
+                    return (
+                      <button key={t.value} type="button" aria-pressed={on}
+                        onClick={() => setEditClientForm({ ...editClientForm, training: t.value, client_type: t.value === 'pt' ? 'pt' : 'member' })}
+                        className={`text-left rounded-lg border px-3 py-2.5 min-h-[44px] transition ${on
+                          ? t.value === 'pt' ? 'border-purple-500 bg-purple-950/40' : t.value === 'self' ? 'border-teal-500 bg-teal-950/40' : 'border-gray-400 bg-gray-800'
+                          : 'border-gray-700 bg-gray-800/40 hover:border-gray-500'}`}>
+                        <span className="block text-sm text-white font-medium">{t.label}</span>
+                        <span className="block text-[11px] text-gray-400">{t.help}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </fieldset>
+            )}
+            {!dojo && !selfTrainingChoice && <label className="flex items-center gap-3 cursor-pointer py-1">
               <input type="checkbox"
                 checked={editClientForm.client_type === 'pt'}
                 onChange={e => setEditClientForm({ ...editClientForm, client_type: e.target.checked ? 'pt' : 'member' })}

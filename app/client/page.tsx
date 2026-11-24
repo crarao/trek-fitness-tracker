@@ -228,7 +228,7 @@ if (prof) {
 
     // Strength per exercise, when the gym shows it (an error = table not there: the list stays hidden).
     // Self-training members always: their own day pre-fills from their last sets.
-    const self = isSelfTraining(prof?.client_type, settings)
+    const self = isSelfTraining(prof, settings)
     if ((settings.client_sees_detailed_progress && sessionsData?.length) || self) {
       const [lg, lib] = await Promise.all([
         supabase.from('exercise_logs').select(EXERCISE_LOG_COLUMNS).eq('client_id', user.id),
@@ -497,7 +497,7 @@ const handleChangePassword = async () => {
   // The gym's client app switches (Super Admin → Client app setup, lib/clientSettings.ts)
   const gymSettings = getClientSettings(profile?.companies)
   // Self-training member (Part C): plans, logs and sees their own progress, whatever the PT switches say
-  const selfTraining = isSelfTraining(profile?.client_type, gymSettings)
+  const selfTraining = isSelfTraining(profile, gymSettings)
   const cs = selfTraining
     ? { ...gymSettings, client_sees_plan: true, client_can_log_sessions: true, client_can_log_activities: true, client_sees_detailed_progress: true, client_can_edit_profile: true }
     : gymSettings
@@ -1009,7 +1009,8 @@ const handleChangePassword = async () => {
             )}
 
 {/* AI Insights */}
-{profile?.companies?.ai_insights_enabled !== false && (
+{/* No AI for self-training members (24 Nov; /api/ai-insights refuses them too) */}
+{profile?.companies?.ai_insights_enabled !== false && !selfTraining && (
 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
   <div className="flex justify-between items-center mb-3">
     <div>

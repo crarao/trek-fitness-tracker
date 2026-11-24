@@ -15,7 +15,7 @@ import BeltsEditor from '@/app/belts-editor'
 import { cleanUpiId, upiProblem } from '@/lib/guardian'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
-import { CLIENT_SETTING_ROWS, getClientSettings, clientSettingsToStore } from '@/lib/clientSettings'
+import { CLIENT_SETTING_ROWS, CLIENT_SETTING_GROUPS, getClientSettings, clientSettingsToStore, selfTrainingProblem } from '@/lib/clientSettings'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, onePerGym, sortUsage } from '@/lib/platform-usage'
@@ -1631,8 +1631,16 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               {ready && !editingCompany.client_module_enabled && (
                                 <p className="text-xs text-amber-400 mt-1">Client Training Module is off: clients only see their membership.</p>
                               )}
-                              <div className="space-y-2 mt-3">
-                                {CLIENT_SETTING_ROWS.map(row => {
+                              {ready && selfTrainingProblem(cs, !!editingCompany.client_module_enabled) && (
+                                <p className="text-xs text-amber-400 mt-1" data-testid="self-training-warning">{selfTrainingProblem(cs, !!editingCompany.client_module_enabled)}</p>
+                              )}
+                              {/* Grouped by who the switch is for (24 Nov): self-training members override the PT switches */}
+                              {CLIENT_SETTING_GROUPS.map(group => (
+                              <div key={group.title} className="mt-3">
+                                <p className="text-xs text-gray-400 uppercase tracking-wider">{group.title}</p>
+                                <p className="text-[11px] text-gray-500 mb-1.5">{group.help}</p>
+                              <div className="space-y-2">
+                                {CLIENT_SETTING_ROWS.filter(row => group.keys.includes(row.key)).map(row => {
                                   const on = cs[row.key]
                                   const dim = row.key !== 'client_login' && !cs.client_login
                                   return (
@@ -1652,6 +1660,8 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                   )
                                 })}
                               </div>
+                              </div>
+                              ))}
                             </div>
                           )
                         })()}

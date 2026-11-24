@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { getCaller } from '@/lib/auth-server'
 import { recordAiUsage } from '@/lib/ai-usage'
 import { createClient } from '@supabase/supabase-js'
+import { getClientSettings, isSelfTraining } from '@/lib/clientSettings'
 
 export async function POST(request: Request) {
   // Must be logged in (clients request their own insights; staff may too)
@@ -23,9 +24,17 @@ export async function POST(request: Request) {
         process.env.SUPABASE_SECRET_KEY!,
         { auth: { autoRefreshToken: false, persistSession: false } }
       )
-      const { data: co } = await admin.from('companies').select('ai_insights_enabled').eq('id', caller.companyId).single()
+      // * so client_settings is read once db/2026-11-19-client-view.md has run
+      const { data: co } = await admin.from('companies').select('*').eq('id', caller.companyId).single()
       if (co?.ai_insights_enabled === false) {
         return NextResponse.json({ error: 'AI insights are turned off for this gym' }, { status: 403 })
+      }
+      // No AI for self-training members (24 Nov): the app hides the button, this refuses a direct call
+      if (caller.role === 'client') {
+        const { data: me } = await admin.from('profiles').select('*').eq('id', caller.userId).single()
+        if (isSelfTraining(me, getClientSettings(co))) {
+          return NextResponse.json({ error: 'AI insights are for PT clients only' }, { status: 403 })
+        }
       }
     }
 

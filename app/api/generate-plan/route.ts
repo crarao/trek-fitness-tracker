@@ -109,9 +109,14 @@ export async function POST(request: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
     // The client's gym, read from the database (for super admin this is the only source)
-    const { data: clientRow } = await admin.from('profiles').select('company_id').eq('id', clientId).single()
+    const { data: clientRow } = await admin.from('profiles').select('company_id, client_type').eq('id', clientId).single()
     const companyId: string | null = caller.role === 'super_admin' ? clientRow?.company_id ?? null : caller.companyId
     if (caller.role !== 'super_admin' && clientRow?.company_id !== caller.companyId) return forbidden()
+    // AI plans are for PT clients only (24 Nov): self-training and membership-only members get none, even when
+    // the route is called directly. Refused before any AI call, so nothing counts towards the monthly cap.
+    if (caller.role !== 'super_admin' && clientRow?.client_type !== 'pt') {
+      return NextResponse.json({ error: 'AI plans are for PT clients only.' }, { status: 403 })
+    }
 
     let usage: AiPlanUsage | null = null
     if (companyId) {

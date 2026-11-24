@@ -7,6 +7,7 @@ import { summarizeMonth } from '../lib/monthly-report'
 import { monthReview, plateauLine, listText } from '../lib/review-report'
 import type { ProgressLog } from '../lib/progress'
 import type { PlanJson } from '../lib/plan-structure'
+import { isSelfTraining, trainingTypeOf, trainingFields, selfTrainingProblem, GYM_DEFAULTS } from '../lib/clientSettings'
 
 let failed = 0
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -100,6 +101,22 @@ eq('review: stalled', rv.stalled, ['Curl'])
 eq('review: in the plan, not done 2+ weeks', rv.notDone, ['Deadlift'])
 eq('list text', [listText(['A']), listText(['A', 'B']), listText(['A', 'B', 'C'])], ['A', 'A and B', 'A, B and C'])
 eq('plateau line', plateauLine('FitLoft', ['Curl']), 'Want help breaking your plateau on Curl? Talk to the FitLoft team on your next visit.')
+
+// Training type (24 Nov): profiles.self_training decides once the column exists
+const on = { ...GYM_DEFAULTS, self_training_enabled: true, client_login: true }
+eq('self: ticked member, switch on', isSelfTraining({ client_type: 'member', self_training: true }, on), true)
+eq('self: membership only', isSelfTraining({ client_type: 'member', self_training: false }, on), false)
+eq('self: PT never, even if flagged', isSelfTraining({ client_type: 'pt', self_training: true }, on), false)
+eq('self: switch off', isSelfTraining({ client_type: 'member', self_training: true }, GYM_DEFAULTS), false)
+eq('self: before the column, every non-PT member (19 Nov rule)', isSelfTraining({ client_type: 'member' }, on), true)
+eq('self: no person', isSelfTraining(null, on), false)
+eq('training type', [trainingTypeOf({ client_type: 'pt' }), trainingTypeOf({ client_type: 'member', self_training: true }), trainingTypeOf({ client_type: null })], ['pt', 'self', 'member'])
+eq('training fields', [trainingFields('pt', true), trainingFields('self', true), trainingFields('member', false)],
+  [{ client_type: 'pt', self_training: false }, { client_type: 'member', self_training: true }, { client_type: 'member' }])
+eq('warning: fine', selfTrainingProblem(on, true), '')
+eq('warning: switch off = none', selfTrainingProblem(GYM_DEFAULTS, false), '')
+eq('warning: app + module off', selfTrainingProblem({ ...GYM_DEFAULTS, self_training_enabled: true }, false),
+  "Self-training is on, but Client app and Client Training Module are off: members can't use it yet.")
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1) }
 console.log('\nall passed')
