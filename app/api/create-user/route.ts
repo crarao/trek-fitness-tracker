@@ -229,7 +229,11 @@ const { error: profileError } = await supabaseAdmin.from('profiles').insert({
   ...clientBasics,
   ...placement,
   ...belt,
-  ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {})
+  ...(primaryCoachId ? { primary_coach_id: primaryCoachId } : {}),
+  // Self-training member (24 Nov, supabase/migrations/20261124120000_self_training_flag.sql): only sent by the app
+  // once the column exists; never for PT clients or dojo students
+  ...(role === 'client' && body.self_training === true && (client_type || 'member') !== 'pt'
+    && !isDojo(companyRow?.business_type as string | null) ? { self_training: true } : {}),
 })
 
   if (profileError) {
