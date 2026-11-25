@@ -34,7 +34,7 @@ const draftKey = (memberId: string, date: string, day: string) => `self-day:${me
 const btn = 'min-h-[44px] rounded-xl text-sm font-semibold transition disabled:opacity-50'
 
 export default function MyPlan({
-  memberId, companyId, availableDays, country, plans, sessions, logs, library, notesEnabled, onSaved, toast,
+  memberId, companyId, availableDays, country, plans, sessions, logs, library, notesEnabled, onSaved, toast, businessType = null,
 }: {
   memberId: string
   companyId: string
@@ -47,6 +47,7 @@ export default function MyPlan({
   notesEnabled: boolean
   onSaved: () => void
   toast: (text: string, kind?: 'success' | 'error') => void
+  businessType?: string | null // yoga: Rounds / Hold in the plan builder
 }) {
   const today = localToday()
   const monday = mondayOf(today)
@@ -163,7 +164,7 @@ export default function MyPlan({
         <p className="text-xs text-gray-500 mt-0.5">Tap a day, then add exercises from your gym&apos;s list. Your plan repeats every week until you change it.</p>
       </div>
       {earlierList}
-      <PlanEditor value={editing} onChange={setEditing} weekStart={monday} companyId={companyId} clientId={memberId}
+      <PlanEditor value={editing} onChange={setEditing} weekStart={monday} companyId={companyId} clientId={memberId} businessType={businessType}
         country={country} allowCopy={false} libraryOnly />
       {planError && <p className="text-sm text-red-400">{planError}</p>}
       <div className="flex gap-2">

@@ -23,6 +23,13 @@ function defaultsFor(group: string | null | undefined): Pick<PlanExercise, 'sets
   return { sets: '3', reps: '10' }
 }
 
+// Yoga (25 Nov): asanas are held for a time, written "30 s" so logging asks for no kg × reps
+// (isTimedOrDistance in lib/exercise-logs.ts). Breathing, flows and relaxation start at 5 min.
+const YOGA_LONG = /pranayama|kapalbhati|bhramari|bhastrika|nadi shodhana|ujjayi|sheetali|shavasana|savasana|yoga nidra|dhyana|meditation|surya namaskar/i
+function yogaDefaults(name: string): Pick<PlanExercise, 'sets' | 'reps'> {
+  return YOGA_LONG.test(name) ? { sets: '1', reps: '5 min' } : { sets: '1', reps: '30 s' }
+}
+
 const isBlank = (e: PlanExercise) => !e.name.trim() && !e.sets && !e.reps && !e.rest && !e.note && !e.weight
 
 // Plan builder: day chips across the top (in the order the plan's week runs), the chosen day below.
@@ -30,7 +37,7 @@ const isBlank = (e: PlanExercise) => !e.name.trim() && !e.sets && !e.reps && !e.
 // "+ Add exercise" (library picker), duplicate to another day. "Copy from a client" fills the
 // whole plan (hidden with allowCopy={false}, e.g. on an AI plan: copying would replace it). Days stay Mon…Sun because client Done ✓ / ticks are saved per weekday.
 export default function PlanEditor({
-  value, onChange, weekStart, companyId = null, clientId, country = 'IN', allowCopy = true, libraryOnly = false,
+  value, onChange, weekStart, companyId = null, clientId, country = 'IN', allowCopy = true, libraryOnly = false, businessType = null,
 }: {
   value: PlanJson
   onChange: (plan: PlanJson) => void
@@ -40,7 +47,9 @@ export default function PlanEditor({
   country?: Country
   allowCopy?: boolean       // false = no "Copy from a client" button (AI plan panel)
   libraryOnly?: boolean     // exercises only from the gym's list, no new names (self-training members' own plans)
+  businessType?: string | null // 'yoga': Rounds / Hold instead of Sets / Reps, no Weight, yoga hints
 }) {
+  const yoga = businessType === 'yoga'
   const ordered = daysInWeekOrder(value, weekStart || '2024-01-01') // 1 Jan 2024 was a Monday
   const [open, setOpen] = useState<Weekday>(() => ordered.find(d => !d.rest)?.day ?? ordered[0].day)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -111,7 +120,7 @@ export default function PlanEditor({
     if (!day) return
     const base = day.exercises.filter(e => !isBlank(e)) // replace the empty starter line
     if (base.length >= MAX_EXERCISES_PER_DAY) { say(`Up to ${MAX_EXERCISES_PER_DAY} exercises a day`); return }
-    const ex: PlanExercise = { ...emptyExercise(), name: p.name, ...defaultsFor(p.muscle_group) }
+    const ex: PlanExercise = { ...emptyExercise(), name: p.name, ...(yoga ? yogaDefaults(p.name) : defaultsFor(p.muscle_group)) }
     if (p.exercise_id) ex.exercise_id = p.exercise_id
     const next = updateDayIn(plan, open, d => ({ ...d, rest: false, exercises: [...base, ex] }))
     latest.current = next
@@ -198,7 +207,7 @@ export default function PlanEditor({
           <div>
             <label htmlFor={`focus-${d.day}`} className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1">Day title</label>
             <input size={1} id={`focus-${d.day}`} value={d.focus} maxLength={60}
-              placeholder="e.g. Push, Legs, Lower Body Strength"
+              placeholder={yoga ? 'e.g. Hip Opening, Balance, Pranayama' : 'e.g. Push, Legs, Lower Body Strength'}
               onChange={e => updateDay(d.day, x => ({ ...x, focus: e.target.value }))}
               className={inputCls} />
           </div>
@@ -214,6 +223,8 @@ export default function PlanEditor({
           const noteKey = `${d.day}:${i}`
           const showNote = !!e.note || !!notesOpen[noteKey]
           const numericSets = /^\d*$/.test(e.sets)
+          // Yoga: Weight only shows when the plan already has one (an older or copied plan), so nothing is hidden
+          const showWeight = !yoga || !!e.weight
           return (
             <div key={i} className="rounded-lg border border-gray-800 bg-gray-900 p-2.5 space-y-2">
               <div className="flex items-center gap-2">
@@ -262,9 +273,9 @@ export default function PlanEditor({
                   </div>
                 )
               })() : (
-              <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-1.5 pl-6 items-end">
+              <div className={`grid ${showWeight ? 'grid-cols-[auto_1fr_1fr_1fr]' : 'grid-cols-[auto_1fr_1fr]'} gap-1.5 pl-6 items-end`}>
                 <div>
-                  <span className="block text-[10px] text-gray-500 mb-0.5">Sets</span>
+                  <span className="block text-[10px] text-gray-500 mb-0.5">{yoga ? 'Rounds' : 'Sets'}</span>
                   {numericSets ? (
                     <div className="flex items-center rounded-lg border border-gray-700 bg-gray-800 overflow-hidden">
                       <button type="button" aria-label="One set fewer" onClick={() => stepSets(d.day, i, e, -1)}
@@ -281,25 +292,25 @@ export default function PlanEditor({
                   )}
                 </div>
                 <label className="block">
-                  <span className="block text-[10px] text-gray-500 mb-0.5">Reps</span>
-                  <input size={1} value={e.reps} maxLength={40} placeholder="10" aria-label="Reps or time"
+                  <span className="block text-[10px] text-gray-500 mb-0.5">{yoga ? 'Hold' : 'Reps'}</span>
+                  <input size={1} value={e.reps} maxLength={40} placeholder={yoga ? '30 s' : '10'} aria-label={yoga ? 'Hold time' : 'Reps or time'}
                     onChange={ev => updateExercise(d.day, i, { reps: ev.target.value })} className={smallInput} />
                 </label>
-                <label className="block">
+                {showWeight && <label className="block">
                   <span className="block text-[10px] text-gray-500 mb-0.5">Weight</span>
                   <input size={1} value={e.weight || ''} maxLength={30} placeholder="20 kg" aria-label="Weight"
                     onChange={ev => updateExercise(d.day, i, { weight: ev.target.value })} className={smallInput} />
-                </label>
+                </label>}
                 <label className="block">
                   <span className="block text-[10px] text-gray-500 mb-0.5">Rest</span>
-                  <input size={1} value={e.rest} maxLength={30} placeholder="60 s" aria-label="Rest between sets"
+                  <input size={1} value={e.rest} maxLength={30} placeholder={yoga ? '15 s' : '60 s'} aria-label="Rest between sets"
                     onChange={ev => updateExercise(d.day, i, { rest: ev.target.value })} className={smallInput} />
                 </label>
               </div>
               )}
               {showNote && (
                 <div className="pl-6">
-                  <input size={1} aria-label="Note" value={e.note} maxLength={160} placeholder="Note, e.g. keep back flat"
+                  <input size={1} aria-label="Note" value={e.note} maxLength={160} placeholder={yoga ? 'Note, e.g. each side, use a block' : 'Note, e.g. keep back flat'}
                     autoFocus={!e.note}
                     onChange={ev => updateExercise(d.day, i, { note: ev.target.value })} className={smallInput} />
                 </div>
@@ -310,12 +321,12 @@ export default function PlanEditor({
                     ? <span className="text-[11px] text-orange-300 truncate">{exerciseDetail(e)}</span>
                     : <button type="button" onClick={() => setNotesOpen(o => ({ ...o, [noteKey]: true }))}
                         className="text-[11px] text-gray-400 hover:text-white">+ Note</button>}
-                  {/* Switch between one target for every set and a weight / reps per set (17 Nov) */}
-                  <button type="button" aria-pressed={!!e.set_targets?.length}
+                  {/* Switch between one target for every set and a weight / reps per set (17 Nov). Not for yoga */}
+                  {(!yoga || !!e.set_targets?.length) && <button type="button" aria-pressed={!!e.set_targets?.length}
                     onClick={() => updateExerciseTo(d.day, i, e.set_targets?.length ? withoutSetTargets(e) : withSetTargets(e, startSetTargets(e)))}
                     className="text-[11px] text-gray-400 hover:text-white shrink-0">
                     {e.set_targets?.length ? 'Same for every set' : 'Different weight per set'}
-                  </button>
+                  </button>}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button type="button" onClick={() => moveExercise(d.day, i, -1)} disabled={i === 0} aria-label="Move up" className={iconBtn}>↑</button>

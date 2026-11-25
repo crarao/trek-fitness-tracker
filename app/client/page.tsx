@@ -759,7 +759,8 @@ const handleChangePassword = async () => {
             {selfTraining && profile && country ? (
               <MyPlan memberId={profile.id} companyId={profile.company_id} availableDays={profile.available_days} country={country}
                 plans={plans} sessions={sessions} logs={exLogs} library={exLibrary}
-                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast} />
+                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast}
+                businessType={profile?.companies?.business_type} />
             ) : plans.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 <p className="text-lg mb-1">No plan yet</p>
