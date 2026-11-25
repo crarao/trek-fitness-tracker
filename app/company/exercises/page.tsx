@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   type Exercise, EXERCISE_COLUMNS, MUSCLE_GROUPS, EQUIPMENT, muscleLabel, equipmentLabel,
-  searchExercises, tidyName, hasExactName,
+  searchExercises, tidyName, hasExactName, shownForBusiness,
 } from '@/lib/exercises'
 
 const INPUT = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm placeholder-gray-500'
@@ -29,6 +29,7 @@ export default function ExercisesPage() {
   const [query, setQuery] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [showStarter, setShowStarter] = useState(false)
+  const [businessType, setBusinessType] = useState<string | null>(null)
   const [edit, setEdit] = useState<Edit | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -47,10 +48,12 @@ export default function ExercisesPage() {
       const user = session?.user
       if (!user) { router.push('/login'); return }
       const { data: profile } = await supabase
-        .from('profiles').select('company_id, companies:company_id(name)').eq('id', user.id).single()
+        .from('profiles').select('company_id, companies:company_id(name, business_type)').eq('id', user.id).single()
       if (!profile?.company_id) { router.push('/login'); return }
       setCompanyId(profile.company_id)
-      setCompanyName((profile as unknown as { companies: { name: string | null } | null }).companies?.name || '')
+      const co = (profile as unknown as { companies: { name: string | null; business_type?: string | null } | null }).companies
+      setCompanyName(co?.name || '')
+      setBusinessType(co?.business_type ?? null)
       const { data, error } = await supabase.from('exercises').select(EXERCISE_COLUMNS).order('name').limit(3000)
       if (error) setMissing(true)
       if (!live) return
@@ -61,7 +64,8 @@ export default function ExercisesPage() {
   }, [router])
 
   const own = useMemo(() => list.filter(e => e.company_id), [list])
-  const starter = useMemo(() => list.filter(e => !e.company_id), [list])
+  // Yoga: only the starter list's mobility items (shownForBusiness in lib/exercises.ts)
+  const starter = useMemo(() => list.filter(e => !e.company_id && shownForBusiness(e, businessType)), [list, businessType])
   const filterBy = (rows: Exercise[], archived: boolean) =>
     searchExercises(rows.filter(e => !!e.is_archived === archived), { query, muscle: null, equipment: null, includeArchived: true })
   const ownActive = filterBy(own, false)
