@@ -3048,7 +3048,7 @@ const handleResetPassword = async () => {
       </div>
     )}
     {generatedJson ? (
-      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} allowCopy={false} />
+      <PlanEditor value={generatedJson} onChange={setGeneratedJson} weekStart={aiPlanMeta.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} allowCopy={false} businessType={dojoType} />
     ) : (
     <textarea
   value={generatedPlan}
@@ -3100,7 +3100,7 @@ const handleResetPassword = async () => {
                       <button type="button" onClick={() => { setPlanError(''); setNewPlanTextMode(true) }}
                         className="text-xs text-gray-400 hover:text-white underline underline-offset-2">Paste a plan as text instead</button>
                     </div>
-                    <PlanEditor value={newPlanJson} onChange={setNewPlanJson} weekStart={newPlan.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} />
+                    <PlanEditor value={newPlanJson} onChange={setNewPlanJson} weekStart={newPlan.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} businessType={dojoType} />
                   </div>
                 ) : (
                 <div>
@@ -3203,7 +3203,7 @@ const handleResetPassword = async () => {
             className="w-full bg-gray-800 text-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-orange-500 border border-gray-700 text-sm" />
         </div>
         {editingJson ? (
-          <PlanEditor value={editingJson} onChange={setEditingJson} weekStart={editingPlan.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} />
+          <PlanEditor value={editingJson} onChange={setEditingJson} weekStart={editingPlan.week_start} companyId={companyId} clientId={clientId} country={country ?? 'IN'} businessType={dojoType} />
         ) : (
           <>
             <textarea
