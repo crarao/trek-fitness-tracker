@@ -3,7 +3,7 @@
 The working priority list. Claude ticks items off here as they ship (PR number in brackets).
 Numbers stay fixed so they can be referred to in chat ("do #11").
 
-_Last updated: 17 Nov 2026_
+_Last updated: 25 Nov 2026_
 
 ---
 
@@ -60,6 +60,8 @@ _From the 27 Oct speed review. The Tokyo region item from that review is already
 ## P4 — Next features
 
 - [ ] **#106 Add unplanned exercise while logging** — next after the per-set weights build (17 Nov): on the plan day, "+ Add exercise" (the shared picker) for an exercise that isn't in the plan; saved as `exercise_logs` rows after the plan's exercises (position after the plan's) and in `exercises_done`; the plan itself is unchanged.
+
+- [ ] **#107 Database rules for self-training (after the pilot)** — decided 25 Nov to keep two rules app-only for the pilot (they only ever touch the member's own data and cost nothing): (1) **membership-only members** see just the membership screen, but the database still applies the PT switches to them, so going around the app they could log a simple activity; (2) **self-training plans start on the current Monday** (no week picker), but the database accepts a plan for any week, in their own account only. The paid features are already enforced (`is_self_training_client()` needs `profiles.self_training`; only they create plans / log weights; AI routes refuse non-PT). Build when a gym charges for self-training and members get around it, or when self-training goes beyond the pilot gyms: one additive migration (restrictive rule: a membership-only client can't insert `logged_sessions`; a client-made `weekly_plans` row must start on the current Monday), dev first. ~1 hour.
 
 - [x] **#37 Cap AI plans at 5 per PT client per month** — asked by Anand 25 Oct to contain AI costs (5 planned; set to 6 by Anand 29 Oct to leave room for a redo; back to 5 by Anand 12 Nov). Counted per client per calendar month (company's local month: India time / US Eastern) from `ai_usage` rows with feature `plan` (`lib/ai-plan-limit.ts`); the server refuses one over the cap with a clear message ("more AI plans from 1 Nov"); the coach sees "3 of 5 AI plans used this month" under the plan buttons, and at the cap the AI button is disabled. A call counts even if the AI output was unusable (it was paid for). Super admin isn't capped. The plan route now checks the client against the database instead of trusting the request. Hand-written plans and edits stay unlimited. The 5 is `AI_PLANS_PER_CLIENT_PER_MONTH` in `lib/ai-pricing.ts`. No SQL (#51)
 
