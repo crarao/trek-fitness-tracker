@@ -193,13 +193,12 @@ export function recentFromPlans(plans: { plan_json?: unknown }[], max = 40): str
   return out
 }
 
-// Yoga companies (25 Nov): the shared starter list is mostly gym moves, so a yoga company sees only its own
-// exercises plus the starter list's bodyweight mobility items (Surya Namaskar, Child's Pose, Downward Dog,
-// Cat-Cow, stretches, Deep Breathing) and a few poses yoga uses too. Display only: matching names, saved plans,
-// logs and reports still use the full list.
-const YOGA_STARTER_KEEP = new Set(['plank', 'sideplank', 'birddog'])
+// Yoga companies (25 Nov): the shared starter list is gym moves with English names, so a yoga company sees only
+// its own exercises (the asana list, db/2026-11-25-yoga-asanas.md, Sanskrit names) plus Surya Namaskar.
+// Display only: matching names, saved plans, logs and reports still use the full list.
+const YOGA_STARTER_KEEP = new Set(['suryanamaskar'])
 
 export function shownForBusiness(e: Pick<Exercise, 'company_id' | 'name' | 'muscle_group' | 'equipment'>, businessType: string | null | undefined): boolean {
   if (businessType !== 'yoga' || e.company_id) return true
-  return e.equipment === 'bodyweight' && (e.muscle_group === 'mobility' || YOGA_STARTER_KEEP.has(nameKey(e.name)))
+  return YOGA_STARTER_KEEP.has(nameKey(e.name))
 }
