@@ -2,7 +2,7 @@
 // No test framework needed (uses the TypeScript compiler already in devDependencies):
 //   npx tsc scripts/check-exercises.ts --outDir /tmp/ce --module commonjs --target es2020 --skipLibCheck && node /tmp/ce/scripts/check-exercises.js
 
-import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, linkPlanExercises, type Exercise } from '../lib/exercises'
+import { searchExercises, hasExactName, recentFromPlans, tidyName, nameKey, findExercise, linkPlanExercises, shownForBusiness, type Exercise } from '../lib/exercises'
 import { normalizePlan, planToText, exerciseDetail, parseExerciseLine, textToPlan, withSetTargets, withoutSetTargets, startSetTargets } from '../lib/plan-structure'
 
 const ex = (id: string, name: string, muscle_group: string, equipment: string, aliases: string[] = [], company_id: string | null = null): Exercise =>
@@ -115,6 +115,14 @@ check('starting rows from the exercise', JSON.stringify(startSetTargets({ name: 
   '[{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8},{"kg":12.5,"reps":8}]')
 check('bodyweight: no kg', JSON.stringify(startSetTargets({ name: 'Push-Up', sets: '', reps: '12', rest: '', note: '', weight: 'bodyweight' })),
   '[{"kg":null,"reps":12},{"kg":null,"reps":12},{"kg":null,"reps":12}]')
+
+// Yoga companies see only the starter list's mobility items (+ Plank / Side Plank / Bird Dog) and their own exercises
+const st = (name: string, muscle_group: string, equipment = 'bodyweight') => ({ company_id: null, name, muscle_group, equipment })
+const yogaShown = [st('Barbell Bench Press', 'chest', 'barbell'), st('Surya Namaskar', 'mobility'), st('Plank', 'core'),
+  st('Crunches', 'core'), st('Shoulder Dislocates', 'mobility', 'band'), { company_id: 'g1', name: 'Tree Pose', muscle_group: 'legs', equipment: 'bodyweight' }]
+check('yoga: starter gym moves hidden', yogaShown.filter(e => shownForBusiness(e, 'yoga')).map(e => e.name).join(', '), 'Surya Namaskar, Plank, Tree Pose')
+check('gym: everything shown', String(yogaShown.filter(e => shownForBusiness(e, 'gym')).length), '6')
+check('no business type: everything shown', String(yogaShown.filter(e => shownForBusiness(e, null)).length), '6')
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nAll checks passed')
 if (fails) process.exit(1)

@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   type Exercise, EXERCISE_COLUMNS, MUSCLE_GROUPS, EQUIPMENT, muscleLabel, equipmentLabel,
-  searchExercises, recentFromPlans, tidyName, normalizeName, findExercise, nameKey,
+  searchExercises, recentFromPlans, tidyName, normalizeName, findExercise, nameKey, shownForBusiness,
 } from '@/lib/exercises'
 
 export type PickedExercise = { name: string; exercise_id?: string; muscle_group?: string | null }
@@ -20,14 +20,19 @@ type Library = { list: Exercise[]; recent: string[]; missing: boolean }
 const cache = new Map<string, Library>()
 
 async function loadLibrary(companyId: string | null): Promise<Library> {
-  const [ex, plans] = await Promise.all([
+  const [ex, plans, company] = await Promise.all([
     supabase.from('exercises').select(EXERCISE_COLUMNS).eq('is_archived', false).order('name').limit(2000),
     // Database rules limit this to the viewer's gym (coaches: PT clients' plans)
     supabase.from('weekly_plans').select('plan_json').not('plan_json', 'is', null)
       .order('created_at', { ascending: false }).limit(40),
+    // Business type: a yoga company doesn't see the starter list's gym moves (shownForBusiness). Error = show all
+    companyId ? supabase.from('companies').select('business_type').eq('id', companyId).maybeSingle() : null,
   ])
   const missing = !!ex.error
-  const list = ((ex.data || []) as Exercise[]).filter(e => !e.company_id || !companyId || e.company_id === companyId)
+  const businessType = (company?.data as { business_type?: string | null } | null)?.business_type ?? null
+  const list = ((ex.data || []) as Exercise[])
+    .filter(e => !e.company_id || !companyId || e.company_id === companyId)
+    .filter(e => shownForBusiness(e, businessType))
   return { list, recent: plans.error ? [] : recentFromPlans(plans.data || []), missing }
 }
 

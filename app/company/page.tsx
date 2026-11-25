@@ -278,11 +278,13 @@ export default function CompanyAdminPage() {
     setCompanyName(company?.name || '')
     setUpiId(company?.upi_id || '')
     setCoachCompany(isCoachCompany(company))
+    // Individual coaches train nearly every client: Add member starts with PT ticked (can be unticked)
+    if (isCoachCompany(company)) setNewClient(n => ({ ...n, client_type: 'pt' }))
     setBusinessType(company?.business_type ?? null)
     if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
     if (gradingOn(company)) fetchBeltRanks(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
-    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
+    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe, isCoachCompany(company))
     setTrainModule(!!company?.client_module_enabled)
     setSelfTrainingGym(getClientSettings(company).self_training_enabled && !isDojo(company?.business_type))
     setCurrency(company?.currency || 'INR')
@@ -326,7 +328,7 @@ export default function CompanyAdminPage() {
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
   // In a dojo the enquiry usually comes from a parent: its phone goes into Parent phone (Child starts ticked)
-  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>) => {
+  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>, solo = false) => {
     const { data: lead, error } = await supabase
       .from('leads')
       .select('id, name, phone, source, interest, status')
@@ -343,7 +345,7 @@ export default function CompanyAdminPage() {
       full_name: lead.name || '',
       phone: toParent ? '' : lead.phone || '',
       guardian_phone: toParent ? lead.phone || '' : '',
-      client_type: lead.interest === 'pt' ? 'pt' : 'member',
+      client_type: lead.interest === 'pt' || (solo && lead.interest !== 'membership') ? 'pt' : 'member',
       training: lead.interest === 'pt' ? 'pt' : '',
     }))
     setFromLead({ id: lead.id, name: lead.name, source: lead.source })
@@ -819,7 +821,7 @@ export default function CompanyAdminPage() {
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '', username: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
-      client_type: 'member', primary_coach_id: '', training: '',
+      client_type: coachCompany ? 'pt' : 'member', primary_coach_id: '', training: '',
       country: '', phone_country: '', currency: '',
       child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
       age: '', gender: '', medical_conditions: '',
