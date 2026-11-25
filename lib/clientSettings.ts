@@ -70,7 +70,7 @@ export const CLIENT_SETTING_GROUPS: ClientSettingGroup[] = [
 // Why self-training won't work yet for this gym, or '' when it will
 export function selfTrainingProblem(s: ClientSettings, trainModule: boolean): string {
   if (!s.self_training_enabled) return ''
-  const off = [!s.client_login && 'Client app', !trainModule && 'Client Training Module'].filter(Boolean)
+  const off = [!s.client_login && 'Client app', !trainModule && 'Training module'].filter(Boolean)
   return off.length ? `Self-training is on, but ${off.join(' and ')} ${off.length === 1 ? 'is' : 'are'} off: members can't use it yet.` : ''
 }
 
