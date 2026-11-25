@@ -46,20 +46,25 @@ export const LEGACY: ClientSettings = {
 // The card's rows, in order, each with one plain-English line
 export const CLIENT_SETTING_ROWS: { key: ClientSettingKey; label: string; help: string }[] = [
   { key: 'client_login', label: 'Client app', help: 'Clients can log in to the app. Off means they see "Your gym hasn\'t turned on the client app yet."' },
-  { key: 'client_can_log_sessions', label: 'Log own sessions', help: 'Clients can mark their plan days done themselves. Off means only coaches log workouts.' },
-  { key: 'client_can_log_activities', label: 'Log other activities', help: 'Clients can add a run, a sport or a class from the Log tab.' },
-  { key: 'client_sees_plan', label: 'See their plan', help: 'Clients see the plan their coach made, day by day (read-only).' },
-  { key: 'client_sees_detailed_progress', label: 'See strength progress', help: 'Clients see weights and sets per exercise. Off means only the weekly activity charts.' },
-  { key: 'client_can_edit_profile', label: 'Edit their profile', help: 'Clients can change their age, weight, goal and other fitness details.' },
-  { key: 'self_training_enabled', label: 'Self-training members', help: 'Members ticked as Self-training build their own weekly plan, log weights per set and see their progress, whatever the PT switches say. The gym sends the monthly report.' },
+  { key: 'client_can_log_sessions', label: 'Mark plan days done', help: 'They tap Done on a day of the plan their coach made. Off means only the coach logs workouts.' },
+  { key: 'client_can_log_activities', label: 'Log other activities', help: 'They add a run, a sport or a class from the Log tab.' },
+  { key: 'client_sees_plan', label: 'See their plan', help: 'They see the plan their coach made, day by day (read-only).' },
+  { key: 'client_sees_detailed_progress', label: 'See strength progress', help: 'They see weights and sets per exercise. Off means only the weekly activity charts.' },
+  { key: 'client_can_edit_profile', label: 'Edit their profile', help: 'They change their age, weight, goal and other fitness details.' },
+  { key: 'self_training_enabled', label: 'Self-training members', help: 'Offer the Self-training type when adding a member.' },
 ]
 
-// The card's groups: who each switch is for (the self-training switch overrides the PT ones for those members)
-export const CLIENT_SETTING_GROUPS: { title: string; help: string; keys: ClientSettingKey[] }[] = [
-  { title: 'Everyone', help: 'Off = no client can log in, PT or self-training.', keys: ['client_login'] },
-  { title: 'PT clients', help: 'What PT clients can do. Typical: see plan and progress, coach logs the workouts.',
-    keys: ['client_can_log_sessions', 'client_can_log_activities', 'client_sees_plan', 'client_sees_detailed_progress', 'client_can_edit_profile'] },
-  { title: 'Self-training members', help: 'Members ticked as Self-training always plan, log and see their progress.', keys: ['self_training_enabled'] },
+// The card's sections (25 Nov), one per kind of client: what that kind of client sees. Switches only where the
+// gym chooses; the self-training and membership-only sections list what they get (fixed). Keys are unchanged.
+export type ClientSettingGroup = { id: string; title: string; subtitle: string; keys: ClientSettingKey[]; fixed?: string[]; needsSelfTraining?: boolean }
+export const CLIENT_SETTING_GROUPS: ClientSettingGroup[] = [
+  { id: 'app', title: 'Client app', subtitle: 'Off = no client can log in, whatever is below.', keys: ['client_login'] },
+  { id: 'pt', title: 'PT clients', subtitle: 'The coach makes the plan. They can:',
+    keys: ['client_sees_plan', 'client_can_log_sessions', 'client_can_log_activities', 'client_sees_detailed_progress', 'client_can_edit_profile'] },
+  { id: 'self', title: 'Self-training members', subtitle: 'They plan and log their own workouts.', keys: ['self_training_enabled'],
+    fixed: ['Build their own weekly plan from the gym\'s exercise list', 'Log sets, weights and reps', 'See their strength progress', 'Log other activities and edit their profile', 'No AI plans or AI insights'] },
+  { id: 'member', title: 'Membership only', subtitle: 'Members who are neither PT nor Self-training.', keys: [], needsSelfTraining: true,
+    fixed: ['See their membership: plan, dates and days left', 'No plan, logging or progress screens'] },
 ]
 
 // Why self-training won't work yet for this gym, or '' when it will
@@ -97,6 +102,14 @@ export type TrainingPerson = { client_type?: string | null; self_training?: bool
 export const isSelfTraining = (person: TrainingPerson, s: ClientSettings) =>
   !!person && s.self_training_enabled && (person.client_type ?? 'member') !== 'pt'
   && (!('self_training' in person) || person.self_training === true)
+
+// Membership only (25 Nov): in a gym with self-training on, a non-PT member not ticked as Self-training sees only
+// the membership screen (plan, dates, days left), like a gym with the Training Module off. Needs the
+// profiles.self_training column; before it exists nobody is membership only. App screen only: the database
+// still applies the PT switches to them.
+export const isMembershipOnly = (person: TrainingPerson, s: ClientSettings) =>
+  !!person && s.self_training_enabled && 'self_training' in person
+  && (person.client_type ?? 'member') !== 'pt' && person.self_training !== true
 
 // The three kinds of client in a gym with self-training on (Add / Edit member, badges)
 export type TrainingType = 'pt' | 'self' | 'member'

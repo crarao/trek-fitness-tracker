@@ -15,7 +15,7 @@ import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calo
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 import { workoutTimeLabel } from '@/lib/today-schedule'
-import { getClientSettings, isSelfTraining, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
+import { getClientSettings, isSelfTraining, isMembershipOnly, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
 import { ownPlanOn } from '@/lib/self-training'
 import { staffWord } from '@/lib/labels'
 import { type ExerciseLog, EXERCISE_LOG_COLUMNS } from '@/lib/exercise-logs'
@@ -169,7 +169,8 @@ const [profileMessage, setProfileMessage] = useState('')
     // The gym hasn't turned the client app on: the page shows CLIENT_APP_OFF_MESSAGE, nothing else is read
     if (prof && !settings.client_login) { setLoading(false); return }
 
-    if (prof?.companies && !prof.companies.client_module_enabled) {
+    // Training Module off, or a membership-only member (25 Nov): the membership screen only
+    if (prof?.companies && (!prof.companies.client_module_enabled || isMembershipOnly(prof, settings))) {
       const { data: ms } = await supabase
         .from('memberships')
         .select('*') // * so the payment's currency is read once db/2026-11-01-multi-country.md has run
@@ -567,7 +568,8 @@ const handleChangePassword = async () => {
     </div>
   )
 
-  if (profile?.companies && !profile.companies.client_module_enabled) {
+  const membershipOnly = isMembershipOnly(profile, gymSettings)
+  if (profile?.companies && (!profile.companies.client_module_enabled || membershipOnly)) {
     const left = daysUntil(membership?.end_date)
     return (
       <div className="min-h-screen bg-gray-950 text-white">
@@ -613,7 +615,9 @@ const handleChangePassword = async () => {
               <p className="text-sm text-gray-500 italic">No membership on record yet. Please ask at the front desk.</p>
             )}
           </div>
-          <p className="text-xs text-gray-500 px-1">Your coach keeps track of your training. Talk to them about your plan.</p>
+          <p className="text-xs text-gray-500 px-1" data-testid={membershipOnly ? 'membership-only-note' : undefined}>
+            {membershipOnly ? 'Want a training plan? Ask at the front desk about PT or self-training.' : 'Your coach keeps track of your training. Talk to them about your plan.'}
+          </p>
         </div>
       </div>
     )

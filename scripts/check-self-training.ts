@@ -7,7 +7,7 @@ import { summarizeMonth } from '../lib/monthly-report'
 import { monthReview, plateauLine, listText } from '../lib/review-report'
 import type { ProgressLog } from '../lib/progress'
 import type { PlanJson } from '../lib/plan-structure'
-import { isSelfTraining, trainingTypeOf, trainingFields, selfTrainingProblem, GYM_DEFAULTS } from '../lib/clientSettings'
+import { isSelfTraining, isMembershipOnly, trainingTypeOf, trainingFields, selfTrainingProblem, GYM_DEFAULTS } from '../lib/clientSettings'
 
 let failed = 0
 const eq = (label: string, got: unknown, want: unknown) => {
@@ -113,6 +113,11 @@ eq('self: no person', isSelfTraining(null, on), false)
 eq('training type', [trainingTypeOf({ client_type: 'pt' }), trainingTypeOf({ client_type: 'member', self_training: true }), trainingTypeOf({ client_type: null })], ['pt', 'self', 'member'])
 eq('training fields', [trainingFields('pt', true), trainingFields('self', true), trainingFields('member', false)],
   [{ client_type: 'pt', self_training: false }, { client_type: 'member', self_training: true }, { client_type: 'member' }])
+eq('membership only: unticked member', isMembershipOnly({ client_type: 'member', self_training: false }, on), true)
+eq('membership only: not for self-training', isMembershipOnly({ client_type: 'member', self_training: true }, on), false)
+eq('membership only: not for PT', isMembershipOnly({ client_type: 'pt', self_training: false }, on), false)
+eq('membership only: switch off = never', isMembershipOnly({ client_type: 'member', self_training: false }, GYM_DEFAULTS), false)
+eq('membership only: before the column = never', isMembershipOnly({ client_type: 'member' }, on), false)
 eq('warning: fine', selfTrainingProblem(on, true), '')
 eq('warning: switch off = none', selfTrainingProblem(GYM_DEFAULTS, false), '')
 eq('warning: app + module off', selfTrainingProblem({ ...GYM_DEFAULTS, self_training_enabled: true }, false),
