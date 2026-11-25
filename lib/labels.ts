@@ -47,3 +47,8 @@ export function staffWord(value: string | null | undefined): { one: string; many
 export function ptWord(value: string | null | undefined): string {
   return isDojo(value) ? 'students' : 'PT clients'
 }
+
+// The sign-off emoji on WhatsApp messages: 🥋 for martial arts, 🧘 for yoga, 💪 for everyone else
+export function messageEmoji(value: string | null | undefined): string {
+  return isDojo(value) ? '🥋' : value === 'yoga' ? '🧘' : '💪'
+}

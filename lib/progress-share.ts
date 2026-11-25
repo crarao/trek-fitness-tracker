@@ -11,6 +11,7 @@ import { estimateKcal } from './calories'
 import { parseActivity } from './activities'
 import { sessionsInWeek } from './weekly-totals'
 import { pickRecipient } from './guardian'
+import { messageEmoji } from './labels'
 
 export type ShareClient = {
   full_name: string
@@ -200,7 +201,7 @@ export function buildProgressMessage(opts: {
   out.push(`Week of ${formatDate(weekStart, country, 'dayMonth')}`)
 
   if (!sessions.length) {
-    const emoji = businessType === 'martial_arts' ? '🥋' : '💪'
+    const emoji = messageEmoji(businessType)
     out.push('', `No sessions logged ${isCurrent ? 'this' : 'that'} week. Let's get back on track ${emoji}`)
   } else {
     if (planned) {
@@ -242,7 +243,7 @@ export function buildSessionMessage(opts: {
   const country = opts.country ?? 'IN'
   const to = recipient(client, country)
   const when = session.session_date === (opts.today ?? localToday()) ? 'today' : `on ${formatDate(session.session_date, country, 'weekday')}`
-  const emoji = opts.businessType === 'martial_arts' ? '🥋' : '💪'
+  const emoji = messageEmoji(opts.businessType)
   const greeting = greet(to.greetName, to.guardian
     ? `${firstName(client.full_name)} had a great session ${when}`
     : `great session ${when}`, country)

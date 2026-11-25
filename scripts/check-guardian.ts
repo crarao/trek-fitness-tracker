@@ -31,6 +31,7 @@ const dojoParent = reminderText({ ...base, status: 'expiring', toParent: true, b
 check('dojo parent expiring', dojoParent, dojoParent === "Namaste Priya 🙏\nAarav's fees at Demo Dojo are due on 10 Nov. Please renew to continue classes. 🥋")
 check('martial_arts emoji 🥋', '', reminderText({ ...base, status: 'expired', toParent: false, businessType: 'martial_arts', country: 'IN' }).endsWith('🥋'))
 check('gym emoji 💪', '', gymExpired.endsWith('💪'))
+check('yoga emoji 🧘', '', reminderText({ ...base, status: 'expired', toParent: false, businessType: 'yoga', country: 'IN' }).endsWith('🧘'))
 const us = reminderText({ ...base, memberFirst: 'Sam', parentFirst: 'Jordan', companyName: 'Peak Dojo', status: 'expiring', toParent: true, businessType: 'martial_arts', country: 'US' })
 console.log(`   US date (parent):\n     ${us}`)
 check('US date reads month first', us, us.includes('Nov 10'))

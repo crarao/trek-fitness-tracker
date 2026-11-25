@@ -25,6 +25,7 @@ import { monthlyProgress, type DatedLog, weightText } from './exercise-logs'
 import type { Exercise } from './exercises'
 import { type ShareClient, type SharePlan, type ShareSession, type ShareResult, waPhone } from './progress-share'
 import { pickRecipient } from './guardian'
+import { messageEmoji } from './labels'
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const addDays = (date: string, n: number) => { const d = parseDate(date.slice(0, 10)); d.setDate(d.getDate() + n); return iso(d) }
@@ -246,7 +247,7 @@ export function buildMonthlyMessage(opts: {
   out.push(monthRangeText(s, country))
 
   if (!s.sessions) {
-    const emoji = opts.businessType === 'martial_arts' ? '🥋' : '💪'
+    const emoji = messageEmoji(opts.businessType)
     out.push('', `No sessions logged in ${monthName}${s.current ? ' yet' : ''}. Let's get back on track ${emoji}`)
   } else {
     out.push('', s.planned ? `✅ ${s.done} of ${s.planned} planned sessions done` : `✅ ${plural(s.sessions, 'session')} logged`)
