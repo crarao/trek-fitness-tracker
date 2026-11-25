@@ -104,6 +104,11 @@ type Partner = {
   archived_at?: string | null
 }
 
+// Client app setup: a coloured left edge per kind of client (same colours as the PT / Self badges)
+const GROUP_ACCENT: Record<string, string> = {
+  app: 'border-l-orange-500', pt: 'border-l-purple-500', self: 'border-l-teal-500', member: 'border-l-gray-400',
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
@@ -1636,17 +1641,19 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               )}
                               {/* One section per kind of client (25 Nov): what that kind of client sees. Switches where the gym
                                   chooses; a fixed list for self-training and membership only. Same keys as before. */}
-                              <div className="space-y-3 mt-3">
+                              <div className="space-y-4 mt-3">
                               {CLIENT_SETTING_GROUPS.map(group => {
                                 if (group.needsSelfTraining && !cs.self_training_enabled) return null
                                 const groupOff = group.id !== 'app' && !cs.client_login
                                 const selfOff = group.id === 'self' && !cs.self_training_enabled
                                 return (
-                                <div key={group.id} className={`rounded-xl border border-gray-800 p-3 ${groupOff ? 'opacity-50' : ''}`} data-testid={`client-setup-${group.id}`}>
-                                  <div className="flex justify-between items-start gap-3">
+                                <div key={group.id} data-testid={`client-setup-${group.id}`}
+                                  className={`rounded-xl border border-gray-600 bg-gray-800/40 overflow-hidden border-l-4 ${GROUP_ACCENT[group.id] ?? 'border-l-gray-500'} ${groupOff ? 'opacity-50' : ''}`}>
+                                  {/* Header strip (25 Nov): a clear title band so each section's edge and name stand out */}
+                                  <div className="flex justify-between items-start gap-3 bg-gray-800 border-b border-gray-700 px-3 py-2.5">
                                     <div>
-                                      <p className="text-sm text-white font-medium">{group.title}</p>
-                                      <p className="text-xs text-gray-500">{group.subtitle}</p>
+                                      <p className="text-base text-white font-semibold">{group.title}</p>
+                                      <p className="text-xs text-gray-400">{group.subtitle}</p>
                                     </div>
                                     {/* A one-switch section puts its switch in the header */}
                                     {group.keys.length === 1 && (() => {
@@ -1664,7 +1671,7 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                     })()}
                                   </div>
                                   {group.keys.length > 1 && (
-                                    <div className="space-y-2 mt-2">
+                                    <div className="space-y-2 p-3">
                                       {CLIENT_SETTING_ROWS.filter(row => group.keys.includes(row.key)).map(row => {
                                         const on = cs[row.key]
                                         return (
@@ -1686,13 +1693,13 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                     </div>
                                   )}
                                   {group.fixed && !selfOff && (
-                                    <ul className="mt-2 space-y-1">
+                                    <ul className="px-3 py-2.5 space-y-1">
                                       {group.fixed.map(line => (
                                         <li key={line} className="text-xs text-gray-400 flex gap-2"><span className="text-gray-600">·</span>{line}</li>
                                       ))}
                                     </ul>
                                   )}
-                                  {selfOff && <p className="text-xs text-gray-500 mt-2">Off: every member is PT or a regular member, as before.</p>}
+                                  {selfOff && <p className="text-xs text-gray-500 px-3 py-2.5">Off: every member is PT or a regular member, as before.</p>}
                                 </div>
                                 )
                               })}
