@@ -1634,34 +1634,69 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                               {ready && selfTrainingProblem(cs, !!editingCompany.client_module_enabled) && (
                                 <p className="text-xs text-amber-400 mt-1" data-testid="self-training-warning">{selfTrainingProblem(cs, !!editingCompany.client_module_enabled)}</p>
                               )}
-                              {/* Grouped by who the switch is for (24 Nov): self-training members override the PT switches */}
-                              {CLIENT_SETTING_GROUPS.map(group => (
-                              <div key={group.title} className="mt-3">
-                                <p className="text-xs text-gray-400 uppercase tracking-wider">{group.title}</p>
-                                <p className="text-[11px] text-gray-500 mb-1.5">{group.help}</p>
-                              <div className="space-y-2">
-                                {CLIENT_SETTING_ROWS.filter(row => group.keys.includes(row.key)).map(row => {
-                                  const on = cs[row.key]
-                                  const dim = row.key !== 'client_login' && !cs.client_login
-                                  return (
-                                    <div key={row.key} className="flex justify-between items-center gap-3 bg-gray-800/50 rounded-xl px-3 py-2.5">
-                                      <div className={dim ? 'opacity-50' : ''}>
-                                        <p className="text-sm text-white">{row.label}</p>
-                                        <p className="text-xs text-gray-500">{row.help}</p>
-                                      </div>
-                                      <button type="button" disabled={!ready} aria-pressed={on}
-                                        onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [row.key]: !on } })}
-                                        className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on
-                                          ? 'bg-green-950 border-green-700 text-green-400'
-                                          : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                                        {on ? 'ON' : 'OFF'}
-                                      </button>
+                              {/* One section per kind of client (25 Nov): what that kind of client sees. Switches where the gym
+                                  chooses; a fixed list for self-training and membership only. Same keys as before. */}
+                              <div className="space-y-3 mt-3">
+                              {CLIENT_SETTING_GROUPS.map(group => {
+                                if (group.needsSelfTraining && !cs.self_training_enabled) return null
+                                const groupOff = group.id !== 'app' && !cs.client_login
+                                const selfOff = group.id === 'self' && !cs.self_training_enabled
+                                return (
+                                <div key={group.id} className={`rounded-xl border border-gray-800 p-3 ${groupOff ? 'opacity-50' : ''}`} data-testid={`client-setup-${group.id}`}>
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div>
+                                      <p className="text-sm text-white font-medium">{group.title}</p>
+                                      <p className="text-xs text-gray-500">{group.subtitle}</p>
                                     </div>
-                                  )
-                                })}
+                                    {/* A one-switch section puts its switch in the header */}
+                                    {group.keys.length === 1 && (() => {
+                                      const key = group.keys[0]
+                                      const on = cs[key]
+                                      return (
+                                        <button type="button" disabled={!ready} aria-pressed={on} aria-label={group.title}
+                                          onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [key]: !on } })}
+                                          className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on
+                                            ? 'bg-green-950 border-green-700 text-green-400'
+                                            : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                                          {on ? 'ON' : 'OFF'}
+                                        </button>
+                                      )
+                                    })()}
+                                  </div>
+                                  {group.keys.length > 1 && (
+                                    <div className="space-y-2 mt-2">
+                                      {CLIENT_SETTING_ROWS.filter(row => group.keys.includes(row.key)).map(row => {
+                                        const on = cs[row.key]
+                                        return (
+                                          <div key={row.key} className="flex justify-between items-center gap-3 bg-gray-800/50 rounded-xl px-3 py-2.5">
+                                            <div>
+                                              <p className="text-sm text-white">{row.label}</p>
+                                              <p className="text-xs text-gray-500">{row.help}</p>
+                                            </div>
+                                            <button type="button" disabled={!ready} aria-pressed={on}
+                                              onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [row.key]: !on } })}
+                                              className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on
+                                                ? 'bg-green-950 border-green-700 text-green-400'
+                                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                                              {on ? 'ON' : 'OFF'}
+                                            </button>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                  {group.fixed && !selfOff && (
+                                    <ul className="mt-2 space-y-1">
+                                      {group.fixed.map(line => (
+                                        <li key={line} className="text-xs text-gray-400 flex gap-2"><span className="text-gray-600">·</span>{line}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {selfOff && <p className="text-xs text-gray-500 mt-2">Off: every member is PT or a regular member, as before.</p>}
+                                </div>
+                                )
+                              })}
                               </div>
-                              </div>
-                              ))}
                             </div>
                           )
                         })()}
