@@ -121,7 +121,7 @@ eq('membership only: before the column = never', isMembershipOnly({ client_type:
 eq('warning: fine', selfTrainingProblem(on, true), '')
 eq('warning: switch off = none', selfTrainingProblem(GYM_DEFAULTS, false), '')
 eq('warning: app + module off', selfTrainingProblem({ ...GYM_DEFAULTS, self_training_enabled: true }, false),
-  "Self-training is on, but Client app and Client Training Module are off: members can't use it yet.")
+  "Self-training is on, but Client app and Training module are off: members can't use it yet.")
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1) }
 console.log('\nall passed')
