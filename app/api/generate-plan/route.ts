@@ -159,7 +159,8 @@ If the Goal or Medical Conditions text mentions a different number of days, stil
     }
 
     // Yoga gets its own safety and output rules: the gym ones talk about machines and loaded squats, and yoga holds
-    // are written as a time ("30 s") so the logging screen doesn't ask for kg × reps (isTimedOrDistance in lib/exercise-logs.ts)
+    // are written as a time ("30 s") so the logging screen doesn't ask for kg × reps (isTimedOrDistance in lib/exercise-logs.ts);
+    // Sanskrit names, matching the yoga asana list (db/2026-11-25-yoga-asanas.md)
     const yoga = businessType === 'yoga'
     const equipmentRules = yoga
       ? `- Use mats and common props only (block, strap, bolster, wall, chair). If the Goal or Medical Conditions mention no props, use none.
@@ -172,9 +173,9 @@ If the Goal or Medical Conditions text mentions a different number of days, stil
 - If the client has knee pain, avoid deep or heavy loaded knee flexion (back squats, deep lunges, jumping) and prefer knee-friendly alternatives (glute bridges, hip thrusts, step-ups to a low box, wall sits with limited range).
 `
     const outputRules = yoga
-      ? `- Workout days: rest = false, a short focus (e.g. "Hip Opening and Balance"), 6–8 items: start with breathing or a gentle warm-up (e.g. Cat-Cow, Surya Namaskar), then the main poses, and end with Savasana or a short relaxation.
-- Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Deep Breathing" – 10 min).
-- Each item: the common English pose name only (e.g. "Tree Pose", "Warrior II", "Bridge Pose"; it is matched to the exercise list), sets = the number of rounds or sides (e.g. "2", or "1" for a flow or relaxation), reps = the hold time written as a time (e.g. "30 s", "1 min", "5 min"; never breaths or counts), rest (e.g. "15 s" or ""), and an optional short note (the Sanskrit name, an alignment cue, a modification, or "each side"). Use "" for parts that don't apply.
+      ? `- Workout days: rest = false, a short focus (e.g. "Hip Opening and Balance"), 6–8 items: start with breathing or a gentle warm-up (e.g. Marjaryasana-Bitilasana, Surya Namaskar), then the main asanas, and end with Shavasana or a short relaxation.
+- Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Nadi Shodhana" – 10 min).
+- Each item: the Sanskrit asana name as commonly written in India (e.g. "Vrikshasana", "Virabhadrasana II", "Setu Bandhasana", "Shavasana"; breathing: "Kapalbhati", "Nadi Shodhana"; it is matched to the exercise list), sets = the number of rounds or sides (e.g. "2", or "1" for a flow or relaxation), reps = the hold time written as a time (e.g. "30 s", "1 min", "5 min"; never breaths or counts), rest (e.g. "15 s" or ""), and an optional short note (the English name, an alignment cue, a modification, or "each side"; e.g. "Tree pose. Each side, hand on the wall if needed"). Use "" for parts that don't apply.
 `
       : `- Workout days: rest = false, a short focus (e.g. "Lower Body Strength"), 5–7 exercises including a warm-up first and a cool-down last.
 - Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Light walk or stretching" – 20 min).
