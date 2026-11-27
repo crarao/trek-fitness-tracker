@@ -70,7 +70,7 @@ export default function ClientPage() {
   // the coach still logs the training from their side
   const [membership, setMembership] = useState<{ plan_type: string; start_date: string; end_date: string; amount_paid?: number | null; currency?: string | null } | null>(null)
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
+  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'sessions' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
   // Full plan text open by default for this week's plan (the one the client trains from)
   const [planOpen, setPlanOpen] = useState(true)
@@ -402,7 +402,7 @@ const handleChangePassword = async () => {
     const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, activity, businessType: profile?.companies?.business_type })
     showToast(`✓ ${activityText(activity)} saved${kcal ? ` — ${kcalText(kcal)} (estimate)` : ''}`)
     initialize()
-    setActiveTab('progress')
+    setActiveTab('sessions')
   }
 
   // "Done ✓" on a day of this week's plan: saves a normal session linked to the plan and the day
@@ -545,8 +545,8 @@ const handleChangePassword = async () => {
       </div>
     )
   }
-  // Tabs this gym shows: My Plan (client_sees_plan), Log (client_can_log_activities), Progress, Profile
-  const tabs = (['plan', 'log', 'progress', 'profile'] as const)
+  // Tabs this gym shows: My Plan (client_sees_plan), Log (client_can_log_activities), Progress, Sessions, Profile
+  const tabs = (['plan', 'log', 'progress', 'sessions', 'profile'] as const)
     .filter(t => (t !== 'plan' || cs.client_sees_plan) && (t !== 'log' || cs.client_can_log_activities))
   const shownTab = tabs.includes(activeTab) ? activeTab : tabs[0]
 
@@ -708,7 +708,7 @@ const handleChangePassword = async () => {
       className={`flex-1 py-3 text-xs font-medium transition ${shownTab === tab
         ? 'text-orange-500 border-b-2 border-orange-500'
         : 'text-gray-500 hover:text-white'}`}>
-      {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : 'Profile'}
+      {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : tab === 'sessions' ? 'Sessions' : 'Profile'}
     </button>
   ))}
 </div>
@@ -1053,6 +1053,12 @@ const handleChangePassword = async () => {
                 loggerName={id => { const t = loggerShort(id); return t.charAt(0).toUpperCase() + t.slice(1) }} />
             )}
 
+          </div>
+        )}
+
+        {/* SESSIONS TAB — every logged session (by the client or the coach), feedback and the client's note; was the end of Progress */}
+        {shownTab === 'sessions' && (
+          <div className="space-y-4" data-testid="client-sessions">
             <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">

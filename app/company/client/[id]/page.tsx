@@ -2481,6 +2481,11 @@ const handleResetPassword = async () => {
             : { dot: 'bg-green-500', text: `Active till ${mEnd}`, cls: 'text-green-300 border-green-900' }
           : null
         const menuItem = 'w-full text-left px-4 min-h-[44px] text-sm hover:bg-gray-800 transition flex items-center'
+        const loginUser = usernameOf(client?.email)
+        const loginText = loginUser ? <>Login: username <span className="text-gray-300">{loginUser}</span></>
+          : isNoLogin(client?.email) ? (isCoach ? 'No login yet' : 'No login yet · ⋯ → Create login')
+          : isPhoneLogin(client?.email) ? <>Login: phone number <span className="text-gray-300">{displayPhone(client?.phone, country)}</span></>
+          : client?.email ? <>Login: email <span className="text-gray-300">{client.email}</span></> : null
         return (
           <div className="bg-gray-900 border-b border-gray-800">
             <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-4">
@@ -2504,6 +2509,8 @@ const handleResetPassword = async () => {
                     )}
                   </div>
                   {metaLine && <p className="text-xs text-gray-500 mt-0.5">{metaLine}</p>}
+                  {/* How they log in, next to Reset password (moved up from Profile → Contact; the coach is asked "what was my username?") */}
+                  {loginText && <p className="text-xs text-gray-500 mt-0.5" data-testid="client-login">{loginText}</p>}
                 </div>
                 {/* Member admin (reset password, edit / renew, archive, delete): owner and partners only */}
                 {!isCoach && (
@@ -2789,6 +2796,12 @@ const handleResetPassword = async () => {
   <div className="bg-gray-900 border-b border-gray-800 px-6 py-4">
     <div className="max-w-2xl mx-auto space-y-3">
       <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Reset Client Password</p>
+      {/* Which login this resets */}
+      <p className="text-sm text-gray-300" data-testid="reset-login">
+        {usernameOf(client?.email) ? <>For username <span className="font-semibold text-white">{usernameOf(client?.email)}</span></>
+          : isPhoneLogin(client?.email) ? <>For phone login <span className="font-semibold text-white">{displayPhone(client?.phone, country)}</span></>
+          : client?.email ? <>For email login <span className="font-semibold text-white">{client.email}</span></> : null}
+      </p>
       <div className="relative">
         <input
           type={showResetPasswordValue ? 'text' : 'password'}
@@ -4408,12 +4421,6 @@ const handleResetPassword = async () => {
             <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact</p>
             <p className="text-sm text-white">{displayPhone(client?.phone, country) || '—'}</p>
             <p className="text-sm text-gray-400">{shownEmail(client?.email)}</p>
-            {/* How they log in (the coach is asked "what was my username?") */}
-            <p className="text-xs text-gray-500 mt-1">
-              {usernameOf(client?.email) ? <>Login: username <span className="text-gray-300">{usernameOf(client?.email)}</span></>
-                : isNoLogin(client?.email) ? (isCoach ? 'No login yet' : 'No login yet · ⋯ → Create login')
-                : isPhoneLogin(client?.email) ? 'Login: phone number' : client?.email ? 'Login: email' : ''}
-            </p>
           </div>
         </>
       )}
