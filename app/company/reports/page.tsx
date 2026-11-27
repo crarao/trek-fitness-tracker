@@ -26,7 +26,7 @@ import { expandOwnPlans, ownPlanOn } from '@/lib/self-training'
 import { monthReview, plateauLine } from '@/lib/review-report'
 
 type Company = { id: string; name: string; country?: string | null; business_type?: string | null; company_type?: string | null; client_settings?: unknown; created_at?: string }
-type Member = ShareClient & { id: string; client_type?: string | null; weight_kg?: number | null; created_at?: string }
+type Member = ShareClient & { id: string; client_type?: string | null; self_training?: boolean | null; weight_kg?: number | null; created_at?: string }
 type Plan = { id: string; client_id: string; week_start: string; plan_details: string; plan_json?: unknown; created_by?: string | null; created_at?: string | null }
 type Session = { id: string; client_id: string; session_date: string; duration_minutes: number; weekly_plan_id: string | null; plan_day?: string | null; activity?: string | null }
 type Made = { text: string; toPhone: string | null; toLabel: string }
@@ -82,7 +82,7 @@ function Reports() {
       if (!live) return
       if (mErr) { setProblem("Couldn't load the members. Refresh to try again."); return }
       // PT members, and self-training members when the gym has self-training on
-      setMembers(((list || []) as Member[]).filter(m => m.client_type === 'pt' || isSelfTraining(m.client_type, s)))
+      setMembers(((list || []) as Member[]).filter(m => m.client_type === 'pt' || isSelfTraining(m, s)))
       const options = monthOptions({ since: (co as Company).created_at ?? null, country: normalizeCountry(co.country) })
       setMonth(defaultMonth(options))
     })()
@@ -123,7 +123,7 @@ function Reports() {
     if (plansR.error || sessR.error) throw new Error((plansR.error || sessR.error)!.message)
     const rawPlans = (plansR.data || []) as Plan[]
     const rawSessions = (sessR.data || []) as Session[]
-    const self = isSelfTraining(m.client_type, settings)
+    const self = isSelfTraining(m, settings)
     const { upTo: monthEnd } = summarizeMonth({ plans: [], sessions: [], month })
     const ex = self ? expandOwnPlans(rawPlans, rawSessions, m.id, monthEnd) : { plans: rawPlans, sessions: rawSessions }
     const sessions = withoutEarlyLinks(ex.sessions, ex.plans)
@@ -242,7 +242,7 @@ function Reports() {
             ) : (
               <ul className={`${card} divide-y divide-gray-800`}>
                 {members.map(m => {
-                  const self = !!settings && isSelfTraining(m.client_type, settings)
+                  const self = !!settings && isSelfTraining(m, settings)
                   const open = openId === m.id
                   const r = made[m.id]
                   return (

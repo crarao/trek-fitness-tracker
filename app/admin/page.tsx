@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { type Country, COUNTRIES, normalizeCountry, currencyForCountry, formatDate, localDateIso, daysUntil } from '@/lib/locale'
@@ -15,7 +15,7 @@ import BeltsEditor from '@/app/belts-editor'
 import { cleanUpiId, upiProblem } from '@/lib/guardian'
 import { slugFromName, cleanSlugInput, slugProblem, slugTaken, slugTakenMessage, isSlugConflict, loginLinkPreview } from '@/lib/company-slug'
 import { gymAddress } from '@/lib/tenant'
-import { CLIENT_SETTING_ROWS, getClientSettings, clientSettingsToStore } from '@/lib/clientSettings'
+import { CLIENT_SETTING_ROWS, CLIENT_SETTING_GROUPS, getClientSettings, clientSettingsToStore, selfTrainingProblem } from '@/lib/clientSettings'
 import { type BrandingKind, uploadBranding } from '@/lib/branding-upload'
 import { bannerFor, taglineFor, bannerShowsBranding } from '@/lib/login-branding'
 import { type UsagePlan, type UsageMembership, type Health, type CompanyUsage, companyUsage, actionsFor, sortActions, onePerGym, sortUsage } from '@/lib/platform-usage'
@@ -102,6 +102,50 @@ type Partner = {
   phone: string
   email?: string | null
   archived_at?: string | null
+}
+
+// Client app setup: a coloured left edge per kind of client (same colours as the PT / Self badges)
+const GROUP_ACCENT: Record<string, string> = {
+  app: 'border-l-orange-500', pt: 'border-l-purple-500', self: 'border-l-teal-500', member: 'border-l-gray-400',
+  account: 'border-l-gray-500', staff: 'border-l-sky-500',
+}
+
+// Company edit (25 Nov): every group of switches is one of these cards, grouped by who it affects
+function SettingsCard({ accent, title, subtitle, right, dim, testId, children }: {
+  accent: string; title: string; subtitle: string; right?: ReactNode; dim?: boolean; testId?: string; children?: ReactNode
+}) {
+  return (
+    <div data-testid={testId}
+      className={`rounded-xl border border-gray-600 bg-gray-800/40 overflow-hidden border-l-4 ${accent} ${dim ? 'opacity-50' : ''}`}>
+      <div className={`flex justify-between items-start gap-3 bg-gray-800 px-3 py-2.5 ${children ? 'border-b border-gray-700' : ''}`}>
+        <div>
+          <p className="text-base text-white font-semibold">{title}</p>
+          <p className="text-xs text-gray-400">{subtitle}</p>
+        </div>
+        {right}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// One ON / OFF switch with its label (the same look everywhere in the company edit panel)
+function SwitchRow({ label, help, on, onClick, disabled, onText = 'ON', offText = 'OFF', onClass = 'bg-green-950 border-green-700 text-green-400', testId }: {
+  label: string; help: string; on: boolean; onClick: () => void; disabled?: boolean
+  onText?: string; offText?: string; onClass?: string; testId?: string
+}) {
+  return (
+    <div className="flex justify-between items-center gap-3 bg-gray-800/50 rounded-xl px-3 py-2.5" data-testid={testId}>
+      <div className="min-w-0">
+        <p className="text-sm text-white">{label}</p>
+        <p className="text-xs text-gray-500">{help}</p>
+      </div>
+      <button type="button" disabled={disabled} aria-pressed={on} aria-label={label} onClick={onClick}
+        className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on ? onClass : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+        {on ? onText : offText}
+      </button>
+    </div>
+  )
 }
 
 export default function AdminPage() {
@@ -1506,112 +1550,36 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                           </div>
                         </div>
 
-                        {/* Toggles */}
-                        <div className="border-t border-gray-800 pt-4 space-y-3">
-                          <p className="text-xs text-gray-500 uppercase tracking-wider">Feature Toggles</p>
-                          <div className="flex justify-between items-center bg-gray-800/50 rounded-xl px-3 py-2.5">
-                            <div>
-                              <p className="text-sm text-white">Test account</p>
-                              <p className="text-xs text-gray-500">
-                                {'is_test' in editingCompany
-                                  ? 'Leave out of the Dashboard and the Clients tab'
-                                  : 'Needs one SQL line first (db/2026-10-25-company-is-test.md)'}
-                              </p>
+                        {/* Settings by who they affect (25 Nov): Account, Staff tools, then Client app setup below.
+                            Same columns and the same ON / OFF meaning as before; only the layout and labels changed. */}
+                        <div className="border-t border-gray-800 pt-4 space-y-4">
+                          <SettingsCard accent={GROUP_ACCENT.account} title="Account" subtitle="About this company on CoachBoard." testId="settings-account">
+                            <div className="p-3">
+                              <SwitchRow label="Test account"
+                                help={'is_test' in editingCompany ? 'Leave out of the Dashboard and the Clients tab' : 'Needs one SQL line first (db/2026-10-25-company-is-test.md)'}
+                                on={!!editingCompany.is_test} disabled={!('is_test' in editingCompany)} onText="TEST" offText="REAL"
+                                onClass="bg-amber-950 border-amber-700 text-amber-300"
+                                onClick={() => setEditingCompany({ ...editingCompany, is_test: !editingCompany.is_test })} />
                             </div>
-                            <button type="button" disabled={!('is_test' in editingCompany)}
-                              onClick={() => setEditingCompany({ ...editingCompany, is_test: !editingCompany.is_test })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.is_test
-                                ? 'bg-amber-950 border-amber-700 text-amber-300'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.is_test ? 'TEST' : 'REAL'}
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-center bg-gray-800/50 rounded-xl px-3 py-2.5">
-                            <div>
-                              <p className="text-sm text-white">Client Training Module</p>
-                              <p className="text-xs text-gray-500">Plans, sessions, progress tabs for PT members</p>
+                          </SettingsCard>
+                          <SettingsCard accent={GROUP_ACCENT.staff} title="Staff tools" subtitle="What the owner, partners and coaches get." testId="settings-staff">
+                            <div className="space-y-2 p-3">
+                              <SwitchRow label="Training module" help="Plans, Sessions and Progress tabs for PT members. Off = memberships only, for staff and clients."
+                                on={!!editingCompany.client_module_enabled} testId="switch-training-module"
+                                onClick={() => setEditingCompany({ ...editingCompany, client_module_enabled: !editingCompany.client_module_enabled })} />
+                              <SwitchRow label="AI plans"
+                                help={'ai_plans_enabled' in editingCompany ? 'Coaches create weekly plans with AI (hand-written plans always work)' : 'Needs one SQL line first (db/2026-10-26-ai-plans-toggle.md)'}
+                                on={editingCompany.ai_plans_enabled !== false} disabled={!('ai_plans_enabled' in editingCompany)}
+                                onClick={() => setEditingCompany({ ...editingCompany, ai_plans_enabled: editingCompany.ai_plans_enabled === false })} />
+                              <SwitchRow label="AI diet chart"
+                                help={'ai_diet_enabled' in editingCompany ? 'Coaches create diet charts with AI (typed diet plans always work)' : 'Needs one SQL line first (db/2026-10-25-ai-diet-toggle.md)'}
+                                on={editingCompany.ai_diet_enabled !== false} disabled={!('ai_diet_enabled' in editingCompany)}
+                                onClick={() => setEditingCompany({ ...editingCompany, ai_diet_enabled: editingCompany.ai_diet_enabled === false })} />
+                              <SwitchRow label="Session feedback" help="Coaches write feedback on a client's session; the client reads it."
+                                on={!!editingCompany.feedback_enabled}
+                                onClick={() => setEditingCompany({ ...editingCompany, feedback_enabled: !editingCompany.feedback_enabled })} />
                             </div>
-                            <button
-                              onClick={() => setEditingCompany({ ...editingCompany, client_module_enabled: !editingCompany.client_module_enabled })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.client_module_enabled
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.client_module_enabled ? 'ON' : 'OFF'}
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-sm text-white">Client Feedback</p>
-                              <p className="text-xs text-gray-500">Allow coaches to give session feedback</p>
-                            </div>
-                            <button
-                              onClick={() => setEditingCompany({ ...editingCompany, feedback_enabled: !editingCompany.feedback_enabled })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.feedback_enabled
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.feedback_enabled ? 'ON' : 'OFF'}
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-sm text-white">AI Insights</p>
-                              <p className="text-xs text-gray-500">Show AI coaching insights to clients</p>
-                            </div>
-                            <button
-                              onClick={() => setEditingCompany({ ...editingCompany, ai_insights_enabled: !editingCompany.ai_insights_enabled })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.ai_insights_enabled
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.ai_insights_enabled ? 'ON' : 'OFF'}
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-sm text-white">AI Plans</p>
-                              <p className="text-xs text-gray-500">
-                                {'ai_plans_enabled' in editingCompany
-                                  ? 'Coaches can create weekly plans with AI (hand-written plans always work)'
-                                  : 'Needs one SQL line first (db/2026-10-26-ai-plans-toggle.md)'}
-                              </p>
-                            </div>
-                            <button type="button" disabled={!('ai_plans_enabled' in editingCompany)}
-                              onClick={() => setEditingCompany({ ...editingCompany, ai_plans_enabled: editingCompany.ai_plans_enabled === false })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.ai_plans_enabled !== false
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.ai_plans_enabled !== false ? 'ON' : 'OFF'}
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-sm text-white">AI Diet Chart</p>
-                              <p className="text-xs text-gray-500">
-                                {'ai_diet_enabled' in editingCompany
-                                  ? 'Coaches can create diet charts with AI (typed diet plans always work)'
-                                  : 'Needs one SQL line first (db/2026-10-25-ai-diet-toggle.md)'}
-                              </p>
-                            </div>
-                            <button type="button" disabled={!('ai_diet_enabled' in editingCompany)}
-                              onClick={() => setEditingCompany({ ...editingCompany, ai_diet_enabled: editingCompany.ai_diet_enabled === false })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${editingCompany.ai_diet_enabled !== false
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.ai_diet_enabled !== false ? 'ON' : 'OFF'}
-                            </button>
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-sm text-white">Session Notes</p>
-                              <p className="text-xs text-gray-500">Allow clients to add notes when logging</p>
-                            </div>
-                            <button
-                              onClick={() => setEditingCompany({ ...editingCompany, session_notes_enabled: !editingCompany.session_notes_enabled })}
-                              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition border ${editingCompany.session_notes_enabled
-                                ? 'bg-green-950 border-green-700 text-green-400'
-                                : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                              {editingCompany.session_notes_enabled ? 'ON' : 'OFF'}
-                            </button>
-                          </div>
-                        </div>
+                          </SettingsCard>
                         </div>
 
                         {/* Client app setup (19 Nov, lib/clientSettings.ts): set by super admin during the gym's setup
@@ -1629,28 +1597,64 @@ const handleToggleActive = async (companyId: string, currentStatus: boolean) => 
                                   : 'Needs Step 1 of db/2026-11-19-client-view.md first (until then clients keep today\'s app).'}
                               </p>
                               {ready && !editingCompany.client_module_enabled && (
-                                <p className="text-xs text-amber-400 mt-1">Client Training Module is off: clients only see their membership.</p>
+                                <p className="text-xs text-amber-400 mt-1">Training module is off (Staff tools): clients only see their membership, whatever is below.</p>
                               )}
-                              <div className="space-y-2 mt-3">
-                                {CLIENT_SETTING_ROWS.map(row => {
-                                  const on = cs[row.key]
-                                  const dim = row.key !== 'client_login' && !cs.client_login
-                                  return (
-                                    <div key={row.key} className="flex justify-between items-center gap-3 bg-gray-800/50 rounded-xl px-3 py-2.5">
-                                      <div className={dim ? 'opacity-50' : ''}>
-                                        <p className="text-sm text-white">{row.label}</p>
-                                        <p className="text-xs text-gray-500">{row.help}</p>
-                                      </div>
-                                      <button type="button" disabled={!ready} aria-pressed={on}
-                                        onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [row.key]: !on } })}
+                              {ready && selfTrainingProblem(cs, !!editingCompany.client_module_enabled) && (
+                                <p className="text-xs text-amber-400 mt-1" data-testid="self-training-warning">{selfTrainingProblem(cs, !!editingCompany.client_module_enabled)}</p>
+                              )}
+                              {/* One section per kind of client (25 Nov): what that kind of client sees. Switches where the gym
+                                  chooses; a fixed list for self-training and membership only. Same keys as before. */}
+                              <div className="space-y-4 mt-3">
+                              {CLIENT_SETTING_GROUPS.map(group => {
+                                if (group.needsSelfTraining && !cs.self_training_enabled) return null
+                                const groupOff = group.id !== 'app' && !cs.client_login
+                                const selfOff = group.id === 'self' && !cs.self_training_enabled
+                                return (
+                                <SettingsCard key={group.id} testId={`client-setup-${group.id}`} accent={GROUP_ACCENT[group.id] ?? 'border-l-gray-500'}
+                                  title={group.title} subtitle={group.subtitle} dim={groupOff}
+                                  right={group.keys.length === 1 ? (() => {
+                                    const key = group.keys[0]
+                                    const on = cs[key]
+                                    return (
+                                      <button type="button" disabled={!ready} aria-pressed={on} aria-label={group.title}
+                                        onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [key]: !on } })}
                                         className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-medium transition border disabled:opacity-40 ${on
                                           ? 'bg-green-950 border-green-700 text-green-400'
                                           : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
                                         {on ? 'ON' : 'OFF'}
                                       </button>
+                                    )
+                                  })() : undefined}>
+                                  {(group.keys.length > 1 || group.id === 'app') && (
+                                    <div className="space-y-2 p-3">
+                                      {group.keys.length > 1 && CLIENT_SETTING_ROWS.filter(row => group.keys.includes(row.key)).map(row => (
+                                        <SwitchRow key={row.key} label={row.label} help={row.help} on={cs[row.key]} disabled={!ready}
+                                          onClick={() => setEditingCompany({ ...editingCompany, client_settings: { ...cs, [row.key]: !cs[row.key] } })} />
+                                      ))}
+                                      {/* Company columns that belong to these clients (moved from Feature Toggles, 25 Nov) */}
+                                      {group.id === 'app' && (
+                                        <SwitchRow label="Notes when logging" help="Clients (PT and self-training) add a note to the workouts they log."
+                                          on={!!editingCompany.session_notes_enabled} testId="switch-session-notes"
+                                          onClick={() => setEditingCompany({ ...editingCompany, session_notes_enabled: !editingCompany.session_notes_enabled })} />
+                                      )}
+                                      {group.id === 'pt' && (
+                                        <SwitchRow label="AI insights" help="They ask for AI coaching feedback on their progress (never for self-training members)."
+                                          on={!!editingCompany.ai_insights_enabled} testId="switch-ai-insights"
+                                          onClick={() => setEditingCompany({ ...editingCompany, ai_insights_enabled: !editingCompany.ai_insights_enabled })} />
+                                      )}
                                     </div>
-                                  )
-                                })}
+                                  )}
+                                  {group.fixed && !selfOff && (
+                                    <ul className="px-3 py-2.5 space-y-1">
+                                      {group.fixed.map(line => (
+                                        <li key={line} className="text-xs text-gray-400 flex gap-2"><span className="text-gray-600">·</span>{line}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {selfOff && <p className="text-xs text-gray-500 px-3 py-2.5">Off: every member is PT or a regular member, as before.</p>}
+                                </SettingsCard>
+                                )
+                              })}
                               </div>
                             </div>
                           )

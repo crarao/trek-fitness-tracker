@@ -34,7 +34,7 @@ const draftKey = (memberId: string, date: string, day: string) => `self-day:${me
 const btn = 'min-h-[44px] rounded-xl text-sm font-semibold transition disabled:opacity-50'
 
 export default function MyPlan({
-  memberId, companyId, availableDays, country, plans, sessions, logs, library, notesEnabled, onSaved, toast,
+  memberId, companyId, availableDays, country, plans, sessions, logs, library, notesEnabled, onSaved, toast, businessType = null,
 }: {
   memberId: string
   companyId: string
@@ -47,6 +47,7 @@ export default function MyPlan({
   notesEnabled: boolean
   onSaved: () => void
   toast: (text: string, kind?: 'success' | 'error') => void
+  businessType?: string | null // yoga: Rounds / Hold in the plan builder
 }) {
   const today = localToday()
   const monday = mondayOf(today)
@@ -56,6 +57,7 @@ export default function MyPlan({
   const [editing, setEditing] = useState<PlanJson | null>(null)
   const [savingPlan, setSavingPlan] = useState(false)
   const [planError, setPlanError] = useState('')
+  const [showEarlier, setShowEarlier] = useState(false)
   const [openDay, setOpenDay] = useState<string | null>(null)
   const [draft, setDraft] = useState<DayDraft>(emptyDraft)
   const [dayError, setDayError] = useState('')
@@ -92,8 +94,50 @@ export default function MyPlan({
   // ---- Building / editing the plan ----
   const startEditing = () => {
     setPlanError('')
+    setShowEarlier(false)
     setEditing(json ? structuredClone(json) : emptyPlan(availableDays))
   }
+  // Earlier versions of their own plan (24 Nov): every own plan except the one in effect, newest first, one per
+  // week (a same-week edit replaced the older one). Picking one fills the editor; nothing is saved until Save.
+  const earlier = (() => {
+    const own = plans.filter(p => p.created_by === memberId && p.id !== current?.id)
+      .sort((a, b) => mondayOf(b.week_start).localeCompare(mondayOf(a.week_start)) || (b.created_at || '').localeCompare(a.created_at || ''))
+    const seen = new Set<string>()
+    return own.filter(p => { const w = mondayOf(p.week_start); if (seen.has(w)) return false; seen.add(w); return true })
+      .map(p => ({ plan: p, json: planJsonOf(p) }))
+      .filter((x): x is { plan: MyPlanRow; json: PlanJson } => !!x.json && workoutDays(x.json).length > 0)
+  })()
+  const pickEarlier = (p: PlanJson) => {
+    setPlanError('')
+    setShowEarlier(false)
+    setEditing(structuredClone(p))
+  }
+  const earlierList = earlier.length > 0 && (
+    <div className="rounded-xl border border-gray-800 bg-gray-950/60" data-testid="self-plan-earlier">
+      <button type="button" aria-expanded={showEarlier} onClick={() => setShowEarlier(!showEarlier)}
+        className="w-full flex items-center justify-between gap-3 px-3 min-h-[44px] text-left text-sm text-orange-300">
+        <span>Start from an earlier plan</span><span className="text-gray-500 text-xs">{showEarlier ? 'Hide' : earlier.length}</span>
+      </button>
+      {showEarlier && (
+        <ul className="border-t border-gray-800 divide-y divide-gray-800">
+          {earlier.map(({ plan, json: pj }) => (
+            <li key={plan.id}>
+              <button type="button" onClick={() => pickEarlier(pj)}
+                className="w-full flex items-center justify-between gap-3 px-3 py-2.5 min-h-[48px] text-left hover:bg-gray-900">
+                <span className="min-w-0">
+                  <span className="block text-sm text-white">Week of {formatDate(plan.week_start, country, 'dayMonth')}</span>
+                  <span className="block text-[11px] text-gray-500 truncate">
+                    {workoutDays(pj).length} training day{workoutDays(pj).length === 1 ? '' : 's'} · {workoutDays(pj).map(d => d.day).join(', ')}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs text-orange-400">Use</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
   const savePlan = async () => {
     if (!editing) return
     const clean = cleanPlan(editing)
@@ -119,7 +163,8 @@ export default function MyPlan({
         <p className="text-base font-semibold text-white">{current ? 'Edit my plan' : 'Build my plan'}</p>
         <p className="text-xs text-gray-500 mt-0.5">Tap a day, then add exercises from your gym&apos;s list. Your plan repeats every week until you change it.</p>
       </div>
-      <PlanEditor value={editing} onChange={setEditing} weekStart={monday} companyId={companyId} clientId={memberId}
+      {earlierList}
+      <PlanEditor value={editing} onChange={setEditing} weekStart={monday} companyId={companyId} clientId={memberId} businessType={businessType}
         country={country} allowCopy={false} libraryOnly />
       {planError && <p className="text-sm text-red-400">{planError}</p>}
       <div className="flex gap-2">
@@ -136,6 +181,7 @@ export default function MyPlan({
       <p className="text-base font-semibold text-white">Plan your training week</p>
       <p className="text-sm text-gray-400 mt-1">Pick your days and exercises. It repeats every week, and your progress builds as you log.</p>
       <button type="button" onClick={startEditing} className={`mt-4 w-full bg-orange-500 hover:bg-orange-400 text-white ${btn}`}>Build my plan</button>
+      {earlier.length > 0 && <div className="mt-3 text-left">{earlierList}</div>}
     </div>
   )
 

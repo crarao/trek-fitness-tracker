@@ -109,9 +109,14 @@ export async function POST(request: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
     // The client's gym, read from the database (for super admin this is the only source)
-    const { data: clientRow } = await admin.from('profiles').select('company_id').eq('id', clientId).single()
+    const { data: clientRow } = await admin.from('profiles').select('company_id, client_type').eq('id', clientId).single()
     const companyId: string | null = caller.role === 'super_admin' ? clientRow?.company_id ?? null : caller.companyId
     if (caller.role !== 'super_admin' && clientRow?.company_id !== caller.companyId) return forbidden()
+    // AI plans are for PT clients only (24 Nov): self-training and membership-only members get none, even when
+    // the route is called directly. Refused before any AI call, so nothing counts towards the monthly cap.
+    if (caller.role !== 'super_admin' && clientRow?.client_type !== 'pt') {
+      return NextResponse.json({ error: 'AI plans are for PT clients only.' }, { status: 403 })
+    }
 
     let usage: AiPlanUsage | null = null
     if (companyId) {
@@ -153,6 +158,30 @@ If the Goal or Medical Conditions text mentions a different number of days, stil
         + `The client's notes mention ${mentioned} days a week. If the profile is wrong, update Available Days and generate again.`)
     }
 
+    // Yoga gets its own safety and output rules: the gym ones talk about machines and loaded squats, and yoga holds
+    // are written as a time ("30 s") so the logging screen doesn't ask for kg × reps (isTimedOrDistance in lib/exercise-logs.ts);
+    // Sanskrit names, matching the yoga asana list (db/2026-11-25-yoga-asanas.md)
+    const yoga = businessType === 'yoga'
+    const equipmentRules = yoga
+      ? `- Use mats and common props only (block, strap, bolster, wall, chair). If the Goal or Medical Conditions mention no props, use none.
+- Knee pain: no kneeling without padding, no deep knee bends (Hero Pose, Garland Pose); keep the front knee above the ankle in lunges and warriors.
+- Back pain or a slipped disc: no deep forward folds with straight legs, no full backbends (Wheel, Camel) and no Plough or Shoulder Stand; prefer gentle versions (Cat-Cow, Sphinx, supported Bridge, bent-knee folds).
+- High blood pressure, heart conditions, glaucoma or pregnancy: no inversions (Headstand, Shoulder Stand, Plough), no breath holds and no Kapalbhati or Bhastrika; pregnancy also no deep twists and no lying on the belly.
+- Beginners and seniors: no Headstand, Crow or other arm balances; offer a supported or chair version of standing poses.
+`
+      : `- If machines are excluded, do NOT use any machine or cable station (no cable exercises, pec deck, leg press, leg curl, lat pulldown, smith machine). Free weights, bodyweight and outdoor exercises are allowed unless also excluded.
+- If the client has knee pain, avoid deep or heavy loaded knee flexion (back squats, deep lunges, jumping) and prefer knee-friendly alternatives (glute bridges, hip thrusts, step-ups to a low box, wall sits with limited range).
+`
+    const outputRules = yoga
+      ? `- Workout days: rest = false, a short focus (e.g. "Hip Opening and Balance"), 6–8 items: start with breathing or a gentle warm-up (e.g. Marjaryasana-Bitilasana, Surya Namaskar), then the main asanas, and end with Shavasana or a short relaxation.
+- Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Nadi Shodhana" – 10 min).
+- Each item: the Sanskrit asana name as commonly written in India (e.g. "Vrikshasana", "Virabhadrasana II", "Setu Bandhasana", "Shavasana"; breathing: "Kapalbhati", "Nadi Shodhana"; it is matched to the exercise list), sets = the number of rounds or sides (e.g. "2", or "1" for a flow or relaxation), reps = the hold time written as a time (e.g. "30 s", "1 min", "5 min"; never breaths or counts), rest (e.g. "15 s" or ""), and an optional short note (the English name, an alignment cue, a modification, or "each side"; e.g. "Tree pose. Each side, hand on the wall if needed"). Use "" for parts that don't apply.
+`
+      : `- Workout days: rest = false, a short focus (e.g. "Lower Body Strength"), 5–7 exercises including a warm-up first and a cool-down last.
+- Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Light walk or stretching" – 20 min).
+- Each exercise: name, sets (a number, e.g. "3"), reps (e.g. "10", "8–12", "30 s", "1 km"), rest (e.g. "60 s"), and an optional short note (a form cue or a safety tip). Use "" for parts that don't apply.
+`
+
     const prompt = `You are an experienced ${businessType.replace(/_/g, ' ')} coach creating a detailed weekly training plan for a client.
 
 Coaching approach: ${style}
@@ -170,18 +199,13 @@ ${schedule}
 
 PRIORITY RULES (these override the coaching approach above):
 - Treat every instruction in the Goal and Medical Conditions fields as a hard requirement for equipment, exercise choice and preferences (the weekly schedule above decides which days are workouts).
-- If machines are excluded, do NOT use any machine or cable station (no cable exercises, pec deck, leg press, leg curl, lat pulldown, smith machine). Free weights, bodyweight and outdoor exercises are allowed unless also excluded.
-- If the client has knee pain, avoid deep or heavy loaded knee flexion (back squats, deep lunges, jumping) and prefer knee-friendly alternatives (glute bridges, hip thrusts, step-ups to a low box, wall sits with limited range).
-- Never include exercises that could aggravate the listed medical conditions or injuries.
+${equipmentRules}- Never include exercises that could aggravate the listed medical conditions or injuries.
 - Give every workout day in the schedule a full workout; never turn one into a rest day.
 - Before answering, silently check every exercise against these rules and replace any that break them.
 - Schedule workouts ONLY on the workout days above. Every other day of the week must be a rest day (optional light walk/stretching only).
 
 OUTPUT: call the weekly_plan tool. Fill in all 7 days, Monday to Sunday.
-- Workout days: rest = false, a short focus (e.g. "Lower Body Strength"), 5–7 exercises including a warm-up first and a cool-down last.
-- Every other day: rest = true, focus "", and either no exercises or one optional light item (e.g. "Light walk or stretching" – 20 min).
-- Each exercise: name, sets (a number, e.g. "3"), reps (e.g. "10", "8–12", "30 s", "1 km"), rest (e.g. "60 s"), and an optional short note (a form cue or a safety tip). Use "" for parts that don't apply.
-- note: "Review with your coach before starting. Not medical advice."
+${outputRules}- note: "Review with your coach before starting. Not medical advice."
 Plain words only, no markdown symbols.`
 
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: prompt }]

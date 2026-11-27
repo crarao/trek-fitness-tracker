@@ -18,6 +18,7 @@ import { isOpen, sourceLabel, leadSummary, type Lead, type LeadStatus, type Lead
 import { isCovering } from '@/lib/coach-today'
 import { isCoachCompany } from '@/lib/company-type'
 import { memberWord, isDojo, staffWord, ptWord } from '@/lib/labels'
+import { getClientSettings, TRAINING_TYPES, trainingFields, type TrainingType } from '@/lib/clientSettings'
 import { type BeltRank, BELT_RANK_COLUMNS, gradingOn, beltLabel, beltOptions, defaultBeltId, beltsById } from '@/lib/belts'
 import BeltChip from '@/app/belt-chip'
 import { GUARDIAN_RELATIONS, reminderRecipient, reminderText, feeReminder } from '@/lib/guardian'
@@ -43,6 +44,7 @@ type Client = {
   phone: string
   created_at: string
   client_type: string | null
+  self_training?: boolean | null // supabase/migrations/20261124120000_self_training_flag.sql
   memberships: Membership[]
   archived_at: string | null
   primary_coach_id?: string | null
@@ -114,6 +116,10 @@ export default function CompanyAdminPage() {
   const dojo = isDojo(businessType)
   // The guardian columns exist on profiles (db/2026-11-03-guardian.md): only then the parent fields show and are sent
   const [guardianColumns, setGuardianColumns] = useState(false)
+  // Self-training (24 Nov): the gym has the switch on (Super Admin → Client app setup), and profiles.self_training
+  // exists (supabase/migrations/20261124120000_self_training_flag.sql). Then Add member asks PT / Self-training / Membership only.
+  const [selfTrainingGym, setSelfTrainingGym] = useState(false)
+  const [selfColumn, setSelfColumn] = useState(false)
   // Branches & batches (dojos, db/2026-11-03-branches-batches.md): on once the tables exist. 'all' | branch id | 'none'
   const [batchesOn, setBatchesOn] = useState(false)
   const [branchList, setBranchList] = useState<Branch[]>([])
@@ -153,6 +159,8 @@ export default function CompanyAdminPage() {
     plan_type: '1 Month', amount_paid: '',
     start_date: new Date().toISOString().split('T')[0], end_date: '',
     client_type: 'member', primary_coach_id: '',
+    // Gyms with self-training on: '' until the owner picks PT / Self-training / Membership only (required)
+    training: '' as '' | TrainingType,
     // Multi-country only: the client's country, the phone's country code and the payment currency ('' = home / base)
     country: '', phone_country: '', currency: '',
     // Child with a parent (guardian columns only). child null = the default: ticked for a dojo (martial arts), else not
@@ -253,6 +261,7 @@ export default function CompanyAdminPage() {
     // Do the guardian columns exist yet? A column error before db/2026-11-03-guardian.md runs (then the fields stay hidden)
     const guardianProbe = supabase.from('profiles').select('guardian_phone').limit(1)
       .then(({ error }) => { setGuardianColumns(!error); return !error })
+    supabase.from('profiles').select('self_training').limit(1).then(({ error }) => setSelfColumn(!error))
 
     type CompanyRow = {
       name: string | null; logo_url: string | null; trial_end: string | null; is_active: boolean | null
@@ -269,12 +278,15 @@ export default function CompanyAdminPage() {
     setCompanyName(company?.name || '')
     setUpiId(company?.upi_id || '')
     setCoachCompany(isCoachCompany(company))
+    // Individual coaches train nearly every client: Add member starts with PT ticked (can be unticked)
+    if (isCoachCompany(company)) setNewClient(n => ({ ...n, client_type: 'pt' }))
     setBusinessType(company?.business_type ?? null)
     if (isDojo(company?.business_type)) fetchBatches(profile.company_id)
     if (gradingOn(company)) fetchBeltRanks(profile.company_id)
     const fromLeadId = new URLSearchParams(window.location.search).get('fromLead')
-    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe)
+    if (fromLeadId) openFromLead(fromLeadId, isDojo(company?.business_type), guardianProbe, isCoachCompany(company))
     setTrainModule(!!company?.client_module_enabled)
+    setSelfTrainingGym(getClientSettings(company).self_training_enabled && !isDojo(company?.business_type))
     setCurrency(company?.currency || 'INR')
     setCountry(normalizeCountry(company?.country))
     setCurrencyColumns(!!company && 'allowed_currencies' in company)
@@ -316,7 +328,7 @@ export default function CompanyAdminPage() {
 
   // Prefill Add Member from an open enquiry, then clean the URL so a refresh doesn't reopen the form
   // In a dojo the enquiry usually comes from a parent: its phone goes into Parent phone (Child starts ticked)
-  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>) => {
+  const openFromLead = async (leadId: string, dojo: boolean, guardianProbe: PromiseLike<boolean>, solo = false) => {
     const { data: lead, error } = await supabase
       .from('leads')
       .select('id, name, phone, source, interest, status')
@@ -333,7 +345,8 @@ export default function CompanyAdminPage() {
       full_name: lead.name || '',
       phone: toParent ? '' : lead.phone || '',
       guardian_phone: toParent ? lead.phone || '' : '',
-      client_type: lead.interest === 'pt' ? 'pt' : 'member',
+      client_type: lead.interest === 'pt' || (solo && lead.interest !== 'membership') ? 'pt' : 'member',
+      training: lead.interest === 'pt' ? 'pt' : '',
     }))
     setFromLead({ id: lead.id, name: lead.name, source: lead.source })
     setMessage('')
@@ -708,6 +721,11 @@ export default function CompanyAdminPage() {
       setSaving(false)
       return
     }
+    if (selfTrainingGym && selfColumn && !dojo && !newClient.training) {
+      setMessage('Error: Pick PT, Self-training or Membership only')
+      setSaving(false)
+      return
+    }
     if (login.kind !== 'none' && newClient.password.length < 6) {
       setMessage('Error: Temporary password must be at least 6 characters')
       setSaving(false)
@@ -734,7 +752,9 @@ export default function CompanyAdminPage() {
           gender: newClient.gender || null,
           medical_conditions: newClient.medical_conditions.trim() || null,
         } : {}),
-        client_type: dojo ? 'pt' : newClient.client_type,
+        ...(dojo ? { client_type: 'pt' }
+          : selfTrainingGym && selfColumn && newClient.training ? trainingFields(newClient.training, true)
+          : { client_type: newClient.client_type }),
         primary_coach_id: !coachCompany && newClient.primary_coach_id ? newClient.primary_coach_id : null,
         // Dojo with branches & batches: branch and home batch (checked on the server)
         ...(dojo && batchesOn ? { branch_id: newClient.branch_id || null, batch_id: newClient.batch_id || null } : {}),
@@ -801,7 +821,7 @@ export default function CompanyAdminPage() {
       full_name: '', email: '', password: '', phone: '', trainer_name: '', diet_plan: '', username: '',
       plan_type: '1 Month', amount_paid: '',
       start_date: new Date().toISOString().split('T')[0], end_date: '',
-      client_type: 'member', primary_coach_id: '',
+      client_type: coachCompany ? 'pt' : 'member', primary_coach_id: '', training: '',
       country: '', phone_country: '', currency: '',
       child: null, guardian_name: '', guardian_phone: '', guardian_phone_country: '', guardian_relation: 'Mother',
       age: '', gender: '', medical_conditions: '',
@@ -1636,6 +1656,9 @@ export default function CompanyAdminPage() {
                               {beltsOn && !attendanceMode && <BeltChip rank={beltById[client.current_rank_id || '']} showNone={activeFilter !== 'archived'} />}
                               {client.client_type === 'pt' && !dojo && (
                                 <span className="text-xs bg-purple-900/50 text-purple-400 border border-purple-800 px-1.5 py-0.5 rounded-full leading-none">PT</span>
+                              )}
+                              {selfTrainingGym && client.client_type !== 'pt' && client.self_training === true && !dojo && (
+                                <span className="text-xs bg-teal-900/50 text-teal-300 border border-teal-800 px-1.5 py-0.5 rounded-full leading-none" data-testid="badge-self">Self</span>
                               )}
                               {!coachCompany && client.primary_coach_id && coachById[client.primary_coach_id] && (
                                 <span className="text-[11px] text-gray-500 leading-none">{sw.one}: {coachById[client.primary_coach_id].full_name.trim().replace(/^(coach|sensei)\s+/i, '').split(/\s+/)[0]}</span>
@@ -2608,7 +2631,28 @@ export default function CompanyAdminPage() {
                   onChange={e => setNewClient({ ...newClient, diet_plan: e.target.value })}
                   rows={2}
                   className="col-span-2 bg-gray-800 text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-white border border-gray-700 text-sm resize-none placeholder-gray-600" />}
-                {!dojo && <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
+                {/* Gyms with self-training on (24 Nov): one required choice instead of the PT checkbox */}
+                {!dojo && selfTrainingGym && selfColumn && (
+                  <fieldset className="col-span-2" data-testid="training-type">
+                    <legend className="text-xs text-gray-500 mb-1.5">Training type</legend>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {TRAINING_TYPES.map(t => {
+                        const on = newClient.training === t.value
+                        return (
+                          <button key={t.value} type="button" aria-pressed={on} data-testid={`training-${t.value}`}
+                            onClick={() => setNewClient({ ...newClient, training: t.value, client_type: t.value === 'pt' ? 'pt' : 'member' })}
+                            className={`text-left rounded-lg border px-3 py-2.5 min-h-[44px] transition ${on
+                              ? t.value === 'pt' ? 'border-purple-500 bg-purple-950/40' : t.value === 'self' ? 'border-teal-500 bg-teal-950/40' : 'border-gray-400 bg-gray-800'
+                              : 'border-gray-700 bg-gray-800/40 hover:border-gray-500'}`}>
+                            <span className="block text-sm text-white font-medium">{t.label}</span>
+                            <span className="block text-[11px] text-gray-400">{t.help}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </fieldset>
+                )}
+                {!dojo && !(selfTrainingGym && selfColumn) && <label className="col-span-2 flex items-center gap-3 cursor-pointer py-1">
                   <input type="checkbox"
                     checked={newClient.client_type === 'pt'}
                     onChange={e => setNewClient({ ...newClient, client_type: e.target.checked ? 'pt' : 'member' })}

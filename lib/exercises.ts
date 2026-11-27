@@ -192,3 +192,13 @@ export function recentFromPlans(plans: { plan_json?: unknown }[], max = 40): str
   }
   return out
 }
+
+// Yoga companies (25 Nov): the shared starter list is gym moves with English names, so a yoga company sees only
+// its own exercises (the asana list, db/2026-11-25-yoga-asanas.md, Sanskrit names) plus Surya Namaskar.
+// Display only: matching names, saved plans, logs and reports still use the full list.
+const YOGA_STARTER_KEEP = new Set(['suryanamaskar'])
+
+export function shownForBusiness(e: Pick<Exercise, 'company_id' | 'name' | 'muscle_group' | 'equipment'>, businessType: string | null | undefined): boolean {
+  if (businessType !== 'yoga' || e.company_id) return true
+  return YOGA_STARTER_KEEP.has(nameKey(e.name))
+}

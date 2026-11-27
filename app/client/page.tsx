@@ -15,7 +15,7 @@ import { estimateKcal, kcalText, thisWeekMonday, doneDayNotes } from '@/lib/calo
 import { weeklyTotals } from '@/lib/weekly-totals'
 import dynamic from 'next/dynamic'
 import { workoutTimeLabel } from '@/lib/today-schedule'
-import { getClientSettings, isSelfTraining, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
+import { getClientSettings, isSelfTraining, isMembershipOnly, CLIENT_APP_OFF_MESSAGE } from '@/lib/clientSettings'
 import { ownPlanOn } from '@/lib/self-training'
 import { staffWord } from '@/lib/labels'
 import { type ExerciseLog, EXERCISE_LOG_COLUMNS } from '@/lib/exercise-logs'
@@ -70,7 +70,7 @@ export default function ClientPage() {
   // the coach still logs the training from their side
   const [membership, setMembership] = useState<{ plan_type: string; start_date: string; end_date: string; amount_paid?: number | null; currency?: string | null } | null>(null)
   const [feedback, setFeedback] = useState<Feedback[]>([])
-  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'profile'>('plan')
+  const [activeTab, setActiveTab] = useState<'plan' | 'log' | 'progress' | 'sessions' | 'profile'>('plan')
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
   // Full plan text open by default for this week's plan (the one the client trains from)
   const [planOpen, setPlanOpen] = useState(true)
@@ -169,7 +169,8 @@ const [profileMessage, setProfileMessage] = useState('')
     // The gym hasn't turned the client app on: the page shows CLIENT_APP_OFF_MESSAGE, nothing else is read
     if (prof && !settings.client_login) { setLoading(false); return }
 
-    if (prof?.companies && !prof.companies.client_module_enabled) {
+    // Training Module off, or a membership-only member (25 Nov): the membership screen only
+    if (prof?.companies && (!prof.companies.client_module_enabled || isMembershipOnly(prof, settings))) {
       const { data: ms } = await supabase
         .from('memberships')
         .select('*') // * so the payment's currency is read once db/2026-11-01-multi-country.md has run
@@ -228,7 +229,7 @@ if (prof) {
 
     // Strength per exercise, when the gym shows it (an error = table not there: the list stays hidden).
     // Self-training members always: their own day pre-fills from their last sets.
-    const self = isSelfTraining(prof?.client_type, settings)
+    const self = isSelfTraining(prof, settings)
     if ((settings.client_sees_detailed_progress && sessionsData?.length) || self) {
       const [lg, lib] = await Promise.all([
         supabase.from('exercise_logs').select(EXERCISE_LOG_COLUMNS).eq('client_id', user.id),
@@ -401,7 +402,7 @@ const handleChangePassword = async () => {
     const kcal = estimateKcal({ minutes, weightKg: profile?.weight_kg, activity, businessType: profile?.companies?.business_type })
     showToast(`✓ ${activityText(activity)} saved${kcal ? ` — ${kcalText(kcal)} (estimate)` : ''}`)
     initialize()
-    setActiveTab('progress')
+    setActiveTab('sessions')
   }
 
   // "Done ✓" on a day of this week's plan: saves a normal session linked to the plan and the day
@@ -497,7 +498,7 @@ const handleChangePassword = async () => {
   // The gym's client app switches (Super Admin → Client app setup, lib/clientSettings.ts)
   const gymSettings = getClientSettings(profile?.companies)
   // Self-training member (Part C): plans, logs and sees their own progress, whatever the PT switches say
-  const selfTraining = isSelfTraining(profile?.client_type, gymSettings)
+  const selfTraining = isSelfTraining(profile, gymSettings)
   const cs = selfTraining
     ? { ...gymSettings, client_sees_plan: true, client_can_log_sessions: true, client_can_log_activities: true, client_sees_detailed_progress: true, client_can_edit_profile: true }
     : gymSettings
@@ -544,8 +545,8 @@ const handleChangePassword = async () => {
       </div>
     )
   }
-  // Tabs this gym shows: My Plan (client_sees_plan), Log (client_can_log_activities), Progress, Profile
-  const tabs = (['plan', 'log', 'progress', 'profile'] as const)
+  // Tabs this gym shows: My Plan (client_sees_plan), Log (client_can_log_activities), Progress, Sessions, Profile
+  const tabs = (['plan', 'log', 'progress', 'sessions', 'profile'] as const)
     .filter(t => (t !== 'plan' || cs.client_sees_plan) && (t !== 'log' || cs.client_can_log_activities))
   const shownTab = tabs.includes(activeTab) ? activeTab : tabs[0]
 
@@ -567,7 +568,8 @@ const handleChangePassword = async () => {
     </div>
   )
 
-  if (profile?.companies && !profile.companies.client_module_enabled) {
+  const membershipOnly = isMembershipOnly(profile, gymSettings)
+  if (profile?.companies && (!profile.companies.client_module_enabled || membershipOnly)) {
     const left = daysUntil(membership?.end_date)
     return (
       <div className="min-h-screen bg-gray-950 text-white">
@@ -613,7 +615,9 @@ const handleChangePassword = async () => {
               <p className="text-sm text-gray-500 italic">No membership on record yet. Please ask at the front desk.</p>
             )}
           </div>
-          <p className="text-xs text-gray-500 px-1">Your coach keeps track of your training. Talk to them about your plan.</p>
+          <p className="text-xs text-gray-500 px-1" data-testid={membershipOnly ? 'membership-only-note' : undefined}>
+            {membershipOnly ? 'Want a training plan? Ask at the front desk about PT or self-training.' : 'Your coach keeps track of your training. Talk to them about your plan.'}
+          </p>
         </div>
       </div>
     )
@@ -704,7 +708,7 @@ const handleChangePassword = async () => {
       className={`flex-1 py-3 text-xs font-medium transition ${shownTab === tab
         ? 'text-orange-500 border-b-2 border-orange-500'
         : 'text-gray-500 hover:text-white'}`}>
-      {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : 'Profile'}
+      {tab === 'plan' ? 'My Plan' : tab === 'log' ? 'Log' : tab === 'progress' ? 'Progress' : tab === 'sessions' ? 'Sessions' : 'Profile'}
     </button>
   ))}
 </div>
@@ -755,7 +759,8 @@ const handleChangePassword = async () => {
             {selfTraining && profile && country ? (
               <MyPlan memberId={profile.id} companyId={profile.company_id} availableDays={profile.available_days} country={country}
                 plans={plans} sessions={sessions} logs={exLogs} library={exLibrary}
-                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast} />
+                notesEnabled={profile?.companies?.session_notes_enabled !== false} onSaved={initialize} toast={showToast}
+                businessType={profile?.companies?.business_type} />
             ) : plans.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">
                 <p className="text-lg mb-1">No plan yet</p>
@@ -1009,7 +1014,8 @@ const handleChangePassword = async () => {
             )}
 
 {/* AI Insights */}
-{profile?.companies?.ai_insights_enabled !== false && (
+{/* No AI for self-training members (24 Nov; /api/ai-insights refuses them too) */}
+{profile?.companies?.ai_insights_enabled !== false && !selfTraining && (
 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
   <div className="flex justify-between items-center mb-3">
     <div>
@@ -1047,6 +1053,12 @@ const handleChangePassword = async () => {
                 loggerName={id => { const t = loggerShort(id); return t.charAt(0).toUpperCase() + t.slice(1) }} />
             )}
 
+          </div>
+        )}
+
+        {/* SESSIONS TAB — every logged session (by the client or the coach), feedback and the client's note; was the end of Progress */}
+        {shownTab === 'sessions' && (
+          <div className="space-y-4" data-testid="client-sessions">
             <p className="text-xs text-gray-500 uppercase tracking-wider">Activity History</p>
             {sessions.length === 0 ? (
               <div className="bg-gray-900 rounded-2xl p-10 text-center text-gray-500 border border-gray-800">

@@ -8,6 +8,7 @@
 import { type Country, formatDate, greet } from './locale'
 import { splitE164, waDigits as toWaDigits } from './phone'
 import { formatMoney } from './currency'
+import { messageEmoji } from './labels'
 
 export type GuardianFields = {
   full_name?: string | null
@@ -44,7 +45,7 @@ export function reminderRecipient(p: GuardianFields, country: string | null | un
 }
 
 // WhatsApp text for the Remind / Follow Up button. Without a parent: the wording the dashboard always used
-// (only the emoji follows the business type: 🥋 for martial arts, 💪 otherwise).
+// (only the emoji follows the business type: messageEmoji in lib/labels.ts).
 export function reminderText(opts: {
   status: 'expiring' | 'expired'
   memberFirst: string
@@ -55,7 +56,7 @@ export function reminderText(opts: {
   toParent: boolean
   country: Country | null
 }): string {
-  const emoji = opts.businessType === 'martial_arts' ? '🥋' : '💪'
+  const emoji = messageEmoji(opts.businessType)
   const date = opts.endDate ? formatDate(opts.endDate, opts.country, 'dayMonth') : ''
   const { memberFirst, companyName } = opts
   if (opts.toParent) {

@@ -2,6 +2,7 @@
 // Table: public.leads (db/2026-10-29-leads.md). A lead is never deleted: it ends as Joined or Lost.
 
 import { type Country, parseDate, greet } from './locale'
+import { messageEmoji } from './labels'
 
 export type LeadStatus = 'new' | 'trial' | 'joined' | 'lost'
 
@@ -86,7 +87,7 @@ export function leadMessage(
   businessType: string | null | undefined,
   country: Country | null | undefined = 'IN'
 ): string {
-  const emoji = businessType === 'martial_arts' ? '🥋' : '💪'
+  const emoji = messageEmoji(businessType)
   const hi = (rest: string) => greet(firstName(lead.name), rest, country)
   switch (lead.status) {
     case 'trial':
